@@ -1,0 +1,6 @@
+# configs/data/source/local_csv.yaml
+_target_: datasets.load_dataset
+path: "csv"
+# Тянем корень данных из секции paths!
+data_files: "${paths.data_dir}/raw/company_dialogues.csv" 
+sep: ";"

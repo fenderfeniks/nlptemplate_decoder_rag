@@ -1,0 +1,39 @@
+# configs/main.yaml
+defaults:
+  - paths: default
+  - data: default
+  - model: default
+  - trainer: default
+  - _self_
+
+# Глобальные параметры
+seed: 42
+project_name: "nlp_industrial_template"
+
+# 1. Настройка оркестратора обучения (LightningModule)
+model_module:
+  _target_: src.training.module.NLPModel
+  num_classes: 2  # Количество классов (для инициализации метрик)
+  
+  # Оптимизатор собирается динамически через Гидру
+  optimizer_cfg:
+    _target_: torch.optim.AdamW
+    lr: 2e-5
+    weight_decay: 0.01
+    
+  # Ссылка на лосс-функцию, которая настроена в выбранной модели
+  loss_fn_cfg: ${model.loss_fn}
+
+# 2. Настройка DataModule
+datamodule:
+  _target_: src.core.data.datamodule.NLPDataModule
+  data_cfg: ${data}
+
+# --- Настройка логирования и рабочей директории Гидры ---
+hydra:
+  run:
+    # Гидра создаст папку вида: logs/runs/2023-10-25_14-30-00/
+    dir: ${paths.log_dir}/runs/${now:%Y-%m-%d}_${now:%H-%M-%S}
+  job:
+    # Смена рабочей директории Питона на эту папку (полезно для сохранения артефактов)
+    chdir: True

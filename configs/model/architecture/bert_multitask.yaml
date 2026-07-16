@@ -1,0 +1,11 @@
+# configs/model/architecture/bert_multitask.yaml
+_target_: src.core.models.custom_heads.MultiTaskBERT
+num_sentiment_classes: 3
+num_category_classes: 10
+
+# Передаем наш стандартный билдер внутрь кастомного класса
+base_builder:
+  _target_: src.core.models.builder.HFModelBuilder
+  model_name_or_path: "DeepPavlov/rubert-base-cased"
+  auto_model_class: "transformers.AutoModel" # Грузим чистое туловище
+  cache_dir: "${paths.hf_cache_dir}"
