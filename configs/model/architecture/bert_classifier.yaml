@@ -7,3 +7,8 @@ builder:
   auto_model_class: "transformers.AutoModelForSequenceClassification"
   torch_dtype: "float32"
   # Квантизации нет, поэтому Гидра не добавит этот блок
+
+loss_fn:
+  _target_: torch.nn.TripletMarginLoss
+  margin: 1.0
+  p: 2
