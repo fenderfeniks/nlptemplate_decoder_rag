@@ -7,7 +7,7 @@ import logging
 import hydra
 from omegaconf import DictConfig
 from pytorch_lightning import Trainer
-from src.core.utils.hydra_utils import setup_config
+from src.utils.hydra_utils import setup_config
 
 logger = logging.getLogger(__name__)
 

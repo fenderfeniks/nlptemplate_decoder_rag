@@ -1,0 +1,7 @@
+# configs/model/cleaner/default.yaml
+_target_: src.core.models.parsers.ResponseCleaner
+
+strip_prompt: true
+remove_special_tokens: true
+remove_extra_spaces: true
+trim_incomplete_sentence: true

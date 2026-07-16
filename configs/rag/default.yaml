@@ -1,0 +1,14 @@
+# configs/rag/default.yaml
+
+# Папка, где лежат сырые документы бизнеса (PDF, TXT)
+documents_dir: "${paths.data_dir}/raw/knowledge_base"
+
+# Папка, куда LlamaIndex сохранит векторную базу (индексы)
+persist_dir: "${paths.data_dir}/processed/vector_db"
+
+# Настройки нарезки текста (Chunking)
+chunk_size: 512
+chunk_overlap: 50
+
+# Настройки ретривера
+similarity_top_k: 3 # Сколько самых релевантных кусков текста доставать

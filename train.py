@@ -9,7 +9,7 @@ import logging
 import pytorch_lightning as pl
 import hydra
 from omegaconf import DictConfig
-from src.core.utils.hydra_utils import setup_config
+from src.utils.hydra_utils import setup_config
 
 # Настройка логгера для текущего файла
 logger = logging.getLogger(__name__)

@@ -4,8 +4,9 @@ defaults:
   - data: default
   - model: default
   - trainer: default
+  - rag: default
+  - api: fastapi
   - _self_
-
 # Глобальные параметры
 seed: 42
 project_name: "nlp_industrial_template"
