@@ -1,0 +1,65 @@
+# k8s/api-deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nlp-api-deployment
+  namespace: production
+  labels:
+    app: nlp-api
+spec:
+  replicas: 2 # Запускаем 2 копии FastAPI для надежности!
+  selector:
+    matchLabels:
+      app: nlp-api
+  template:
+    metadata:
+      labels:
+        app: nlp-api
+    spec:
+      containers:
+      - name: fastapi-server
+        image: твоя-компания/nlp_template:latest
+        # По умолчанию наш Dockerfile запускает API, так что cmds не переопределяем
+        ports:
+        - containerPort: 8000
+        
+        # Подключаем секреты (вместо .env файла)
+        envFrom:
+        - secretRef:
+            name: nlp-api-secrets
+            
+        # Монтируем тот же диск с весами, куда Airflow сохранил новую модель
+        volumeMounts:
+        - name: model-weights
+          mountPath: /app/models
+          
+        # Liveness Probe (Эндпоинт /health, который мы написали!)
+        # Если API зависнет, k8s убьет контейнер и поднимет новый
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          
+      volumes:
+      - name: model-weights
+        persistentVolumeClaim:
+          claimName: pvc-models
+
+---
+# Создаем Service, чтобы к нашему API можно было обращаться по сети
+apiVersion: v1
+kind: Service
+metadata:
+  name: nlp-api-service
+  namespace: production
+spec:
+  type: ClusterIP
+  selector:
+    app: nlp-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000

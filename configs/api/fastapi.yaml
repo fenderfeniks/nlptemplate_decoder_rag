@@ -5,12 +5,12 @@ defaults:
 
 
 host: "0.0.0.0"
-port: 8000
+port: ${oc.env:API_PORT, 8000}
 domain: "${oc.env:API_DOMAIN, 'http://localhost:8000'}"
 
-title: "Industrial NLP API"
+title: "${oc.env:PROJECT_NAME} API"
 description: "LLM backend with RAG and Hydra integration"
-version: "1.0.0"
+version: "${oc.env:PROJECT_VERSION}"
 
 telegram_webhook:
   path: "/webhook/telegram"

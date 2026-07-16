@@ -1,0 +1,107 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # ----------------------------------------------------
+  # 1. Векторная база данных (Qdrant)
+  # ----------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_IMAGE_TAG:-latest}
+    # ХАРДКОД ИМЕНИ: легко найти и заменить
+    container_name: industrial_nlp_template_vector_db
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  # ----------------------------------------------------
+  # 2. Главный ML-Сервер (FastAPI)
+  # ----------------------------------------------------
+  api:
+    # Задаем явное имя образа, чтобы сборщик не выдумывал свое
+    image: my-company/industrial_nlp_template:latest
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: industrial_nlp_template_api_server
+    ports:
+      - "${API_PORT:-8000}:8000"
+    # Сюда прокидываются ТОЛЬКО секреты с локального компьютера (токены, пароли)
+    env_file:
+      - .env
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      - qdrant
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ----------------------------------------------------
+  # 3. Воркер для обучения (Batch Job) - Запускается вручную
+  # ----------------------------------------------------
+  trainer:
+    image: my-company/industrial_nlp_template:latest
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_EXTRAS: "training"
+    container_name: industrial_nlp_template_trainer
+    profiles:
+      - training
+    # ПРАВИЛЬНЫЙ ЗАПУСК: как модуль, а не как прямой скрипт
+    command: ["python", "-m", "src.train"]
+    env_file:
+      - .env # <-- ДОБАВЛЕНО: тренеру тоже нужны секреты (например, WANDB_API_KEY)
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./outputs:/app/outputs
+      - ./mlruns:/app/mlruns
+    restart: "no"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ----------------------------------------------------
+  # 4. Airflow (Оркестратор для локального тестирования DAG-ов)
+  # ----------------------------------------------------
+  airflow:
+    image: apache/airflow:${AIRFLOW_IMAGE_TAG:-2.8.1}
+    container_name: industrial_nlp_template_airflow
+    ports:
+      - "8080:8080"
+    environment:
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW_VAR_PROJECT_IMAGE=my-company/industrial_nlp_template:latest
+      - AIRFLOW_VAR_K8S_NAMESPACE=ml-pipelines
+    env_file:
+      - .env # <-- ДОБАВЛЕНО: чтобы DAG'и видели пароли при тестах
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./deploy/airflow:/opt/airflow/deploy
+      - ./logs/airflow:/opt/airflow/logs
+    command: >
+      bash -c "airflow db init &&
+               airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com &&
+               airflow variables import /opt/airflow/deploy/variables.json &&
+               airflow standalone"
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:

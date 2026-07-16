@@ -7,22 +7,23 @@ defaults:
   - rag: default
   - api: fastapi
   - _self_
+
 # Глобальные параметры
 seed: 42
-project_name: "nlp_industrial_template"
+# ХАРДКОД: Это название будет использоваться в логах MLFlow, 
+# в путях сохранения моделей и в метаданных экспериментов.
+project_name: "industrial_nlp_template"
 
 # 1. Настройка оркестратора обучения (LightningModule)
 model_module:
   _target_: src.training.module.NLPModel
-  num_classes: 2  # Количество классов (для инициализации метрик)
+  num_classes: 2  
   
-  # Оптимизатор собирается динамически через Гидру
   optimizer_cfg:
     _target_: torch.optim.AdamW
     lr: 2e-5
     weight_decay: 0.01
     
-  # Ссылка на лосс-функцию, которая настроена в выбранной модели
   loss_fn_cfg: ${model.loss_fn}
 
 # 2. Настройка DataModule
@@ -33,8 +34,7 @@ datamodule:
 # --- Настройка логирования и рабочей директории Гидры ---
 hydra:
   run:
-    # Гидра создаст папку вида: logs/runs/2023-10-25_14-30-00/
-    dir: ${paths.log_dir}/runs/${now:%Y-%m-%d}_${now:%H-%M-%S}
+    # Используем project_name для формирования структуры папок
+    dir: ${paths.log_dir}/${project_name}/runs/${now:%Y-%m-%d}_${now:%H-%M-%S}
   job:
-    # Смена рабочей директории Питона на эту папку (полезно для сохранения артефактов)
     chdir: True

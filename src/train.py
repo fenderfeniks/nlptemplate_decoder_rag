@@ -9,6 +9,8 @@ import logging
 import pytorch_lightning as pl
 import hydra
 from omegaconf import DictConfig
+from dotenv import load_dotenv
+load_dotenv()
 from src.utils.hydra_utils import setup_config
 
 # Настройка логгера для текущего файла
