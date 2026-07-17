@@ -17,27 +17,51 @@
   },
 
   "analytics_config": {
-  "schedule": "0 8 * * *",
-  "db_connection": "postgresql://user:pass@db_host:5432/analytics",
-  "resources": {
-    "requests": {"cpu": "2", "memory": "4Gi"},
-    "limits": {"cpu": "4", "memory": "8Gi"}
+    "schedule": "0 8 * * *",
+    "db_secret_name": "analytics-db-secrets",
+    "resources": {
+      "requests": {"cpu": "2", "memory": "4Gi"},
+      "limits": {"cpu": "4", "memory": "8Gi"}
+    },
+    "default_args": {
+      "owner": "ml_team",
+      "retries": 3,
+      "retry_delay_minutes": 5
     }
   },
 
   "evaluation_config": {
-  "schedule": "@weekly",
-  "drift_threshold": 0.9,
-  "resources": {
-    "requests": {"cpu": "2", "memory": "8Gi"},
-    "limits": {"cpu": "4", "memory": "16Gi", "nvidia.com/gpu": "1"}
+    "schedule": "@weekly",
+    "drift_threshold": 0.9,
+    "pvc_name": "pvc-models",
+    "mount_path": "/app/models",
+    "resources": {
+      "requests": {"cpu": "2", "memory": "8Gi"},
+      "limits": {"cpu": "4", "memory": "16Gi", "nvidia.com/gpu": "1"}
+    },
+    "default_args": {
+      "owner": "ml_team",
+      "retries": 1,
+      "retry_delay_minutes": 5
     }
   },
 
   "maintenance_config": {
-  "schedule": "0 3 * * 0",
-  "s3_bucket": "my-company-backups/qdrant",
-  "retention_days": 30
+    "schedule": "0 3 * * 0",
+    "retention_days": 30,
+    "qdrant_url": "http://qdrant:6333",
+    "qdrant_secret_name": "qdrant-secrets",
+    "mlruns_pvc_name": "pvc-mlruns",
+    "mlruns_mount_path": "/app/mlruns",
+    "resources": {
+      "requests": {"cpu": "1", "memory": "2Gi"},
+      "limits": {"cpu": "2", "memory": "4Gi"}
+    },
+    "default_args": {
+      "owner": "ml_team",
+      "retries": 1,
+      "retry_delay_minutes": 5
+    }
   },
 
   "training_config": {

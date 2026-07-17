@@ -4,6 +4,9 @@ import logging
 from src.api.schemas import ChatRequest, ChatResponse
 from src.api.rest.dependencies import get_generator, get_retriever, get_prompt_manager
 
+# --- 1. ДОБАВЛЯЕМ ИМПОРТ НАШИХ МЕТРИК ---
+from src.api.metrics import LLM_GENERATIONS_TOTAL, LLM_INFERENCE_TIME
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["Generation"])
 
@@ -41,7 +44,14 @@ async def generate_text(
         if request.max_tokens:
             generator.generation_kwargs["max_new_tokens"] = request.max_tokens
 
-        responses = generator.generate(final_prompt)
+        # --- 2. ДОБАВЛЯЕМ СБОР МЕТРИК ---
+        
+        # Увеличиваем счетчик запросов именно из REST API
+        LLM_GENERATIONS_TOTAL.labels(source="rest").inc()
+        
+        # Засекаем чистое время работы нейросети
+        with LLM_INFERENCE_TIME.labels(source="rest").time():
+            responses = generator.generate(final_prompt)
         
         return ChatResponse(
             answer=responses[0],

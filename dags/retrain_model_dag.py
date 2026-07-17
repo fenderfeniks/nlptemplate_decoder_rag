@@ -12,25 +12,8 @@ import pendulum
 IMAGE = Variable.get("PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:latest")
 NAMESPACE = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
 
-# 2. БИЗНЕС-ЛОГИКА (Конфиг конкретной задачи)
-CONFIG = Variable.get("training_config", deserialize_json=True, default_var={
-    "schedule": "@weekly",
-    "pvc_name": "pvc-models",
-    "mount_path": "/app/models",
-    "resources": {
-        "requests": {"cpu": "4", "memory": "16Gi"},
-        "limits": {
-            "cpu": "8", 
-            "memory": "32Gi", 
-            "nvidia.com/gpu": "1"
-        }
-    },
-    "default_args": {
-        "owner": "ml_team",
-        "retries": 1,
-        "retry_delay_minutes": 5
-    }
-})
+# 2. БИЗНЕС-ЛОГИКА (Конфиг из Variables без хардкода по умолчанию, так как он уже есть в БД Airflow)
+CONFIG = Variable.get("training_config", deserialize_json=True)
 
 default_args = {
     'owner': CONFIG["default_args"]["owner"],
@@ -52,12 +35,37 @@ with DAG(
     train_model_task = KubernetesPodOperator(
         task_id='run_lora_finetuning',
         name='llm-trainer-pod',
-        namespace=NAMESPACE,       # Берем из Global Var
-        image=IMAGE,               # Берем из Global Var
-        # ЗАПУСК КАК МОДУЛЬ: наш новый стандарт
+        namespace=NAMESPACE,
+        image=IMAGE,
         cmds=["python", "-m", "src.train"],
         
         container_resources=k8s.V1ResourceRequirements(**CONFIG["resources"]),
+        
+        # --- ДОБАВЛЕНО: Проброс секретов для обучения ---
+        env_vars=[
+            # Токен HuggingFace для скачивания базовой модели (опционально)
+            k8s.V1EnvVar(
+                name="HUGGINGFACE_TOKEN", 
+                value_from=k8s.V1EnvVarSource(
+                    secret_key_ref=k8s.V1SecretKeySelector(
+                        name="hf-secrets", 
+                        key="token",
+                        optional=True 
+                    )
+                )
+            ),
+            # Ключ Weights & Biases для логирования экспериментов (опционально)
+            k8s.V1EnvVar(
+                name="WANDB_API_KEY", 
+                value_from=k8s.V1EnvVarSource(
+                    secret_key_ref=k8s.V1SecretKeySelector(
+                        name="wandb-secrets", 
+                        key="api-key",
+                        optional=True 
+                    )
+                )
+            )
+        ],
         
         volume_mounts=[
             k8s.V1VolumeMount(name='model-weights', mount_path=CONFIG["mount_path"])

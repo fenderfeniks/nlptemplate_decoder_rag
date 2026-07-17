@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nlp-api-ingress
+  namespace: ml-pipelines # Наша общая "комната"
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    
+    # 1. ТРЕБОВАНИЕ TELEGRAM: Строгий HTTPS
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    
+    # 2. СПЕЦИФИКА ML: Увеличиваем таймауты
+    # Стандартные 60 секунд могут убить долгую генерацию RAG-ответа. Даем 120 секунд.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    
+    # 3. АВТОМАТИЧЕСКИЙ SSL: Если в кластере стоит cert-manager (стандарт индустрии)
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - nlp-api.my-company.com # Твой реальный домен
+    # Cert-manager сам сгенерирует сертификат и положит его в этот секрет
+    secretName: nlp-api-tls-secret 
+  rules:
+  - host: nlp-api.my-company.com # Твой реальный домен
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nlp-api-service # Ссылаемся на наш Service из предыдущего шага
+            port:
+              number: 80

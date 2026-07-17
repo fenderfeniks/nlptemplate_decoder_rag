@@ -1,21 +1,19 @@
 import os
-import sys
 import logging
+from dotenv import load_dotenv
 
-# Настройка логирования
+# Загружаем локальный .env (если скрипт запущен не в K8s)
+load_dotenv()
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def main():
     db_url = os.getenv("DB_CONN")
     if not db_url:
-        raise ValueError("Environment variable DB_CONN is not set!")
+        raise ValueError("Environment variable DB_CONN is not set! Check your .env or K8s variables.")
     
     logger.info("Starting batch analytics...")
-    # Здесь логика: 
-    # 1. Загрузка данных из БД/Файла
-    # 2. Инференс через LLM (src.core.generation)
-    # 3. Сохранение в SQL
     logger.info(f"Connecting to {db_url}...")
     logger.info("Processing reviews...")
     logger.info("Batch analytics completed successfully.")

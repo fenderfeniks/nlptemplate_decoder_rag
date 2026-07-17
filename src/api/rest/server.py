@@ -12,6 +12,8 @@ from hydra import initialize, compose
 from hydra.utils import instantiate
 from aiogram import types
 
+from prometheus_fastapi_instrumentator import Instrumentator
+
 from src.api.rest.endpoints import health, chat
 from src.api.rest.middlewares import setup_middlewares
 
@@ -87,6 +89,10 @@ setup_middlewares(app, cors_origins=list(cfg.api.cors_origins))
 app.include_router(health.router)
 app.include_router(chat.router)
 
+Instrumentator(
+    should_group_status_codes=False, 
+    should_ignore_untemplated=True
+).instrument(app).expose(app, include_in_schema=False, endpoint="/metrics")
 
 # 4. Эндпоинт-приемник для Webhook
 @app.post(cfg.api.telegram_webhook.path, include_in_schema=False)

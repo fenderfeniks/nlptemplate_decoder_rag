@@ -1,14 +1,12 @@
-# k8s/api-deployment.yaml
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nlp-api-deployment
-  namespace: production
+  name: industrial-nlp-api
+  namespace: ml-pipelines # Синхронизировали с пространством имен наших DAG-ов
   labels:
     app: nlp-api
 spec:
-  replicas: 2 # Запускаем 2 копии FastAPI для надежности!
+  replicas: 1 # Начинаем с одной копии для экономии GPU
   selector:
     matchLabels:
       app: nlp-api
@@ -16,50 +14,56 @@ spec:
     metadata:
       labels:
         app: nlp-api
+      annotations:
+        # МАГИЯ МОНИТОРИНГА: Prometheus сам найдет это
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
       - name: fastapi-server
-        image: твоя-компания/nlp_template:latest
-        # По умолчанию наш Dockerfile запускает API, так что cmds не переопределяем
+        image: my-company/industrial_nlp_template:latest # Синхронизировано с PROJECT_IMAGE
         ports:
         - containerPort: 8000
         
-        # Подключаем секреты (вместо .env файла)
+        # Подключаем секреты 
         envFrom:
         - secretRef:
             name: nlp-api-secrets
             
-        # Монтируем тот же диск с весами, куда Airflow сохранил новую модель
+        # Монтируем диск с моделями
         volumeMounts:
         - name: model-weights
           mountPath: /app/models
           
-        # Liveness Probe (Эндпоинт /health, который мы написали!)
-        # Если API зависнет, k8s убьет контейнер и поднимет новый
+        # ЖЕЛЕЗО: Обязательно ограничиваем аппетиты модели
+        resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1" # Критично для работы ML
+
+        # READINESS: Не даем трафик, пока веса не загрузятся в VRAM
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          successThreshold: 1
+
+        # LIVENESS: Убиваем, если он намертво завис
         livenessProbe:
           httpGet:
             path: /health
             port: 8000
-          initialDelaySeconds: 30
-          periodSeconds: 10
+          initialDelaySeconds: 60 # Даем больше времени на холодный старт модели!
+          periodSeconds: 15
           
       volumes:
       - name: model-weights
         persistentVolumeClaim:
           claimName: pvc-models
-
----
-# Создаем Service, чтобы к нашему API можно было обращаться по сети
-apiVersion: v1
-kind: Service
-metadata:
-  name: nlp-api-service
-  namespace: production
-spec:
-  type: ClusterIP
-  selector:
-    app: nlp-api
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 8000

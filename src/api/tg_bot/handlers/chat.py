@@ -11,6 +11,9 @@ from aiogram.fsm.context import FSMContext
 from src.api.tg_bot.keyboards.reply import get_main_keyboard
 from src.api.tg_bot.states import ChatProcess
 
+# --- 1. ДОБАВЛЯЕМ ИМПОРТ МЕТРИК ---
+from src.api.metrics import LLM_GENERATIONS_TOTAL, LLM_INFERENCE_TIME
+
 logger = logging.getLogger(__name__)
 
 # Создаем роутер (аналог APIRouter в FastAPI)
@@ -78,7 +81,12 @@ async def process_chat_message(
             else:
                 prompt = prompt_manager.build_simple_prompt(message.text)
 
-            responses = generator.generate(prompt)
+            # --- 2. СБОР МЕТРИК ДЛЯ ТЕЛЕГРАМ-БОТА ---
+            LLM_GENERATIONS_TOTAL.labels(source="tg").inc()
+            
+            with LLM_INFERENCE_TIME.labels(source="tg").time():
+                responses = generator.generate(prompt)
+                
             answer = responses[0]
 
         # =================================================================

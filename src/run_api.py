@@ -2,19 +2,17 @@ import os
 import uvicorn
 from dotenv import load_dotenv
 
-# Загружаем секреты и метаданные проекта
+# Загружаем локальные секреты (если файла нет, например в K8s, функция просто проигнорирует это)
 load_dotenv()
 
 if __name__ == "__main__":
-    # Читаем порт из .env. Обязательно конвертируем в int! 
+    # Читаем порт из среды. Обязательно конвертируем в int! 
     # Если переменной нет, берем 8000 по умолчанию.
     api_port = int(os.getenv("API_PORT", 8000))
 
-    # В Uvicorn можно передать параметр env_file, чтобы воркеры тоже его увидели
     uvicorn.run(
-        "src.api.server:app", 
+        "src.api.rest.server:app", # <-- Исправлен путь импорта 
         host="0.0.0.0", 
         port=api_port, 
-        reload=False,         # На проде reload должен быть выключен!
-        env_file=".env"       # <-- Заставляем Uvicorn прокинуть .env во все дочерние процессы
+        reload=False               # На проде reload строго выключен
     )
