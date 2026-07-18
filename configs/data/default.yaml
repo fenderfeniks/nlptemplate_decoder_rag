@@ -31,7 +31,7 @@ collator:
   max_length: ${data.max_length}          # Ссылаемся на параметр выше
   text_column: ${data.text_column}        # Ссылаемся на параметр выше
   target_column: ${data.target_column}    # Ссылаемся на параметр выше
-  is_causal_lm: ${model.is_causal_lm}     # Интерполяция: тянем из конфига модели
+  is_causal_lm: ${model.architecture.is_causal_lm}     # Интерполяция: тянем из конфига модели
 
 # --- 4. Настройки DataLoader ---
 dataloader:

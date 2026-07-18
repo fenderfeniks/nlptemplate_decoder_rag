@@ -1,14 +1,21 @@
-import faiss
-import os
 import logging
-from typing import Any, List, Optional
-from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, StorageContext, Settings, Document
-from llama_index.vector_stores.faiss import FaissVectorStore
+import os
+
+import faiss
+from llama_index.core import (
+    Document,
+    Settings,
+    SimpleDirectoryReader,
+    StorageContext,
+    VectorStoreIndex,
+)
 from llama_index.core.node_parser import SentenceSplitter
-from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.vector_stores.faiss import FaissVectorStore
+
 
 logger = logging.getLogger(__name__)
+
 
 class RAGIndexer:
     def __init__(
@@ -19,7 +26,8 @@ class RAGIndexer:
         chunk_overlap: int = 50,
         embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         vector_dimension: int = 384,
-        hnsw_m: int = 32            
+        hnsw_m: int = 32,
+        device: str = "cpu",  # ИСПРАВЛЕНИЕ: Выносим эмбеддер на CPU по умолчанию
     ):
         self.documents_dir = documents_dir
         self.persist_dir = persist_dir
@@ -27,16 +35,20 @@ class RAGIndexer:
         self.chunk_overlap = chunk_overlap
         self.vector_dimension = vector_dimension
         self.hnsw_m = hnsw_m
-        
-        logger.info(f"Загрузка модели эмбеддингов: {embedding_model_name}")
-        Settings.embed_model = HuggingFaceEmbedding(model_name=embedding_model_name)
-        Settings.llm = None 
+        self.device = device
+
+        logger.info(f"Загрузка модели эмбеддингов: {embedding_model_name} на устройстве: {self.device}")
+        # ИСПРАВЛЕНИЕ: Явно передаем device, чтобы не отъедать VRAM у основной LLM
+        Settings.embed_model = HuggingFaceEmbedding(
+            model_name=embedding_model_name, 
+            device=self.device
+        )
+        Settings.llm = None
         Settings.node_parser = SentenceSplitter(
-            chunk_size=self.chunk_size, 
-            chunk_overlap=self.chunk_overlap
+            chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
         )
 
-    def build_and_save_index(self, documents: Optional[List[Document]] = None):
+    def build_and_save_index(self, documents: list[Document] | None = None):
         """
         Создает индекс. Если documents не передан, читает сырые файлы с диска.
         """
@@ -51,12 +63,9 @@ class RAGIndexer:
         faiss_index = faiss.IndexHNSWFlat(self.vector_dimension, self.hnsw_m)
         vector_store = FaissVectorStore(faiss_index=faiss_index)
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
-        
+
         logger.info("Создание HNSW индекса...")
-        index = VectorStoreIndex.from_documents(
-            documents, 
-            storage_context=storage_context
-        )
-        
+        index = VectorStoreIndex.from_documents(documents, storage_context=storage_context)
+
         index.storage_context.persist(persist_dir=self.persist_dir)
         logger.info("Индекс успешно сохранен.")

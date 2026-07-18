@@ -4,14 +4,17 @@
 и запускает тренировочный цикл PyTorch Lightning.
 """
 
-import os
 import logging
-import pytorch_lightning as pl
+
 import hydra
-from omegaconf import DictConfig
+import pytorch_lightning as pl
 from dotenv import load_dotenv
+from omegaconf import DictConfig
+
+
 load_dotenv()
-from src.utils.hydra_utils import setup_config
+from src.utils.hydra_utils import setup_config  # noqa: E402
+
 
 # Настройка логгера для текущего файла
 logger = logging.getLogger(__name__)
@@ -21,11 +24,11 @@ logger = logging.getLogger(__name__)
 def train(cfg: DictConfig) -> None:
     """
     Основная функция запуска эксперимента.
-    
+
     Args:
         cfg (DictConfig): Разрешенная конфигурация Hydra.
     """
-    
+
     setup_config(cfg)
 
     # 2. Обеспечение воспроизводимости
@@ -47,18 +50,12 @@ def train(cfg: DictConfig) -> None:
     # 5. Инициализация LightningModule (оркестратора логики шагов обучения)
     logger.info("Инициализация PyTorch Lightning Module...")
     # Передаем готовую модель внутрь LightningModule
-    model_module = hydra.utils.instantiate(
-        cfg.model_module,
-        model=base_model
-    )
+    model_module = hydra.utils.instantiate(cfg.model_module, model=base_model)
 
     # 6. Инициализация DataModule
     logger.info("Инициализация DataModule...")
     # Прокидываем токенизатор, который создали на шаге 3
-    datamodule = hydra.utils.instantiate(
-        cfg.datamodule,
-        tokenizer=tokenizer
-    )
+    datamodule = hydra.utils.instantiate(cfg.datamodule, tokenizer=tokenizer)
 
     # 7. Сборка PyTorch Lightning Trainer (включая MLflow логгер и коллбэки)
     logger.info("Инициализация PyTorch Lightning Trainer...")

@@ -1,12 +1,12 @@
 defaults:
   - _self_
-  - architecture: llama3_8b
+  - architecture: bert_classifier
 
 # --- Базовый скелет Токенизатора ---
 tokenizer:
   _target_: src.core.models.tokenization.HFTokenizerBuilder
   # Имя модели прилетит из файла архитектуры при слиянии
-  tokenizer_name: ${model.model_name}
+  tokenizer_name: ${model.architecture.model_name}
   use_fast: True
   padding_side: "right"
   add_eos_token: False
@@ -14,7 +14,7 @@ tokenizer:
 # --- Базовый скелет Билдера Модели ---
 builder:
   _target_: src.core.models.builder.HFModelBuilder
-  model_name_or_path: ${model.model_name}
+  model_name_or_path: ${model.architecture.model_name}
   cache_dir: "${paths.hf_cache_dir}"
   trust_remote_code: False
   # Fallback-значения (если архитектура их не перезапишет)

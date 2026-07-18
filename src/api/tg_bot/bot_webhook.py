@@ -4,8 +4,11 @@
 """
 
 import logging
+
 from aiogram import Bot, Dispatcher
+
 from src.api.tg_bot.handlers.chat import router as chat_router
+
 
 logger = logging.getLogger(__name__)
 

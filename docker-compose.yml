@@ -3,21 +3,7 @@ version: '3.8'
 
 services:
   # ----------------------------------------------------
-  # 1. Векторная база данных (Qdrant)
-  # ----------------------------------------------------
-  qdrant:
-    image: qdrant/qdrant:${QDRANT_IMAGE_TAG:-latest}
-    # ХАРДКОД ИМЕНИ: легко найти и заменить
-    container_name: industrial_nlp_template_vector_db
-    ports:
-      - "${QDRANT_HTTP_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    restart: unless-stopped
-
-  # ----------------------------------------------------
-  # 2. Главный ML-Сервер (FastAPI)
+  # 1. Главный ML-Сервер (FastAPI)
   # ----------------------------------------------------
   api:
     # Задаем явное имя образа, чтобы сборщик не выдумывал свое
@@ -29,12 +15,10 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     # Сюда прокидываются ТОЛЬКО секреты с локального компьютера (токены, пароли)
+    environment:
+      - PROJECT_ROOT=/app
     env_file:
       - .env
-    environment:
-      - QDRANT_URL=http://qdrant:6333
-    depends_on:
-      - qdrant
     volumes:
       - ./data:/app/data
       - ./models:/app/models
@@ -48,7 +32,7 @@ services:
               capabilities: [gpu]
 
   # ----------------------------------------------------
-  # 3. Воркер для обучения (Batch Job) - Запускается вручную
+  # 2. Воркер для обучения (Batch Job) - Запускается вручную
   # ----------------------------------------------------
   trainer:
     image: my-company/industrial_nlp_template:latest
@@ -62,6 +46,8 @@ services:
       - training
     # ПРАВИЛЬНЫЙ ЗАПУСК: как модуль, а не как прямой скрипт
     command: ["python", "-m", "src.train"]
+    environment:
+      - PROJECT_ROOT=/app
     env_file:
       - .env # <-- ДОБАВЛЕНО: тренеру тоже нужны секреты (например, WANDB_API_KEY)
     volumes:
@@ -79,7 +65,7 @@ services:
               capabilities: [gpu]
 
   # ----------------------------------------------------
-  # 4. Airflow (Оркестратор для локального тестирования DAG-ов)
+  # 3. Airflow (Оркестратор для локального тестирования DAG-ов)
   # ----------------------------------------------------
   airflow:
     image: apache/airflow:${AIRFLOW_IMAGE_TAG:-2.8.1}
@@ -104,7 +90,7 @@ services:
     restart: unless-stopped
 
   # ----------------------------------------------------
-  # 5. Prometheus (Сбор метрик)
+  # 4. Prometheus (Сбор метрик)
   # ----------------------------------------------------
   prometheus:
     image: prom/prometheus:latest
@@ -120,7 +106,7 @@ services:
       - api # Запускаем только после старта API
 
   # ----------------------------------------------------
-  # 6. Grafana (Дашборды)
+  # 5. Grafana (Дашборды)
   # ----------------------------------------------------
   grafana:
     image: grafana/grafana:latest
@@ -136,7 +122,23 @@ services:
     depends_on:
       - prometheus
 
-# Не забудь добавить grafana_data в блок volumes в самом низу файла!
+  # ----------------------------------------------------
+  # 6. Тонкий клиент (Streamlit Demo)
+  # ----------------------------------------------------
+  demo:
+    build:
+      context: .
+      dockerfile: demo/Dockerfile
+    container_name: industrial_nlp_template_demo
+    ports:
+      - "8501:8501"
+    environment:
+      # Фронтенд стучится к твоему ML-Серверу (сервис api)
+      - API_URL=http://api:8000/chat/generate
+    depends_on:
+      - api
+    restart: unless-stopped
+
+# ИСПРАВЛЕНИЕ: Удален qdrant_data
 volumes:
-  qdrant_data:
   grafana_data:

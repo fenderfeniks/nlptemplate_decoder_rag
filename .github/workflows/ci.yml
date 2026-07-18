@@ -1,0 +1,41 @@
+# Название пайплайна
+name: Python NLP CI
+
+# 1. ТРИГГЕР: Когда запускать этот сервер?
+# В данном случае - при любом пуше в ветку main
+on:
+  push:
+    branches: [ "main" ]
+
+# 2. РАБОТЫ (Jobs): Что именно делать?
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest # Выделяем голый сервер на Linux
+
+    # 3. ШАГИ (Steps): Конкретные команды в терминале
+    steps:
+    # Шаг 1: Клонируем код из твоего репозитория на этот пустой сервер
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Шаг 2: Устанавливаем сверхбыстрый пакетный менеджер uv
+    - name: Install uv
+      uses: astral-sh/setup-uv@v2
+
+    # Шаг 3: Устанавливаем Python 3.10
+    - name: Set up Python
+      run: uv python install 3.10
+
+    # Шаг 4: Устанавливаем все зависимости (FastAPI, Pytest, Ruff и т.д.)
+    - name: Install dependencies
+      run: uv pip install --system ".[api,dev]"
+
+    # Шаг 5: Запускаем проверку кода линтером
+    # Если Ruff найдет кривой импорт, он выдаст ошибку, и пайплайн упадет здесь
+    - name: Run Ruff Linter
+      run: ruff check .
+
+    # Шаг 6: Запускаем тесты
+    # Если хоть один тест из папки tests/ не пройдет, пайплайн упадет здесь
+    - name: Run Pytest
+      run: pytest tests/ -v

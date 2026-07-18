@@ -3,16 +3,18 @@
 Запускается как независимый процесс и общается с FastAPI по HTTP.
 """
 
-import os
 import asyncio
 import logging
+import os
+
 import hydra
-from omegaconf import DictConfig, OmegaConf
 from aiogram import Bot, Dispatcher
 from dotenv import load_dotenv
+from omegaconf import DictConfig, OmegaConf
 
 # Импортируем наш универсальный роутер хэндлеров
 from src.api.tg_bot.handlers.chat import router as chat_router
+
 
 # Загружаем переменные окружения из .env
 load_dotenv()
@@ -41,15 +43,11 @@ def main(cfg: DictConfig) -> None:
     async def start_polling():
         logger.info("Удаление старых вебхуков...")
         await bot.delete_webhook(drop_pending_updates=True)
-        
+
         logger.info("Запуск локального бота в режиме Polling...")
         # aiogram 3 позволяет прокидывать любые переменные в старт-поллинг.
         # Они автоматически прилетят в аргументы функций-хэндлеров по именам!
-        await dp.start_polling(
-            bot, 
-            cfg=cfg, 
-            api_url=api_url
-        )
+        await dp.start_polling(bot, cfg=cfg, api_url=api_url)
 
     # Запускаем асинцио-цикл внутри синхронной функции Hydra
     asyncio.run(start_polling())

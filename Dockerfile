@@ -11,7 +11,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 # 3. Настройки среды
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    PROJECT_ROOT=/app
 
 WORKDIR /app
 

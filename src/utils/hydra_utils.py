@@ -1,9 +1,13 @@
 # src/core/utils/hydra_utils.py
 import logging
+
 from omegaconf import DictConfig, OmegaConf
-from src.utils import ConfigSchema
+
+from src.utils.config_schema import ConfigSchema
+
 
 logger = logging.getLogger(__name__)
+
 
 def setup_config(cfg: DictConfig) -> None:
     """

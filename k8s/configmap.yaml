@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nlp-api-config
+  namespace: ml-pipelines
+data:
+  # Настройки веб-сервера (Те самые переменные из run_api.py)
+  API_PORT: "8000"
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  
+  # Настройки RAG и Qdrant
+  # Если Qdrant запущен в этом же кластере через другой Deployment/Service
+  QDRANT_URL: "http://qdrant-service.ml-pipelines.svc.cluster.local:6333"
+  
+  # Настройки ML (Пути к нашим RWX дискам)
+  # Эти пути должны совпадать с mountPath в api-deployment.yaml
+  MODEL_WEIGHTS_DIR: "/app/models"
+  MLRUNS_DIR: "/app/mlruns"
+  DATA_DIR: "/app/data"

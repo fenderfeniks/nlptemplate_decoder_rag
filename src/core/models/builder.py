@@ -36,6 +36,8 @@ class HFModelBuilder:
         self.quantization_config = quantization_config
         self.trust_remote_code = trust_remote_code
         self.torch_dtype = torch_dtype
+        # ИСПРАВЛЕНИЕ: Сохраняем peft_config в атрибут инстанса
+        self.peft_config = peft_config
 
     def build(self) -> PreTrainedModel:
         """
@@ -59,10 +61,18 @@ class HFModelBuilder:
             else:
                 quant_dict = self.quantization_config
                 
+            # ИСПРАВЛЕНИЕ: Конвертируем bnb_4bit_compute_dtype из строки в torch.dtype
+            compute_dtype_str = quant_dict.get("bnb_4bit_compute_dtype")
+            if isinstance(compute_dtype_str, str):
+                quant_dict["bnb_4bit_compute_dtype"] = getattr(torch, compute_dtype_str)
+
             bnb_config = BitsAndBytesConfig(**quant_dict)
 
         # 3. Парсинг torch_dtype
         parsed_dtype = getattr(torch, self.torch_dtype) if self.torch_dtype != "auto" else "auto"
+
+        # ИСПРАВЛЕНИЕ: Динамическое определение device_map для безопасной загрузки 4-bit моделей
+        device_map = "auto" if torch.cuda.is_available() else "cpu"
 
         # 4. Загрузка весов
         model = model_class.from_pretrained(
@@ -71,6 +81,7 @@ class HFModelBuilder:
             quantization_config=bnb_config,
             trust_remote_code=self.trust_remote_code,
             torch_dtype=parsed_dtype,
+            device_map=device_map, # <-- Передаем вычисленный device_map
         )
 
         # 5. Синхронизация словаря

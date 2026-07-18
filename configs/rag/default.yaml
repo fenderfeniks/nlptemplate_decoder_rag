@@ -3,13 +3,14 @@
 # Папка, где лежат сырые документы бизнеса (PDF, TXT)
 documents_dir: "${paths.data_dir}/raw/knowledge_base"
 
-# Папка, куда LlamaIndex сохранит векторную базу (индексы)
+# Папка, куда LlamaIndex сохранит векторную базу (индексы FAISS)
 persist_dir: "${paths.data_dir}/processed/vector_db"
 
 indexer:
   _target_: src.core.rag.indexer.RAGIndexer
   documents_dir: ${paths.data_dir}/raw/knowledge_base
-  persist_dir: ${paths.data_dir}/vector_store
+  # ИСПРАВЛЕНИЕ: Теперь путь строго совпадает с глобальным persist_dir
+  persist_dir: ${paths.data_dir}/processed/vector_db
   chunk_size: 512
   chunk_overlap: 50
 

@@ -24,10 +24,6 @@ class ResponseCleaner:
     def clean(self, raw_text: str, prompt: str = None) -> str:
         """
         Основной метод очистки текста.
-        
-        Args:
-            raw_text (str): Сырой ответ от LLM.
-            prompt (str, optional): Исходный промпт для срезания эха.
         """
         if not raw_text:
             return ""
@@ -38,24 +34,24 @@ class ResponseCleaner:
         if self.strip_prompt and prompt and text.startswith(prompt):
             text = text[len(prompt):]
 
-        # 2. Удаляем системные токены (например, <|im_start|>, <|eot_id|> и т.д.)
+        # 2. Удаляем блоки заголовков Llama (например, <|start_header_id|>assistant<|end_header_id|>)
+        # Используем re.DOTALL, чтобы захватить всё, что внутри, включая переносы строк
+        text = re.sub(r"<\|start_header_id\|>.*?<\|end_header_id\|>", "", text, flags=re.DOTALL)
+
+        # 3. Удаляем оставшиеся системные токены
         if self.remove_special_tokens:
-            # Регулярка для поиска любых конструкций вида <|...|> или </s>
             special_tokens_pattern = r"<\|.*?\|>|</s>|<s>"
             text = re.sub(special_tokens_pattern, "", text)
 
-        # 3. Удаляем дублирующиеся пробелы и пустые строки на краях
+        # 4. Удаляем дублирующиеся пробелы и пустые строки на краях
         if self.remove_extra_spaces:
-            text = re.sub(r" +", " ", text)  # Склеиваем множественные пробелы
-            text = text.strip()
+            text = re.sub(r" +", " ", text) 
+            text = text.strip()  # <--- Вот это удалит лишний \n, который остался после заголовка
 
-        # 4. Обрезаем последнее предложение, если оно не завершено
+        # 5. Обрезаем последнее предложение
         if self.trim_incomplete_sentence and text:
-            # Ищем последние знаки препинания, завершающие мысль
             last_punctuation = max(text.rfind('.'), text.rfind('!'), text.rfind('?'))
-            # Если нашли знак препинания и после него идет незаконченный кусок текста
             if last_punctuation != -1 and last_punctuation < len(text) - 1:
-                # Обрезаем текст ровно по последний завершенный знак препинания
                 text = text[:last_punctuation + 1]
 
         return text

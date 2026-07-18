@@ -78,15 +78,72 @@ orchestration = [
 # ==========================================
 dev = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.27.0",
     "ruff>=0.3.0",
     "mypy>=1.8.0",
     "jupyterlab>=4.1.0"
 ]
 
-# Настройки линтера Ruff
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+
+# ==========================================
+# НАСТРОЙКИ ЛИНТЕРА RUFF
+# ==========================================
 [tool.ruff]
+# Общие настройки
 line-length = 100
 target-version = "py310"
+
+# Исключаем папки с данными, весами и кэшем из проверки
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".ruff_cache",
+    "__pypackages__",
+    "build",
+    "dist",
+    "venv",
+    "mlruns",     # Папка MLflow
+    "models",     # Веса моделей
+    "data",       # Сырые документы
+]
+
+[tool.ruff.lint]
+# Включаем самые полезные наборы правил:
+select = [
+    "E",  # pycodestyle errors (ошибки стиля PEP8)
+    "W",  # pycodestyle warnings (предупреждения стиля)
+    "F",  # pyflakes (неиспользуемые переменные и импорты)
+    "I",  # isort (автоматическая сортировка импортов)
+    "N",  # pep8-naming (проверка имен переменных и классов)
+    "UP", # pyupgrade (обновление старого синтаксиса на новый из Python 3.10)
+    "B",  # flake8-bugbear (поиск потенциальных багов и уязвимостей)
+    "C4", # flake8-comprehensions (оптимизация list/dict comprehensions)
+]
+
+# Отключаем правила, которые мешают в ML и FastAPI:
+ignore = [
+    "B008", # ОЧЕНЬ ВАЖНО ДЛЯ FASTAPI: разрешает вызовы функций в аргументах (например, Depends(get_db))
+    "E501", # Игнорируем жесткое ограничение длины строки (полезно для длинных промптов и ссылок)
+]
+
+# Позволяем Ruff автоматически удалять неиспользуемые импорты (F401)
+unfixable = []
+
+[tool.ruff.lint.isort]
+# Настройки сортировки импортов
+known-first-party = ["src"] # Ruff будет знать, что импорты из src - это наш локальный код
+lines-after-imports = 2     # Две пустые строки после блока импортов (стандарт PEP8)
+
+[tool.ruff.format]
+# Настройки автоформатирования кода
+quote-style = "double"            # Используем двойные кавычки для строк
+indent-style = "space"            # Отступы пробелами, а не табами
+skip-magic-trailing-comma = false # Умное форматирование списков и словарей
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

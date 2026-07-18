@@ -24,7 +24,7 @@ model_module:
     lr: 2e-5
     weight_decay: 0.01
     
-  loss_fn_cfg: ${model.loss_fn}
+  loss_fn_cfg: ${model.architecture.loss_fn}
 
 # 2. Настройка DataModule
 datamodule:

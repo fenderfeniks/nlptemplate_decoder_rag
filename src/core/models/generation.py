@@ -43,12 +43,16 @@ class HFTextGenerator:
         self.model.eval()
 
     @torch.inference_mode() # Отключаем градиенты для ускорения и экономии памяти
-    def generate(self, texts: Union[str, List[str]]) -> List[str]:
+    # ИСПРАВЛЕНИЕ 2: Добавляем **kwargs, чтобы эндпоинты могли безопасно переопределять параметры (Race Condition fix)
+    def generate(self, texts: Union[str, List[str]], **kwargs) -> List[str]:
         """
         Генерирует ответы для одного текста или батча текстов.
         """
         if isinstance(texts, str):
             texts = [texts]
+
+        # ИСПРАВЛЕНИЕ 1: Надежно получаем device для inputs, даже если модель распределена по GPU
+        device = next(self.model.parameters()).device
 
         # 1. Токенизация (обязательно на устройство модели)
         inputs = self.tokenizer(
@@ -56,13 +60,18 @@ class HFTextGenerator:
             return_tensors="pt", 
             padding=True, 
             truncation=True
-        ).to(self.model.device)
+        ).to(device)
+
+        # Мержим глобальные параметры (из конфига) с локальными (из API)
+        # Это позволяет динамически менять max_new_tokens на один запрос, не мутируя self.generation_kwargs
+        current_gen_kwargs = self.generation_kwargs.copy()
+        current_gen_kwargs.update(kwargs)
 
         # 2. Вызов встроенного метода генерации
-        # Распаковываем **kwargs из конфига Гидры
+        # Распаковываем обновленные **kwargs
         generated_ids = self.model.generate(
             **inputs,
-            **self.generation_kwargs,
+            **current_gen_kwargs,
             pad_token_id=self.tokenizer.pad_token_id,
             eos_token_id=self.tokenizer.eos_token_id,
         )

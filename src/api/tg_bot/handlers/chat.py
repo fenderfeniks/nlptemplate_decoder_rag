@@ -2,22 +2,26 @@
 Главный обработчик сообщений (Бизнес-логика бота).
 Универсален: умеет ходить по HTTP (для bot_local) и напрямую в память (для bot_webhook).
 """
-import aiohttp
+
+import asyncio
 import logging
-from aiogram import Router, F, types
+
+import aiohttp
+from aiogram import F, Router, types
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 
+# --- 1. ДОБАВЛЯЕМ ИМПОРТ МЕТРИК ---
+from src.api.metrics import LLM_GENERATIONS_TOTAL, LLM_INFERENCE_TIME
 from src.api.tg_bot.keyboards.reply import get_main_keyboard
 from src.api.tg_bot.states import ChatProcess
 
-# --- 1. ДОБАВЛЯЕМ ИМПОРТ МЕТРИК ---
-from src.api.metrics import LLM_GENERATIONS_TOTAL, LLM_INFERENCE_TIME
 
 logger = logging.getLogger(__name__)
 
 # Создаем роутер (аналог APIRouter в FastAPI)
 router = Router()
+
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext, cfg):
@@ -25,11 +29,8 @@ async def cmd_start(message: types.Message, state: FSMContext, cfg):
     await state.set_state(ChatProcess.chatting)
     # Сохраняем настройку RAG по умолчанию в состояние юзера
     await state.update_data(use_rag=cfg.api.telegram.default_use_rag)
-    
-    await message.answer(
-        text=cfg.api.telegram.messages.welcome,
-        reply_markup=get_main_keyboard()
-    )
+
+    await message.answer(text=cfg.api.telegram.messages.welcome, reply_markup=get_main_keyboard())
 
 
 @router.message(F.text == "🧹 Очистить контекст")
@@ -40,23 +41,23 @@ async def clear_context(message: types.Message, state: FSMContext):
     await state.clear()
     await state.set_state(ChatProcess.chatting)
     await state.update_data(use_rag=data.get("use_rag", True))
-    
+
     await message.answer("Контекст диалога успешно очищен! 🧹", reply_markup=get_main_keyboard())
 
 
 @router.message(ChatProcess.chatting, F.text)
 async def process_chat_message(
-    message: types.Message, 
-    state: FSMContext, 
-    cfg, 
+    message: types.Message,
+    state: FSMContext,
+    cfg,
     # Эти параметры могут быть None, зависимо от того, кто вызвал хэндлер
-    generator=None, 
+    generator=None,
     retriever=None,
     prompt_manager=None,
-    api_url=None
+    api_url=None,
 ):
     """Универсальный генератор ответов."""
-    
+
     # 1. Ловим клики по кнопкам переключения RAG
     if message.text == "⚙️ RAG: Вкл":
         await state.update_data(use_rag=True)
@@ -76,17 +77,19 @@ async def process_chat_message(
         if generator and retriever and prompt_manager:
             context = None
             if use_rag:
-                context = retriever.retrieve_context(message.text)
+                # ИСПРАВЛЕНИЕ: Оборачиваем синхронный поиск по RAG в отдельный поток
+                context = await asyncio.to_thread(retriever.retrieve_context, message.text)
                 prompt = prompt_manager.build_rag_prompt(message.text, context)
             else:
                 prompt = prompt_manager.build_simple_prompt(message.text)
 
             # --- 2. СБОР МЕТРИК ДЛЯ ТЕЛЕГРАМ-БОТА ---
             LLM_GENERATIONS_TOTAL.labels(source="tg").inc()
-            
+
             with LLM_INFERENCE_TIME.labels(source="tg").time():
-                responses = generator.generate(prompt)
-                
+                # ИСПРАВЛЕНИЕ: Выносим тяжелую генерацию в отдельный поток
+                responses = await asyncio.to_thread(generator.generate, prompt)
+
             answer = responses[0]
 
         # =================================================================
@@ -96,7 +99,7 @@ async def process_chat_message(
             payload = {
                 "query": message.text,
                 "use_rag": use_rag,
-                "max_tokens": cfg.api.telegram.max_tokens
+                "max_tokens": cfg.api.telegram.max_tokens,
             }
             async with aiohttp.ClientSession() as session:
                 async with session.post(api_url, json=payload) as resp:

@@ -30,6 +30,8 @@ spec:
         envFrom:
         - secretRef:
             name: nlp-api-secrets
+        - configMapRef:
+            name: nlp-api-config
             
         # Монтируем диск с моделями
         volumeMounts:
