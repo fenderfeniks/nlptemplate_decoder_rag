@@ -1,0 +1,16 @@
+defaults:
+  - main # Наследуем всю базу (модели, данные, пути) из твоего main.yaml
+  - _self_
+
+optuna:
+  n_trials: 20
+  direction: "maximize" # Максимизируем F1
+  metric_name: "val_f1" # Имя метрики в точности как в твоем NLPModel
+  enable_pruning: True  # Ранняя остановка плохих экспериментов
+  study_name: "${project_name}_hpo"
+  storage: "sqlite:///optuna_journal.db" # Сохраняем прогресс в локальную БД
+
+# Переопределяем Trainer, чтобы он был "полегче" для подбора
+trainer:
+  max_epochs: 5 # Для Optuna не нужно учить до конца, хватит 5 эпох чтобы понять тренд
+  logger: False # Выключаем MLFlowLogger внутри PyTorch Lightning

@@ -233,6 +233,17 @@ class APIConfig:
 
 
 @dataclass
+class OptunaConfig:
+    n_trials: int
+    direction: str
+    metric_name: str
+    enable_pruning: bool
+    # Можно добавить путь к БД, если хочешь сохранять историю подбора
+    storage: str | None = None
+    study_name: str | None = None
+
+
+@dataclass
 class ConfigSchema:
     seed: int
     project_name: str
@@ -245,3 +256,4 @@ class ConfigSchema:
     model_module: ModelModuleConfig
     datamodule: RootDataModuleConfig
     hydra: HydraConfig
+    optuna: OptunaConfig | None = None
