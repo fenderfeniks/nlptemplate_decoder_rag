@@ -1,3 +1,4 @@
+# dags/quality_control.py
 """
 DAG: Model Evaluation & Drift Detection
 """
@@ -40,7 +41,8 @@ with DAG(
         name="evaluator-pod",
         namespace=NAMESPACE,
         image=IMAGE,
-        cmds=["python", "-m", "src.evaluate"],
+        # ИСПРАВЛЕНИЕ: Заменен несуществующий src.evaluate на src.eval
+        cmds=["python", "-m", "src.eval"],
         arguments=[f"ckpt_path={CONFIG['mount_path']}/best.ckpt"],
         # Подключаем GPU и память из JSON
         container_resources=k8s.V1ResourceRequirements(**CONFIG["resources"]),

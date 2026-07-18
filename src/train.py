@@ -29,10 +29,10 @@ def train(cfg: DictConfig) -> None:
         cfg (DictConfig): Разрешенная конфигурация Hydra.
     """
 
-    setup_config(cfg)
+    # ИСПРАВЛЕНИЕ: Перехватываем возвращаемый валидированный конфиг
+    cfg = setup_config(cfg)
 
     # 2. Обеспечение воспроизводимости
-    # pl.seed_everything фиксирует сиды для random, numpy, torch (CPU/GPU)
     if "seed" in cfg:
         pl.seed_everything(cfg.seed, workers=True)
         logger.info(f"Зафиксирован глобальный seed: {cfg.seed}")
@@ -42,22 +42,20 @@ def train(cfg: DictConfig) -> None:
     tokenizer_builder = hydra.utils.instantiate(cfg.model.tokenizer)
     tokenizer = tokenizer_builder.build()
 
-    # 4. Сборка базовой модели (с квантизацией и LoRA, если они настроены)
+    # 4. Сборка базовой модели
     logger.info("Загрузка и сборка архитектуры модели...")
     model_builder = hydra.utils.instantiate(cfg.model.builder, tokenizer=tokenizer)
     base_model = model_builder.build()
 
-    # 5. Инициализация LightningModule (оркестратора логики шагов обучения)
+    # 5. Инициализация LightningModule
     logger.info("Инициализация PyTorch Lightning Module...")
-    # Передаем готовую модель внутрь LightningModule
     model_module = hydra.utils.instantiate(cfg.model_module, model=base_model)
 
     # 6. Инициализация DataModule
     logger.info("Инициализация DataModule...")
-    # Прокидываем токенизатор, который создали на шаге 3
     datamodule = hydra.utils.instantiate(cfg.datamodule, tokenizer=tokenizer)
 
-    # 7. Сборка PyTorch Lightning Trainer (включая MLflow логгер и коллбэки)
+    # 7. Сборка PyTorch Lightning Trainer
     logger.info("Инициализация PyTorch Lightning Trainer...")
     trainer = hydra.utils.instantiate(cfg.trainer)
 

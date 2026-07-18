@@ -16,4 +16,4 @@ def test_build_rag_prompt_contains_context_and_query():
 
     assert "Кто написал этот код?" in prompt
     assert "Этот код написала команда MLOps." in prompt
-    assert "Контекст:" in prompt
+    assert "<context>" in prompt

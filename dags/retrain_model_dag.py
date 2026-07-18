@@ -1,3 +1,4 @@
+# dags/weekly_llm_finetuning.py
 """
 DAG: Еженедельное переобучение модели (Continuous Finetuning).
 Архитектура: Разделение инфраструктуры и бизнес-логики.
@@ -7,6 +8,7 @@ import pendulum
 from airflow import DAG
 from airflow.models import Variable
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+from airflow.providers.slack.operators.slack_webhook import SlackWebhookOperator
 from kubernetes.client import models as k8s
 
 
@@ -14,7 +16,7 @@ from kubernetes.client import models as k8s
 IMAGE = Variable.get("PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:latest")
 NAMESPACE = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
 
-# 2. БИЗНЕС-ЛОГИКА (Конфиг из Variables без хардкода по умолчанию, так как он уже есть в БД Airflow)
+# 2. БИЗНЕС-ЛОГИКА
 CONFIG = Variable.get("training_config", deserialize_json=True)
 
 default_args = {
@@ -33,6 +35,7 @@ with DAG(
     catchup=False,
     tags=["nlp", "training"],
 ) as dag:
+    # Шаг 1: Обучение. Веса пишутся в {mount_path}/staging/
     train_model_task = KubernetesPodOperator(
         task_id="run_lora_finetuning",
         name="llm-trainer-pod",
@@ -40,9 +43,7 @@ with DAG(
         image=IMAGE,
         cmds=["python", "-m", "src.train"],
         container_resources=k8s.V1ResourceRequirements(**CONFIG["resources"]),
-        # --- ДОБАВЛЕНО: Проброс секретов для обучения ---
         env_vars=[
-            # Токен HuggingFace для скачивания базовой модели (опционально)
             k8s.V1EnvVar(
                 name="HUGGINGFACE_TOKEN",
                 value_from=k8s.V1EnvVarSource(
@@ -51,7 +52,6 @@ with DAG(
                     )
                 ),
             ),
-            # Ключ Weights & Biases для логирования экспериментов (опционально)
             k8s.V1EnvVar(
                 name="WANDB_API_KEY",
                 value_from=k8s.V1EnvVarSource(
@@ -73,3 +73,35 @@ with DAG(
         get_logs=True,
         is_delete_operator_pod=True,
     )
+
+    # ИСПРАВЛЕНИЕ: Шаг 2 - Оценка новой модели в песочнице (Staging)
+    evaluate_staging_task = KubernetesPodOperator(
+        task_id="evaluate_staging_model",
+        name="llm-eval-pod",
+        namespace=NAMESPACE,
+        image=IMAGE,
+        cmds=["python", "-m", "src.eval"],
+        arguments=[f"ckpt_path={CONFIG['mount_path']}/staging/best.ckpt"],
+        container_resources=k8s.V1ResourceRequirements(**CONFIG["resources"]),
+        volume_mounts=[k8s.V1VolumeMount(name="model-weights", mount_path=CONFIG["mount_path"])],
+        volumes=[
+            k8s.V1Volume(
+                name="model-weights",
+                persistent_volume_claim=k8s.V1PersistentVolumeClaimVolumeSource(
+                    claim_name=CONFIG["pvc_name"]
+                ),
+            )
+        ],
+        get_logs=True,
+        is_delete_operator_pod=True,
+    )
+
+    # ИСПРАВЛЕНИЕ: Шаг 3 - Запрос ручного аппрува
+    request_approval = SlackWebhookOperator(
+        task_id="request_manual_approval",
+        slack_webhook_conn_id="slack_conn",
+        message="✅ Обучение завершено. Метрики посчитаны. Чекпоинт ждет в папке Staging.\n"
+        "👉 Проверьте MLflow. Если качество устраивает, запустите DAG `promote_to_prod`.",
+    )
+
+    train_model_task >> evaluate_staging_task >> request_approval

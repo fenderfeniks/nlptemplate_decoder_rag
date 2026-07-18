@@ -28,7 +28,7 @@ model_module:
 
 # 2. Настройка DataModule
 datamodule:
-  _target_: src.core.data.datamodule.NLPDataModule
+  _target_: src.core.data.NLPDataModule  # Исправлен путь импорта таргета
   data_cfg: ${data}
 
 # --- Настройка логирования и рабочей директории Гидры ---

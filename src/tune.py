@@ -1,3 +1,4 @@
+# src/tune.py
 import logging
 
 from dotenv import load_dotenv
@@ -17,7 +18,8 @@ from src.utils.hydra_utils import setup_config  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(config_path="configs", config_name="tune", version_base="1.3")
+# ИСПРАВЛЕНИЕ: Изменен config_path с "configs" на "../configs"
+@hydra.main(config_path="../configs", config_name="tune", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     # Валидация конфига (твоя кастомная функция)
     setup_config(cfg)

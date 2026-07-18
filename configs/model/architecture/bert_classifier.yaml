@@ -9,6 +9,4 @@ builder:
   # Квантизации нет, поэтому Гидра не добавит этот блок
 
 loss_fn:
-  _target_: torch.nn.TripletMarginLoss
-  margin: 1.0
-  p: 2
+  _target_: torch.nn.CrossEntropyLoss

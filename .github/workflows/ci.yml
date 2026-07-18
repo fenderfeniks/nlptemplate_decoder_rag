@@ -1,41 +1,50 @@
-# Название пайплайна
+# .github/workflows/ci.yml
 name: Python NLP CI
 
-# 1. ТРИГГЕР: Когда запускать этот сервер?
-# В данном случае - при любом пуше в ветку main
+# 1. ТРИГГЕРЫ: Запускаем при пуше в main И при создании Pull Request в main
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
-# 2. РАБОТЫ (Jobs): Что именно делать?
+# 2. РАБОТЫ (Jobs)
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest # Выделяем голый сервер на Linux
+    runs-on: ubuntu-latest 
 
-    # 3. ШАГИ (Steps): Конкретные команды в терминале
+    # Подстраховка: задаем фейковые переменные окружения на уровне сервера
+    env:
+      ENVIRONMENT: testing
+      TG_BOT_TOKEN: ci_dummy_token
+      API_KEY: ci_dummy_key
+
     steps:
-    # Шаг 1: Клонируем код из твоего репозитория на этот пустой сервер
+    # Шаг 1: Клонируем код
     - name: Checkout code
       uses: actions/checkout@v4
 
-    # Шаг 2: Устанавливаем сверхбыстрый пакетный менеджер uv
-    - name: Install uv
-      uses: astral-sh/setup-uv@v2
+    # Шаг 2: Устанавливаем uv и Python 3.10 за один шаг + включаем кэш
+    - name: Install uv and Set up Python
+      uses: astral-sh/setup-uv@v5 # Используем актуальную мажорную версию
+      with:
+        python-version: "3.10"
+        enable-cache: true      # Кэширует скачанные пакеты для ускорения будущих сборок
 
-    # Шаг 3: Устанавливаем Python 3.10
-    - name: Set up Python
-      run: uv python install 3.10
-
-    # Шаг 4: Устанавливаем все зависимости (FastAPI, Pytest, Ruff и т.д.)
+    # Шаг 3: Устанавливаем зависимости проекта
+    # Флаг -e (editable) гарантирует, что импорты вида from src... будут работать корректно
     - name: Install dependencies
-      run: uv pip install --system ".[api,dev]"
+      run: uv pip install --system -e ".[api,dev]"
 
-    # Шаг 5: Запускаем проверку кода линтером
-    # Если Ruff найдет кривой импорт, он выдаст ошибку, и пайплайн упадет здесь
+    # Шаг 4: Проверяем, отформатирован ли код (заменяет Black)
+    - name: Check code formatting
+      run: ruff format --check .
+
+    # Шаг 5: Запускаем линтер (поиск багов и кривых импортов)
+    # --output-format=github позволяет GitHub Actions красиво подсвечивать ошибки прямо в коде PR
     - name: Run Ruff Linter
-      run: ruff check .
+      run: ruff check --output-format=github .
 
-    # Шаг 6: Запускаем тесты
-    # Если хоть один тест из папки tests/ не пройдет, пайплайн упадет здесь
+    # Шаг 6: Прогон всех тестов
     - name: Run Pytest
       run: pytest tests/ -v

@@ -97,13 +97,18 @@ class ResponseCleanerConfig:
 
 @dataclass
 class ModelConfig:
-    model_name: str
-    is_causal_lm: bool
     tokenizer: TokenizerConfig
     builder: ModelBuilderConfig
     generation: GenerationConfig
     cleaner: ResponseCleanerConfig
-    loss_fn: Any | None = None
+    # ВАЖНО: architecture — намеренно Any, а не строгий дата-класс.
+    # Разные архитектуры (bert_classifier / llama3_8b / bert_multitask) имеют
+    # РАЗНУЮ форму этого узла (см. configs/model/architecture/*.yaml):
+    #   - bert_classifier/llama3_8b: model_name, is_causal_lm, builder-overrides, loss_fn
+    #   - bert_multitask: _target_, num_sentiment_classes, num_category_classes, base_builder
+    # Если сделать здесь строгий дата-класс под первую форму, схема будет падать
+    # с ConfigKeyError на любой другой архитектуре (это и была причина бага).
+    architecture: Any = None
 
 
 @dataclass

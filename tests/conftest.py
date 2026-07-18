@@ -1,3 +1,4 @@
+# tests/conftest.py
 import os
 from unittest.mock import MagicMock
 
@@ -14,6 +15,8 @@ os.environ.setdefault("PROJECT_DESCRIPTION", "Test API")
 os.environ.setdefault("API_PORT", "8000")
 os.environ.setdefault("ENVIRONMENT", "testing")
 os.environ.setdefault("HUGGINGFACE_TOKEN", "test_token")
+# ИСПРАВЛЕНИЕ: Добавлен мок для токена телеграма, чтобы OmegaConf.resolve не падал
+os.environ.setdefault("TG_BOT_TOKEN", "test_bot_token")
 
 # Импортируем фабрику, а не глобальный app
 from src.api.rest.dependencies import get_generator, get_prompt_manager, get_retriever

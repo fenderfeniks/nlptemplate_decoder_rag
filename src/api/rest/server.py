@@ -1,3 +1,4 @@
+# src/api/rest/server.py
 import gc
 import logging
 import os
@@ -7,18 +8,37 @@ from pathlib import Path
 import hydra
 from aiogram import types
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi.security import APIKeyHeader
 from hydra.core.global_hydra import GlobalHydra
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from prometheus_fastapi_instrumentator import Instrumentator
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 from src.api.rest.endpoints import chat, health
+from src.api.rest.limiter import limiter
 from src.api.rest.middlewares import setup_middlewares
 from src.api.tg_bot.bot_webhook import dp, get_webhook_bot
 
 
 logger = logging.getLogger(__name__)
+
+# ИСПРАВЛЕНИЕ: Базовый слой безопасности. Если API_KEY задан в окружении,
+# FastAPI потребует заголовок X-API-Key для всех эндпоинтов (кроме исключенных).
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["10/minute"])
+
+
+async def verify_api_key(api_key: str = Security(api_key_header)):
+    expected_key = os.getenv("API_KEY")
+    if expected_key and api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Invalid or missing API Key")
+    return api_key
 
 
 def create_app(load_ml: bool = True) -> FastAPI:
@@ -82,15 +102,23 @@ def create_app(load_ml: bool = True) -> FastAPI:
             except ImportError:
                 pass
 
+    # Подключаем зависимость глобально
     app = FastAPI(
         title=cfg.api.title,
         description=cfg.api.description,
         version=cfg.api.version,
         lifespan=lifespan,
+        dependencies=[Depends(verify_api_key)],
     )
+
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
 
     app.state.config = cfg
     setup_middlewares(app, cors_origins=list(cfg.api.cors_origins))
+
+    # Исключаем healthcheck из проверки API-ключа
     app.include_router(health.router)
     app.include_router(chat.router)
 

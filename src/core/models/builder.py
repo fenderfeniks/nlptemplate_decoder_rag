@@ -1,3 +1,4 @@
+# src/core/model/builder.py
 """
 Фабрика для загрузки архитектур моделей из Hugging Face.
 Отвечает за инициализацию базовых весов, квантизацию и синхронизацию словаря.
@@ -21,10 +22,10 @@ class HFModelBuilder:
     def __init__(
         self,
         model_name_or_path: str,
-        tokenizer: Optional[PreTrainedTokenizerBase] = None, # <-- Принимаем токенизатор из train.py!
+        tokenizer: Optional[PreTrainedTokenizerBase] = None, 
         auto_model_class: str = "transformers.AutoModelForCausalLM",
         cache_dir: Optional[str] = None,
-        quantization_config: Optional[Any] = None, # Type Any, так как придет DictConfig
+        quantization_config: Optional[Any] = None, 
         trust_remote_code: bool = False,
         torch_dtype: str = "auto",
         peft_config: Optional[Any] = None,
@@ -36,7 +37,6 @@ class HFModelBuilder:
         self.quantization_config = quantization_config
         self.trust_remote_code = trust_remote_code
         self.torch_dtype = torch_dtype
-        # ИСПРАВЛЕНИЕ: Сохраняем peft_config в атрибут инстанса
         self.peft_config = peft_config
 
     def build(self) -> PreTrainedModel:
@@ -55,13 +55,11 @@ class HFModelBuilder:
         if self.quantization_config is not None:
             logger.info("Применение квантизации BitsAndBytes.")
             
-            # Если пришел DictConfig от Гидры, превращаем его в чистый Python dict
             if isinstance(self.quantization_config, DictConfig):
                 quant_dict = OmegaConf.to_container(self.quantization_config, resolve=True)
             else:
                 quant_dict = self.quantization_config
                 
-            # ИСПРАВЛЕНИЕ: Конвертируем bnb_4bit_compute_dtype из строки в torch.dtype
             compute_dtype_str = quant_dict.get("bnb_4bit_compute_dtype")
             if isinstance(compute_dtype_str, str):
                 quant_dict["bnb_4bit_compute_dtype"] = getattr(torch, compute_dtype_str)
@@ -71,8 +69,12 @@ class HFModelBuilder:
         # 3. Парсинг torch_dtype
         parsed_dtype = getattr(torch, self.torch_dtype) if self.torch_dtype != "auto" else "auto"
 
-        # ИСПРАВЛЕНИЕ: Динамическое определение device_map для безопасной загрузки 4-bit моделей
-        device_map = "auto" if torch.cuda.is_available() else "cpu"
+        # ИСПРАВЛЕНИЕ: Убираем device_map="auto" для совместимости с PL DDP.
+        # Оставляем маппинг только если используется квантизация.
+        if bnb_config is not None:
+            device_map = {"": torch.cuda.current_device()} if torch.cuda.is_available() else "cpu"
+        else:
+            device_map = None
 
         # 4. Загрузка весов
         model = model_class.from_pretrained(
@@ -81,12 +83,10 @@ class HFModelBuilder:
             quantization_config=bnb_config,
             trust_remote_code=self.trust_remote_code,
             torch_dtype=parsed_dtype,
-            device_map=device_map, # <-- Передаем вычисленный device_map
+            device_map=device_map,
         )
 
         # 5. Синхронизация словаря
-        # Если в токенизатор были добавлены новые спец-токены (например, pad_token),
-        # матрица эмбеддингов модели должна быть расширена, иначе будет краш.
         if self.tokenizer is not None:
             vocab_size = len(self.tokenizer)
             if model.config.vocab_size != vocab_size:
@@ -100,15 +100,11 @@ class HFModelBuilder:
         if self.peft_config is not None:
             logger.info("Инициализация PEFT/LoRA адаптеров.")
             
-            # Прячу импорты тяжелых библиотек
-            # внутрь функций, чтобы скрипт не падал, если peft не установлен
             from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
             
-            # Если мы загрузили модель в 4-bit, ее нужно "подготовить" для LoRA
             if bnb_config is not None:
                 model = prepare_model_for_kbit_training(model)
 
-            # Безопасная распаковка DictConfig от Гидры
             if isinstance(self.peft_config, DictConfig):
                 peft_dict = OmegaConf.to_container(self.peft_config, resolve=True)
             else:
@@ -117,7 +113,6 @@ class HFModelBuilder:
             lora_config = LoraConfig(**peft_dict)
             model = get_peft_model(model, lora_config)
             
-            # Выводим в логи, сколько параметров мы реально будем обучать (обычно < 1%)
             trainable_params, all_param = model.get_nb_trainable_parameters()
             logger.info(
                 f"LoRA инициализирована: обучаемых параметров: {trainable_params:,d} "

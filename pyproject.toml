@@ -20,7 +20,8 @@ dependencies = [
     "hydra-core>=1.3.2",
     "pydantic>=2.6.0",
     "python-dotenv>=1.0.0",
-    "accelerate>=0.27.0"
+    "accelerate>=0.27.0",
+    "python-json-logger>=2.0.0" # <-- ДОБАВЛЕНО для структурированного логирования
 ]
 
 [project.optional-dependencies]
@@ -59,7 +60,9 @@ api = [
     "aiogram>=3.4.0",
     "aiohttp>=3.9.3",
     "prometheus-fastapi-instrumentator>=6.1.0",
-    "prometheus-client>=0.20.0"
+    "prometheus-client>=0.20.0",
+    "slowapi>=0.1.9", # <-- ДОБАВЛЕНО для Rate Limiting
+    "redis>=5.0.0"    # <-- ДОБАВЛЕНО для масштабирования сессий aiogram
 ]
 
 # ==========================================
@@ -94,7 +97,7 @@ dev = [
     "httpx>=0.27.0",
     "ruff>=0.3.0",
     "mypy>=1.8.0",
-    "experimentation" # Наследуем всё для экспериментов
+    "industrial-nlp-template[experimentation]" # Наследуем всё для экспериментов
 ]
 
 # ==========================================

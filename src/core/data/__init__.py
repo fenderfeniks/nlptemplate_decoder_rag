@@ -4,7 +4,7 @@
 from .cleaners import BaseCleaner, RegexCleaner, TextCleaningPipeline
 from .collators import DynamicTextCollator
 from .datasets import NLPDatasetAdapter
-from .datamodule import NLPDataModule
+from .builder import NLPDataModule  # Исправлено с .datamodule на .builder
 
 # Ограничиваем то, что импортируется при from src.core.data import *
 __all__ = [

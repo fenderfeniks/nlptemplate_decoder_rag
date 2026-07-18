@@ -1,3 +1,4 @@
+# Makefile
 # ==========================================
 # КОМАНДЫ ДЛЯ РАЗРАБОТКИ (Task Runner)
 # ==========================================
@@ -7,7 +8,7 @@
 help:
 	@echo "Доступные команды:"
 	@echo "  make install   - Установить зависимости локально через uv"
-	@echo "  make api       - Запустить продакшен сервер API и базу Qdrant"
+	@echo "  make api       - Запустить продакшен сервер API"
 	@echo "  make train     - Запустить задачу дообучения модели (Finetuning)"
 	@echo "  make airflow   - Поднять локальный оркестратор для тестов DAG-ов"
 	@echo "  make down      - Остановить все Docker контейнеры"
@@ -20,8 +21,9 @@ install:
 
 # --- Запуск Docker контейнеров ---
 api:
-	@echo "🚀 Запуск API и векторной базы..."
-	docker compose up -d --build api qdrant
+	@echo "🚀 Запуск API..."
+	# ИСПРАВЛЕНИЕ: Удален вызов несуществующего сервиса qdrant
+	docker compose up -d --build api
 
 train:
 	@echo "🧠 Запуск изолированного обучения (Trainer)..."

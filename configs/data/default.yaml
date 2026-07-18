@@ -4,8 +4,8 @@
 defaults:
   - source: hf_dataset
 
-text_column: "context"
-target_column: "answers"
+text_column: "text"      # Исправлено для задачи классификации
+target_column: "label"   # Исправлено для задачи классификации
 max_length: 512
 val_split_size: 0.1
 
