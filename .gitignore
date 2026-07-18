@@ -7,3 +7,6 @@ k8s/secrets.yaml
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Cursor IDE
+.cursor/
