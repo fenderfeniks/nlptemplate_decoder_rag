@@ -1,0 +1,37 @@
+# 1. Создаем аккаунт, под которым будут запускаться поды KubernetesPodOperator
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: airflow-worker-sa
+  namespace: ml-pipelines
+
+---
+# 2. Даем права на работу с Pods (для запуска задач) и Deployments (для rollout restart)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-worker-role
+  namespace: ml-pipelines
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch", "list", "watch"] # patch нужен для rollout restart
+
+---
+# 3. Связываем аккаунт с правами
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-worker-rolebinding
+  namespace: ml-pipelines
+subjects:
+  - kind: ServiceAccount
+    name: airflow-worker-sa
+    namespace: ml-pipelines
+roleRef:
+  kind: Role
+  name: airflow-worker-role
+  apiGroup: rbac.authorization.k8s.io

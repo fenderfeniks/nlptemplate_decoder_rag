@@ -37,7 +37,6 @@ class NLPDataModule(pl.LightningDataModule):
         self.data_cfg = data_cfg
         self.tokenizer = tokenizer
         
-        # ИСПРАВЛЕНИЕ: Хэшируем все параметры, влияющие на данные, а не только cleaner
         hash_dict = {
             "cleaner": OmegaConf.to_container(self.data_cfg.cleaner, resolve=True),
             "source": OmegaConf.to_container(self.data_cfg.source, resolve=True),
@@ -47,11 +46,9 @@ class NLPDataModule(pl.LightningDataModule):
             "max_length": self.data_cfg.get("max_length")
         }
         
-        # Сериализуем и берем хэш
         hash_str = json.dumps(hash_dict, sort_keys=True)
         config_hash = hashlib.md5(hash_str.encode('utf-8')).hexdigest()[:8]
         
-        # Безопасное получение имени датасета (на случай если его нет в конфиге)
         dataset_name = self.data_cfg.get("dataset_name", "nlp_dataset")
         
         self.processed_dir = os.path.join(
@@ -71,37 +68,42 @@ class NLPDataModule(pl.LightningDataModule):
         
         raw_datasets = instantiate(self.data_cfg.source)
         
-        if "validation" in raw_datasets:
-            raw_train, raw_val = raw_datasets["train"], raw_datasets["validation"]
+        # Разделение на train/val/test
+        if "validation" in raw_datasets and "test" in raw_datasets:
+            raw_train = raw_datasets["train"]
+            raw_val = raw_datasets["validation"]
+            raw_test = raw_datasets["test"]
         else:
+            # Fallback: Если сплитов нет, делаем их искусственно из train
             split_ds = raw_datasets["train"].train_test_split(
-                test_size=self.data_cfg.val_split_size, 
+                test_size=self.data_cfg.val_split_size * 2, # Берем x2, чтобы поделить на val и test
                 seed=self.data_cfg.seed
             )
-            raw_train, raw_val = split_ds["train"], split_ds["test"]
+            raw_train = split_ds["train"]
+            
+            # Делим отщипнутый кусок пополам между val и test
+            val_test_split = split_ds["test"].train_test_split(test_size=0.5, seed=self.data_cfg.seed)
+            raw_val = val_test_split["train"]
+            raw_test = val_test_split["test"]
 
         cleaner_pipeline = instantiate(self.data_cfg.cleaner)
 
-        clean_train = NLPDatasetAdapter(
-            hf_dataset=raw_train, 
-            text_column=self.data_cfg.text_column, 
-            cleaning_pipeline=cleaner_pipeline,
-            num_proc=self.data_cfg.get("preprocessing_num_workers", 4),
-            batch_size=self.data_cfg.get("preprocessing_batch_size", 1000)
-        ).prepare_dataset()
-
-        clean_val = NLPDatasetAdapter(
-            hf_dataset=raw_val, 
-            text_column=self.data_cfg.text_column, 
-            cleaning_pipeline=cleaner_pipeline,
-            num_proc=self.data_cfg.get("preprocessing_num_workers", 4),
-            batch_size=self.data_cfg.get("preprocessing_batch_size", 1000)
-        ).prepare_dataset()
+        # Функция для минимизации дублирования кода
+        def _process_split(dataset_split):
+            return NLPDatasetAdapter(
+                hf_dataset=dataset_split, 
+                text_column=self.data_cfg.text_column, 
+                cleaning_pipeline=cleaner_pipeline,
+                num_proc=self.data_cfg.get("preprocessing_num_workers", 4),
+                batch_size=self.data_cfg.get("preprocessing_batch_size", 1000)
+            ).prepare_dataset()
 
         processed_dataset = DatasetDict({
-            "train": clean_train,
-            "validation": clean_val
+            "train": _process_split(raw_train),
+            "validation": _process_split(raw_val),
+            "test": _process_split(raw_test)
         })
+        
         processed_dataset.save_to_disk(self.processed_dir)
         logger.info(f"Данные успешно очищены и сохранены в {self.processed_dir}")
 
@@ -114,6 +116,9 @@ class NLPDataModule(pl.LightningDataModule):
         if stage == "fit" or stage is None:
             self.train_dataset = processed_dataset["train"]
             self.val_dataset = processed_dataset["validation"]
+            
+        if stage == "test" or stage is None:
+            self.test_dataset = processed_dataset["test"]
 
         self.collator = instantiate(
             self.data_cfg.collator, 
@@ -132,6 +137,14 @@ class NLPDataModule(pl.LightningDataModule):
         return instantiate(
             self.data_cfg.dataloader,
             dataset=self.val_dataset,
+            collate_fn=self.collator,
+            shuffle=False
+        )
+        
+    def test_dataloader(self) -> Any:
+        return instantiate(
+            self.data_cfg.dataloader,
+            dataset=self.test_dataset,
             collate_fn=self.collator,
             shuffle=False
         )

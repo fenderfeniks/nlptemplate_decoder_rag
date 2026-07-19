@@ -10,11 +10,26 @@ from kubernetes.client import models as k8s
 
 
 # 1. ИНФРАСТРУКТУРА
-IMAGE = Variable.get("PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:latest")
+# ИСПРАВЛЕНИЕ: Меняем тег на trainer-latest для батч-задач
+IMAGE = Variable.get(
+    "PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:trainer-latest"
+)
 NAMESPACE = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
 
+# ИСПРАВЛЕНИЕ: Защитный словарь-заглушка от краша парсера Airflow
+DEFAULT_CONFIG = {
+    "schedule": "@daily",
+    "default_args": {"owner": "mlops", "retries": 1, "retry_delay_minutes": 5},
+    "resources": {
+        "requests": {"cpu": "1", "memory": "4Gi"},
+        "limits": {"cpu": "2", "memory": "8Gi"},  # Для батч-задач можно без GPU или с 1 GPU
+    },
+    "db_secret_name": "db-secrets",
+}
+
 # 2. БИЗНЕС-ЛОГИКА
-CONFIG = Variable.get("analytics_config", deserialize_json=True)
+# ИСПРАВЛЕНИЕ: Передаем default_var
+CONFIG = Variable.get("analytics_config", default_var=DEFAULT_CONFIG, deserialize_json=True)
 
 # 3. НАСТРОЙКИ ОТКАЗОУСТОЙЧИВОСТИ
 default_args = {
@@ -40,6 +55,8 @@ with DAG(
         image=IMAGE,
         cmds=["python", "-m", "src.jobs.batch_analytics"],
         container_resources=k8s.V1ResourceRequirements(**CONFIG["resources"]),
+        # ИСПРАВЛЕНИЕ: Подключаем сервисный аккаунт с правами RBAC
+        service_account_name="airflow-worker-sa",
         env_vars=[
             # БЕЗОПАСНАЯ ПЕРЕДАЧА СЕКРЕТА ИЗ K8S
             k8s.V1EnvVar(

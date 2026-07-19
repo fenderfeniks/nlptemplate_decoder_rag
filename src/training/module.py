@@ -36,53 +36,79 @@ class NLPModel(pl.LightningModule):
         )
         self.train_metrics = metrics.clone(prefix="train_")
         self.val_metrics = metrics.clone(prefix="val_")
+        self.test_metrics = metrics.clone(prefix="test_")
 
-    def forward(self, input_ids, attention_mask, labels=None):
-        return self.model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-
-    def training_step(self, batch, batch_idx):
-        outputs = self(
-            input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
-            labels=batch.get("labels"),
+    def forward(self, input_ids, attention_mask, labels=None, **kwargs):
+        # Прокидываем **kwargs на случай кастомных голов, которым нужны sentiment_labels и т.д.
+        return self.model(
+            input_ids=input_ids, attention_mask=attention_mask, labels=labels, **kwargs
         )
 
-        # ИСПРАВЛЕНИЕ: Поддержка нестандартных выходов (Multitask / seq2seq)
-        if hasattr(outputs, "logits"):
-            loss = self.loss_fn(outputs.logits, batch["labels"]) if self.loss_fn else outputs.loss
-            preds = torch.argmax(outputs.logits, dim=1)
+    def _extract_loss_and_logits(self, outputs, batch):
+        """
+        Универсальный экстрактор.
+        Понимает HuggingFace ModelOutput и обычные Python словари (от MultiTaskBERT).
+        """
+        # 1. Достаем loss
+        if isinstance(outputs, dict):
+            loss = outputs.get("loss")
+        else:
+            loss = getattr(outputs, "loss", None)
+
+        # 2. Достаем logits
+        if isinstance(outputs, dict):
+            logits = outputs.get("logits")
+        else:
+            logits = getattr(outputs, "logits", None)
+
+        # 3. Применяем внешнюю функцию потерь, если loss не был вычислен внутри модели
+        if loss is None and logits is not None and "labels" in batch and self.loss_fn:
+            loss = self.loss_fn(logits, batch["labels"])
+
+        if loss is None:
+            raise ValueError(
+                "Model didn't return 'loss' and no external loss_fn was able to compute it. "
+                "Check your architecture configuration."
+            )
+
+        return loss, logits
+
+    def training_step(self, batch, batch_idx):
+        outputs = self(**batch)
+        loss, logits = self._extract_loss_and_logits(outputs, batch)
+
+        if logits is not None and "labels" in batch:
+            preds = torch.argmax(logits, dim=1)
             self.train_metrics.update(preds, batch["labels"])
             self.log_dict(
                 self.train_metrics, on_step=False, on_epoch=True, prog_bar=True, logger=True
             )
-        else:
-            # Fallback для архитектур, которые сами считают итоговый лосс
-            # (например, суммируют лоссы для нескольких голов внутри себя)
-            loss = outputs.loss
-            if loss is None:
-                raise ValueError(
-                    "Model didn't return 'loss' and 'logits' are not available. Custom logic required."
-                )
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        outputs = self(
-            input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
-            labels=batch.get("labels"),
-        )
+        outputs = self(**batch)
+        loss, logits = self._extract_loss_and_logits(outputs, batch)
 
-        if hasattr(outputs, "logits"):
-            loss = self.loss_fn(outputs.logits, batch["labels"]) if self.loss_fn else outputs.loss
-            preds = torch.argmax(outputs.logits, dim=1)
+        if logits is not None and "labels" in batch:
+            preds = torch.argmax(logits, dim=1)
             self.val_metrics.update(preds, batch["labels"])
             self.log_dict(self.val_metrics, on_epoch=True, prog_bar=True, logger=True)
-        else:
-            loss = outputs.loss
 
         self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+
+    def test_step(self, batch, batch_idx):
+        outputs = self(**batch)
+        loss, logits = self._extract_loss_and_logits(outputs, batch)
+
+        if logits is not None and "labels" in batch:
+            preds = torch.argmax(logits, dim=1)
+            self.test_metrics.update(preds, batch["labels"])
+            self.log_dict(self.test_metrics, on_epoch=True, prog_bar=True, logger=True)
+
+        self.log("test_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        return loss
 
     def configure_optimizers(self):
         optimizer = instantiate(self.optimizer_cfg, params=self.model.parameters())

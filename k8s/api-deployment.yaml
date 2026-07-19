@@ -2,11 +2,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: industrial-nlp-api
-  namespace: ml-pipelines # Синхронизировали с пространством имен наших DAG-ов
+  namespace: ml-pipelines
   labels:
     app: nlp-api
 spec:
-  replicas: 1 # Начинаем с одной копии для экономии GPU
+  replicas: 1
   selector:
     matchLabels:
       app: nlp-api
@@ -15,30 +15,27 @@ spec:
       labels:
         app: nlp-api
       annotations:
-        # МАГИЯ МОНИТОРИНГА: Prometheus сам найдет это
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
         prometheus.io/path: "/metrics"
     spec:
       containers:
       - name: fastapi-server
-        image: my-company/industrial_nlp_template:latest # Синхронизировано с PROJECT_IMAGE
+        image: my-company/industrial_nlp_template:api-latest
         ports:
         - containerPort: 8000
-        
-        # Подключаем секреты 
         envFrom:
         - secretRef:
             name: nlp-api-secrets
         - configMapRef:
             name: nlp-api-config
-            
-        # Монтируем диск с моделями
         volumeMounts:
         - name: model-weights
           mountPath: /app/models
-          
-        # ЖЕЛЕЗО: Обязательно ограничиваем аппетиты модели
+        - name: data-volume
+          mountPath: /app/data
+        - name: mlruns-volume
+          mountPath: /app/mlruns
         resources:
           requests:
             cpu: "2"
@@ -46,9 +43,7 @@ spec:
           limits:
             cpu: "4"
             memory: "16Gi"
-            nvidia.com/gpu: "1" # Критично для работы ML
-
-        # READINESS: Не даем трафик, пока веса не загрузятся в VRAM
+            nvidia.com/gpu: "1"
         readinessProbe:
           httpGet:
             path: /health
@@ -56,16 +51,19 @@ spec:
           initialDelaySeconds: 15
           periodSeconds: 10
           successThreshold: 1
-
-        # LIVENESS: Убиваем, если он намертво завис
         livenessProbe:
           httpGet:
             path: /health
             port: 8000
-          initialDelaySeconds: 60 # Даем больше времени на холодный старт модели!
+          initialDelaySeconds: 60
           periodSeconds: 15
-          
       volumes:
       - name: model-weights
         persistentVolumeClaim:
           claimName: pvc-models
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: pvc-data
+      - name: mlruns-volume
+        persistentVolumeClaim:
+          claimName: pvc-mlruns

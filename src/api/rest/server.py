@@ -14,10 +14,11 @@ from hydra.core.global_hydra import GlobalHydra
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from prometheus_fastapi_instrumentator import Instrumentator
-from slowapi import Limiter, _rate_limit_exceeded_handler
+
+# ИСПРАВЛЕНИЕ: Удален импорт Limiter и get_remote_address, чтобы не затирать переменную
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 
 from src.api.rest.endpoints import chat, health
 from src.api.rest.limiter import limiter
@@ -27,11 +28,7 @@ from src.api.tg_bot.bot_webhook import dp, get_webhook_bot
 
 logger = logging.getLogger(__name__)
 
-# ИСПРАВЛЕНИЕ: Базовый слой безопасности. Если API_KEY задан в окружении,
-# FastAPI потребует заголовок X-API-Key для всех эндпоинтов (кроме исключенных).
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-limiter = Limiter(key_func=get_remote_address, default_limits=["10/minute"])
 
 
 async def verify_api_key(api_key: str = Security(api_key_header)):
@@ -43,10 +40,10 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
 
 def create_app(load_ml: bool = True) -> FastAPI:
     load_dotenv()
-    CONFIG_DIR = Path(__file__).resolve().parents[3] / "configs"
+    config_dir = Path(__file__).resolve().parents[3] / "configs"
     GlobalHydra.instance().clear()
 
-    with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base="1.3"):
+    with hydra.initialize_config_dir(config_dir=str(config_dir), version_base="1.3"):
         cfg = hydra.compose(config_name="main")
         OmegaConf.resolve(cfg)
 
@@ -66,7 +63,8 @@ def create_app(load_ml: bool = True) -> FastAPI:
             else:
                 from src.core.rag.retriever import RAGRetriever
 
-                retriever = RAGRetriever()
+                # ИСПРАВЛЕНИЕ: Передаем обязательный persist_dir из конфига
+                retriever = RAGRetriever(persist_dir=cfg.rag.persist_dir)
 
             prompt_manager = instantiate(cfg.model_module.get("prompt_manager_cfg", None))
             if not prompt_manager:
@@ -102,13 +100,12 @@ def create_app(load_ml: bool = True) -> FastAPI:
             except ImportError:
                 pass
 
-    # Подключаем зависимость глобально
+    # ИСПРАВЛЕНИЕ: Удалена глобальная зависимость verify_api_key
     app = FastAPI(
         title=cfg.api.title,
         description=cfg.api.description,
         version=cfg.api.version,
         lifespan=lifespan,
-        dependencies=[Depends(verify_api_key)],
     )
 
     app.state.limiter = limiter
@@ -118,9 +115,10 @@ def create_app(load_ml: bool = True) -> FastAPI:
     app.state.config = cfg
     setup_middlewares(app, cors_origins=list(cfg.api.cors_origins))
 
-    # Исключаем healthcheck из проверки API-ключа
+    # ИСПРАВЛЕНИЕ: Healthcheck остается открытым для K8s
     app.include_router(health.router)
-    app.include_router(chat.router)
+    # ИСПРАВЛЕНИЕ: Защищаем API-ключом только боевые эндпоинты
+    app.include_router(chat.router, dependencies=[Depends(verify_api_key)])
 
     Instrumentator(should_group_status_codes=False, should_ignore_untemplated=True).instrument(
         app
@@ -144,5 +142,4 @@ def create_app(load_ml: bool = True) -> FastAPI:
     return app
 
 
-# Глобальный инстанс для Uvicorn/Docker
 app = create_app(load_ml=True)

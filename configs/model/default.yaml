@@ -2,28 +2,23 @@ defaults:
   - _self_
   - architecture: bert_classifier
 
-# --- Базовый скелет Токенизатора ---
 tokenizer:
   _target_: src.core.models.tokenization.HFTokenizerBuilder
-  # Имя модели прилетит из файла архитектуры при слиянии
-  tokenizer_name: ${model.architecture.model_name}
+  tokenizer_name: ${model.model_name}
   use_fast: True
   padding_side: "right"
   add_eos_token: False
 
-# --- Базовый скелет Билдера Модели ---
 builder:
   _target_: src.core.models.builder.HFModelBuilder
-  model_name_or_path: ${model.architecture.model_name}
+  model_name_or_path: ${model.model_name}
   cache_dir: "${paths.hf_cache_dir}"
   trust_remote_code: False
-  # Fallback-значения (если архитектура их не перезапишет)
   auto_model_class: "transformers.AutoModel" 
   torch_dtype: "auto"
 
 generation:
   _target_: src.core.models.generation.HFTextGenerator
-  # model и tokenizer мы передадим из кода через instantiate
   generation_kwargs:
     max_new_tokens: 256
     temperature: 0.7

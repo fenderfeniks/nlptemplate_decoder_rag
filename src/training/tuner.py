@@ -52,25 +52,28 @@ class NLPOptunaTuner:
 
         # 5. Запускаем обучение
         try:
-            # Нам не нужно вызывать trainer.test(), нас интересует валидационная метрика
             trainer.fit(model=model_module, datamodule=datamodule)
-
-            # 6. Извлекаем лучшую метрику из словаря Lightning
             val_metric = trainer.callback_metrics.get(self.optuna_cfg.metric_name)
 
             if val_metric is None:
-                logger.warning(f"Метрика {self.optuna_cfg.metric_name} не найдена. Возвращаем 0.")
-                return 0.0
+                # ИСПРАВЛЕНИЕ: Динамический штраф вместо хардкода 0.0
+                failure_val = (
+                    float("inf") if self.optuna_cfg.direction == "minimize" else float("-inf")
+                )
+                logger.warning(
+                    f"Метрика {self.optuna_cfg.metric_name} не найдена. Возвращаем {failure_val}."
+                )
+                return failure_val
 
             return val_metric.item()
 
         except optuna.exceptions.TrialPruned:
-            raise  # Передаем сигнал остановки наверх в Optuna
+            raise
         except Exception as e:
             logger.error(f"Trial {trial.number} failed: {e}")
-            return 0.0
+            # ИСПРАВЛЕНИЕ: Тот же динамический штраф при падении
+            return float("inf") if self.optuna_cfg.direction == "minimize" else float("-inf")
         finally:
-            # Очистка памяти (критично для циклов в PyTorch!)
             del trainer, model_module, base_model, datamodule
             gc.collect()
             if torch.cuda.is_available():

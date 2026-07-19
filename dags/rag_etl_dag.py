@@ -1,3 +1,7 @@
+"""
+DAG: RAG Knowledge Base Update
+"""
+
 import pendulum
 from airflow import DAG
 from airflow.models import Variable
@@ -6,11 +10,27 @@ from kubernetes.client import models as k8s
 
 
 # 1. ИНФРАСТРУКТУРА
-IMAGE = Variable.get("PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:latest")
+# ИСПРАВЛЕНИЕ: Меняем тег на trainer-latest для работы с библиотеками индексации
+IMAGE = Variable.get(
+    "PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:trainer-latest"
+)
 NAMESPACE = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
 
+# ИСПРАВЛЕНИЕ: Защитный словарь-заглушка для парсера
+DEFAULT_CONFIG = {
+    "schedule": "@daily",
+    "default_args": {"owner": "mlops", "retries": 1, "retry_delay_minutes": 5},
+    "resources": {
+        "requests": {"cpu": "1", "memory": "4Gi"},
+        "limits": {"cpu": "2", "memory": "8Gi"},
+    },
+    "mount_path": "/app/data",
+    "pvc_name": "pvc-data",
+}
+
 # 2. БИЗНЕС-ЛОГИКА
-CONFIG = Variable.get("etl_config", deserialize_json=True)
+# ИСПРАВЛЕНИЕ: Передаем default_var для предотвращения ошибки отсутствия переменной
+CONFIG = Variable.get("etl_config", default_var=DEFAULT_CONFIG, deserialize_json=True)
 
 default_args = {
     "owner": CONFIG["default_args"]["owner"],
@@ -35,7 +55,8 @@ with DAG(
         namespace=NAMESPACE,
         image=IMAGE,
         cmds=["python", "-m", "src.jobs.rag_update_job"],
-        # Фиксируем data_dir на PVC: raw/knowledge_base -> processed/vector_db (FAISS)
+        # ИСПРАВЛЕНИЕ: Добавлен сервисный аккаунт
+        service_account_name="airflow-worker-sa",
         arguments=[
             f"paths.data_dir={CONFIG['mount_path']}",
             f"rag.indexer.persist_dir={CONFIG['mount_path']}/processed/vector_db",

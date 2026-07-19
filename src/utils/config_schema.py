@@ -101,14 +101,17 @@ class ModelConfig:
     builder: ModelBuilderConfig
     generation: GenerationConfig
     cleaner: ResponseCleanerConfig
-    # ВАЖНО: architecture — намеренно Any, а не строгий дата-класс.
-    # Разные архитектуры (bert_classifier / llama3_8b / bert_multitask) имеют
-    # РАЗНУЮ форму этого узла (см. configs/model/architecture/*.yaml):
-    #   - bert_classifier/llama3_8b: model_name, is_causal_lm, builder-overrides, loss_fn
-    #   - bert_multitask: _target_, num_sentiment_classes, num_category_classes, base_builder
-    # Если сделать здесь строгий дата-класс под первую форму, схема будет падать
-    # с ConfigKeyError на любой другой архитектуре (это и была причина бага).
-    architecture: Any = None
+
+    # --- ДОБАВЛЕНО: Поля, которые прилетают из файлов архитектур (# @package model) ---
+    model_name: str | None = None
+    is_causal_lm: bool | None = None
+    loss_fn: Any = None
+
+    # Специфичные поля для bert_multitask
+    _target_: str | None = None
+    base_builder: Any = None
+    num_sentiment_classes: int | None = None
+    num_category_classes: int | None = None
 
 
 @dataclass
@@ -127,15 +130,6 @@ class DataCleanerPipelineConfig:
 
 
 @dataclass
-class DataCollatorConfig:
-    _target_: str
-    max_length: int
-    text_column: str
-    target_column: str
-    is_causal_lm: bool
-
-
-@dataclass
 class DataLoaderConfig:
     _target_: str
     batch_size: int
@@ -150,18 +144,26 @@ class DataDataModuleConfig:
 
 @dataclass
 class DataConfig:
-    text_column: str
-    target_column: str
     max_length: int
     val_split_size: float
     seed: int
     preprocessing_num_workers: int
     preprocessing_batch_size: int
     cleaner: DataCleanerPipelineConfig
-    collator: DataCollatorConfig
+
+    # --- ИСПРАВЛЕНО: Any, чтобы пускать разные коллаторы (DynamicTextCollator / TripletTextCollator)
+    collator: Any
+
     dataloader: DataLoaderConfig
     datamodule: DataDataModuleConfig
     source: DataSourceConfig
+
+    # --- ИСПРАВЛЕНО: Делаем колонки опциональными для поддержки разных задач
+    text_column: str | None = None
+    target_column: str | None = None
+    anchor_column: str | None = None
+    positive_column: str | None = None
+    negative_column: str | None = None
 
 
 @dataclass

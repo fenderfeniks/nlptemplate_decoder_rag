@@ -9,12 +9,23 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from kubernetes.client import models as k8s
 
 
-# 1. ИНФРАСТРУКТУРА
-IMAGE = Variable.get("PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:latest")
+# ИНФРАСТРУКТУРА
+IMAGE = Variable.get(
+    "PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:trainer-latest"
+)
 NAMESPACE = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
 
-# 2. БИЗНЕС-ЛОГИКА
-CONFIG = Variable.get("maintenance_config", deserialize_json=True)
+# Защитный словарь
+DEFAULT_CONFIG = {
+    "schedule": "@daily",
+    "default_args": {"owner": "mlops", "retries": 1, "retry_delay_minutes": 5},
+    "resources": {"requests": {"cpu": "0.5", "memory": "1Gi"}},
+    "mlruns_mount_path": "/app/mlruns",
+    "mlruns_pvc_name": "pvc-mlruns",
+    "retention_days": 30,
+}
+
+CONFIG = Variable.get("maintenance_config", default_var=DEFAULT_CONFIG, deserialize_json=True)
 
 default_args = {
     "owner": CONFIG["default_args"]["owner"],
@@ -37,6 +48,8 @@ with DAG(
         name="cleanup-logs-pod",
         namespace=NAMESPACE,
         image=IMAGE,
+        # ИСПРАВЛЕНИЕ: Добавлен сервисный аккаунт
+        service_account_name="airflow-worker-sa",
         cmds=[
             "python",
             "-m",

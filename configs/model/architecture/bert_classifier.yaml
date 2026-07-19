@@ -1,4 +1,4 @@
-# configs/model/architecture/bert_classifier.yaml
+# @package model
 
 model_name: "DeepPavlov/rubert-base-cased"
 is_causal_lm: False
@@ -6,7 +6,6 @@ is_causal_lm: False
 builder:
   auto_model_class: "transformers.AutoModelForSequenceClassification"
   torch_dtype: "float32"
-  # Квантизации нет, поэтому Гидра не добавит этот блок
 
 loss_fn:
   _target_: torch.nn.CrossEntropyLoss

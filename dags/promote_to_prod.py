@@ -11,11 +11,21 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from kubernetes.client import models as k8s
 
 
-IMAGE = Variable.get("PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:latest")
+# ИСПРАВЛЕНИЕ: Меняем дефолтный тег на api-latest
+IMAGE = Variable.get("PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:api-latest")
 NAMESPACE = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
 
-# Можно переиспользовать training_config, чтобы получить пути к PVC
-CONFIG = Variable.get("training_config", deserialize_json=True)
+# ИСПРАВЛЕНИЕ: Защитный словарь-заглушка от краша парсера Airflow
+DEFAULT_CONFIG = {
+    "default_args": {
+        "owner": "mlops",
+    },
+    "mount_path": "/app/models",
+    "pvc_name": "model-weights-pvc",
+}
+
+# ИСПРАВЛЕНИЕ: Передаем default_var
+CONFIG = Variable.get("training_config", default_var=DEFAULT_CONFIG, deserialize_json=True)
 
 default_args = {
     "owner": CONFIG["default_args"]["owner"],
@@ -30,15 +40,15 @@ with DAG(
     catchup=False,
     tags=["nlp", "mlops", "production"],
 ) as dag:
-    # Шаг 1: Атомарное копирование весов из staging в prod
     promote_weights = KubernetesPodOperator(
         task_id="copy_weights_to_prod",
         name="promote-weights-pod",
         namespace=NAMESPACE,
         image=IMAGE,
         cmds=["bash", "-c"],
+        # ИСПРАВЛЕНИЕ: Безопасное копирование с созданием директории prod
         arguments=[
-            f"cp {CONFIG['mount_path']}/staging/best.ckpt {CONFIG['mount_path']}/prod/best.ckpt && echo 'Weights promoted!'"
+            f"mkdir -p {CONFIG['mount_path']}/prod && cp {CONFIG['mount_path']}/staging/best.ckpt {CONFIG['mount_path']}/prod/best.ckpt && echo 'Weights promoted!'"
         ],
         volume_mounts=[k8s.V1VolumeMount(name="model-weights", mount_path=CONFIG["mount_path"])],
         volumes=[
@@ -51,18 +61,21 @@ with DAG(
         ],
         get_logs=True,
         is_delete_operator_pod=True,
+        # ИСПРАВЛЕНИЕ: Подключаем сервисный аккаунт
+        service_account_name="airflow-worker-sa",
     )
 
-    # Шаг 2: Перезапуск Deployment API для подхвата новых весов
-    # Примечание: У ServiceAccount пода должны быть Role/ClusterRole с правами patch deployments
     restart_api = KubernetesPodOperator(
         task_id="restart_api_deployment",
         name="restart-api-pod",
         namespace=NAMESPACE,
         image="bitnami/kubectl:latest",
-        cmds=["kubectl", "rollout", "restart", "deployment/nlp-api-deployment", "-n", NAMESPACE],
+        # ИСПРАВЛЕНИЕ: Исправлено имя деплоймента на то, которое задано в K8s манифестах
+        cmds=["kubectl", "rollout", "restart", "deployment/industrial-nlp-api", "-n", NAMESPACE],
         get_logs=True,
         is_delete_operator_pod=True,
+        # ИСПРАВЛЕНИЕ: Подключаем сервисный аккаунт (критично для kubectl)
+        service_account_name="airflow-worker-sa",
     )
 
     promote_weights >> restart_api
