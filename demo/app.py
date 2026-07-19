@@ -33,7 +33,7 @@ if prompt := st.chat_input("Задайте вопрос по корпорати�
     with st.chat_message("assistant"):
         with st.spinner("Анализирую документы..."):
             try:
-                response = requests.post(API_URL, json=payload)
+                response = requests.post(API_URL, json=payload, timeout=15)
                 response.raise_for_status()
                 answer = response.json().get("answer", "Пустой ответ")
 
