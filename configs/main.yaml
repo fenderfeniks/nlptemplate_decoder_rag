@@ -5,6 +5,7 @@ defaults:
   - model: default
   - trainer: default
   - rag: default
+  - logger: mlflow
   - api: fastapi
   - _self_
 

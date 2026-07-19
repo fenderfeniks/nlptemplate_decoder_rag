@@ -102,7 +102,7 @@ class ModelConfig:
     generation: GenerationConfig
     cleaner: ResponseCleanerConfig
 
-    # --- ДОБАВЛЕНО: Поля, которые прилетают из файлов архитектур (# @package model) ---
+    # Поля, которые прилетают из файлов архитектур (# @package model)
     model_name: str | None = None
     is_causal_lm: bool | None = None
     loss_fn: Any = None
@@ -151,14 +151,12 @@ class DataConfig:
     preprocessing_batch_size: int
     cleaner: DataCleanerPipelineConfig
 
-    # --- ИСПРАВЛЕНО: Any, чтобы пускать разные коллаторы (DynamicTextCollator / TripletTextCollator)
     collator: Any
 
     dataloader: DataLoaderConfig
     datamodule: DataDataModuleConfig
     source: DataSourceConfig
 
-    # --- ИСПРАВЛЕНО: Делаем колонки опциональными для поддержки разных задач
     text_column: str | None = None
     target_column: str | None = None
     anchor_column: str | None = None
@@ -166,12 +164,21 @@ class DataConfig:
     negative_column: str | None = None
 
 
+# --- ДОБАВЛЕНО: Конфиг окружения ---
+@dataclass
+class EnvironmentConfig:
+    name: str
+
+
+# --- ОБНОВЛЕНО: Синхронизировано с logger/mlflow.yaml ---
 @dataclass
 class MLFlowLoggerConfig:
     _target_: str
     experiment_name: str
     tracking_uri: str
-    save_dir: str
+    run_name: str
+    log_model: bool
+    tags: dict[str, str]
 
 
 @dataclass
@@ -181,7 +188,8 @@ class TrainerConfig:
     accelerator: str
     devices: int
     precision: str
-    logger: MLFlowLoggerConfig
+    # Изменено на Any, чтобы Hydra могла без конфликтов разрезолвить ${logger}
+    logger: Any
     callbacks: list[Any] = field(default_factory=list)
 
 
@@ -245,7 +253,6 @@ class OptunaConfig:
     direction: str
     metric_name: str
     enable_pruning: bool
-    # Можно добавить путь к БД, если хочешь сохранять историю подбора
     storage: str | None = None
     study_name: str | None = None
 
@@ -254,12 +261,14 @@ class OptunaConfig:
 class ConfigSchema:
     seed: int
     project_name: str
+    environment: EnvironmentConfig
     paths: PathsConfig
     model: ModelConfig
     data: DataConfig
     trainer: TrainerConfig
     rag: RAGConfig
     api: APIConfig
+    logger: MLFlowLoggerConfig
     model_module: ModelModuleConfig
     datamodule: RootDataModuleConfig
     hydra: HydraConfig

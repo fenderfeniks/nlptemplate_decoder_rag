@@ -7,13 +7,7 @@ devices: 1
 precision: "bf16-mixed" # Индустриальный стандарт ускорения
 
 # 1. Интеграция с MLflow
-logger:
-  _target_: pytorch_lightning.loggers.MLFlowLogger
-  experiment_name: ${project_name}
-  # Создаем базу данных SQLite прямо внутри папки logs
-  tracking_uri: "sqlite:///${paths.log_dir}/mlflow.db"
-  # Туда же складываем тяжелые артефакты (папку mlruns)
-  save_dir: "${paths.log_dir}"
+logger: ${logger}
 
 # 2. Сохранение артефактов (Чекпоинтов моделей)
 callbacks:

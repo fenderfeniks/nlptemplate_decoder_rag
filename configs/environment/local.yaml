@@ -1,0 +1,11 @@
+name: local
+
+# Для локальной разработки урезаем аппетиты трейнера
+trainer:
+  max_epochs: 2
+  accelerator: auto # Автоматический выбор CPU/MPS/GPU
+  precision: 32
+
+# Включаем детальное логирование
+api:
+  log_level: DEBUG

@@ -1,0 +1,8 @@
+_target_: pytorch_lightning.loggers.MLFlowLogger
+experiment_name: industrial_nlp_${environment.name}
+# По умолчанию используем локальный сервер, в проде переопределим через переменные окружения
+tracking_uri: ${oc.env:MLFLOW_TRACKING_URI, "http://localhost:5000"}
+run_name: ${now:%Y-%m-%d_%H-%M-%S}
+log_model: True
+tags:
+  env: ${environment.name}
