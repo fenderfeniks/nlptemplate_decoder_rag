@@ -1,150 +1,144 @@
 # src/core/data/builder.py
-"""
-Модуль управления данных для NLP пайплайна.
-
-Содержит реализацию PyTorch Lightning DataModule, который инкапсулирует
-всю логику загрузки, очистки, кэширования и подготовки батчей текста.
-Поддерживает динамическую токенизацию и версионирование кэша на основе
-хэширования полной конфигурации обработки данных.
-"""
-
-import logging
-import os
-import json
 import hashlib
+import json
+import logging
+from pathlib import Path
 from typing import Any, Optional
 
 import pytorch_lightning as pl
-from omegaconf import OmegaConf
+from datasets import DatasetDict, load_from_disk
 from hydra.utils import instantiate
-from datasets import load_from_disk, DatasetDict
+from omegaconf import OmegaConf
+from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase
-
-from src.core.data.datasets import NLPDatasetAdapter
 
 logger = logging.getLogger(__name__)
 
+
 class NLPDataModule(pl.LightningDataModule):
-    """
-    Lightning DataModule для обработки текстовых данных.
+    """Универсальный DataModule для работы с NLP датасетами.
+
+    Делегирует получение сырых данных fetcher'у, разбиение — сплиттеру,
+    а подготовку данных — пайплайну трансформаций. 
+    Обработанные данные кэшируются на диске по хэшу конфигурации.
     """
 
-    def __init__(self, data_cfg: Any, tokenizer: PreTrainedTokenizerBase):
-        """
-        Инициализирует DataModule и вычисляет путь для DVC кэша.
-        """
+    def __init__(self, data_cfg: Any, tokenizer: PreTrainedTokenizerBase) -> None:
         super().__init__()
         self.data_cfg = data_cfg
         self.tokenizer = tokenizer
-        
+
+        # Хэшируем конфигурацию данных для DVC/кэширования
         hash_dict = {
-            "cleaner": OmegaConf.to_container(self.data_cfg.cleaner, resolve=True),
             "source": OmegaConf.to_container(self.data_cfg.source, resolve=True),
-            "text_column": self.data_cfg.get("text_column"),
-            "target_column": self.data_cfg.get("target_column"),
+            "splitter": OmegaConf.to_container(self.data_cfg.splitter, resolve=True),
+            # transforms — DictConfig с именованными ключами (validation, deduplication, ...),
+            # порядок определяется defaults в sft/cpt.yaml
+            "transforms": OmegaConf.to_container(self.data_cfg.transforms, resolve=True),
             "seed": self.data_cfg.get("seed"),
-            "max_length": self.data_cfg.get("max_length")
+            "tokenizer_name": getattr(tokenizer, "name_or_path", "custom_tokenizer"),
         }
-        
+
         hash_str = json.dumps(hash_dict, sort_keys=True)
-        config_hash = hashlib.md5(hash_str.encode('utf-8')).hexdigest()[:8]
-        
+        config_hash = hashlib.md5(hash_str.encode("utf-8")).hexdigest()[:8]
+
         dataset_name = self.data_cfg.get("dataset_name", "nlp_dataset")
-        
-        self.processed_dir = os.path.join(
-            self.data_cfg.paths.processed_data_dir, 
-            f"{dataset_name}_cleaned_{config_hash}"
-        )
+        self.processed_dir = Path(self.data_cfg.paths.processed_data_dir) / f"{dataset_name}_processed_{config_hash}"
+
+    def _maybe_subsample(self, dataset: Any, name: str) -> Any:
+        max_samples = self.data_cfg.get("max_samples", None)
+        if max_samples is None:
+            return dataset
+
+        n = len(dataset)
+        k = max(1, int(n * max_samples)) if isinstance(max_samples, float) else min(int(max_samples), n)
+
+        logger.info("max_samples: %s %d → %d примеров (%s)", name, n, k, max_samples)
+        return dataset.select(range(k))
 
     def prepare_data(self) -> None:
-        """
-        Скачивает сырые данные, применяет очистку и сохраняет результат на диск.
-        """
-        if os.path.exists(self.processed_dir) and not self.data_cfg.get("force_reprocess", False):
-            logger.info(f"Нашли кэш данных: {self.processed_dir}. Очистка пропущена.")
+        if self.processed_dir.exists() and not self.data_cfg.get("force_reprocess", False):
+            logger.info("Нашли кэш обработанных данных: %s. Подготовка пропущена.", self.processed_dir)
             return
 
-        logger.info("Начинаем загрузку и обработку сырых данных...")
-        
-        raw_datasets = instantiate(self.data_cfg.source)
-        
-        # Разделение на train/val/test
-        if "validation" in raw_datasets and "test" in raw_datasets:
-            raw_train = raw_datasets["train"]
-            raw_val = raw_datasets["validation"]
-            raw_test = raw_datasets["test"]
-        else:
-            # Fallback: Если сплитов нет, делаем их искусственно из train
-            split_ds = raw_datasets["train"].train_test_split(
-                test_size=self.data_cfg.val_split_size * 2, # Берем x2, чтобы поделить на val и test
-                seed=self.data_cfg.seed
-            )
-            raw_train = split_ds["train"]
-            
-            # Делим отщипнутый кусок пополам между val и test
-            val_test_split = split_ds["test"].train_test_split(test_size=0.5, seed=self.data_cfg.seed)
-            raw_val = val_test_split["train"]
-            raw_test = val_test_split["test"]
+        logger.info("Начинаем загрузку и применение трансформаций...")
 
-        cleaner_pipeline = instantiate(self.data_cfg.cleaner)
+        # 1. Загрузка данных
+        fetcher = instantiate(self.data_cfg.source)
+        raw_datasets = fetcher.load()
 
-        # Функция для минимизации дублирования кода
-        def _process_split(dataset_split):
-            return NLPDatasetAdapter(
-                hf_dataset=dataset_split, 
-                text_column=self.data_cfg.text_column, 
-                cleaning_pipeline=cleaner_pipeline,
-                num_proc=self.data_cfg.get("preprocessing_num_workers", 4),
-                batch_size=self.data_cfg.get("preprocessing_batch_size", 1000)
-            ).prepare_dataset()
+        # 2. Разбиение датасета (логика вынесена в сплиттер)
+        splitter = instantiate(self.data_cfg.splitter)
+        split_datasets = splitter(raw_datasets)
 
+        # 3. Инициализация трансформаций
+        # data.transforms — DictConfig: {validation: {...}, deduplication: {...}, ...}
+        # Порядок применения = порядок defaults в sft.yaml / cpt.yaml (Hydra его сохраняет).
+        # TokenizationTransform требует tokenizer как runtime-аргумент — пробрасываем отдельно.
+
+        transforms = []
+        for transform_cfg in self.data_cfg.transforms.values():
+            if "TokenizationTransform" in transform_cfg.get("_target_", ""):
+                transforms.append(instantiate(transform_cfg, tokenizer=self.tokenizer))
+            else:
+                transforms.append(instantiate(transform_cfg))
+
+        def _apply_transforms(dataset_split: Any) -> Any:
+            for transform in transforms:
+                dataset_split = transform(dataset_split)
+            return dataset_split
+
+        # 4. Применение пайплайна
         processed_dataset = DatasetDict({
-            "train": _process_split(raw_train),
-            "validation": _process_split(raw_val),
-            "test": _process_split(raw_test)
+            "train": _apply_transforms(self._maybe_subsample(split_datasets["train"], "train")),
+            "validation": _apply_transforms(self._maybe_subsample(split_datasets["validation"], "validation")),
+            "test": _apply_transforms(self._maybe_subsample(split_datasets["test"], "test")),
         })
-        
-        processed_dataset.save_to_disk(self.processed_dir)
-        logger.info(f"Данные успешно очищены и сохранены в {self.processed_dir}")
+
+        processed_dataset.save_to_disk(str(self.processed_dir))
+        logger.info("Данные успешно обработаны и сохранены в %s", self.processed_dir)
 
     def setup(self, stage: Optional[str] = None) -> None:
-        """
-        Загружает обработанные данные с диска в память текущего процесса.
-        """
-        processed_dataset = load_from_disk(self.processed_dir)
-        
+        processed_dataset = load_from_disk(str(self.processed_dir))
+
         if stage == "fit" or stage is None:
             self.train_dataset = processed_dataset["train"]
             self.val_dataset = processed_dataset["validation"]
-            
+
         if stage == "test" or stage is None:
             self.test_dataset = processed_dataset["test"]
 
-        self.collator = instantiate(
-            self.data_cfg.collator, 
-            tokenizer=self.tokenizer
-        )
+        if stage == "validate" or stage is None:
+            self.val_dataset = processed_dataset["validation"]
 
-    def train_dataloader(self) -> Any:
-        return instantiate(
-            self.data_cfg.dataloader,
+        self.collator = instantiate(self.data_cfg.collator, tokenizer=self.tokenizer)
+
+    def _dataloader_kwargs(self) -> dict:
+        dl_cfg = OmegaConf.to_container(self.data_cfg.dataloader, resolve=True)
+        for key in ("_target_", "dataset", "collate_fn", "shuffle"):
+            dl_cfg.pop(key, None)
+        return dl_cfg
+
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(
             dataset=self.train_dataset,
             collate_fn=self.collator,
-            shuffle=True
+            shuffle=True,
+            **self._dataloader_kwargs(),
         )
 
-    def val_dataloader(self) -> Any:
-        return instantiate(
-            self.data_cfg.dataloader,
+    def val_dataloader(self) -> DataLoader:
+        return DataLoader(
             dataset=self.val_dataset,
             collate_fn=self.collator,
-            shuffle=False
+            shuffle=False,
+            **self._dataloader_kwargs(),
         )
-        
-    def test_dataloader(self) -> Any:
-        return instantiate(
-            self.data_cfg.dataloader,
+
+    def test_dataloader(self) -> DataLoader:
+        return DataLoader(
             dataset=self.test_dataset,
             collate_fn=self.collator,
-            shuffle=False
+            shuffle=False,
+            **self._dataloader_kwargs(),
         )

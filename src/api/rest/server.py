@@ -1,7 +1,9 @@
 # src/api/rest/server.py
+import asyncio
 import gc
 import logging
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,27 +13,36 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from hydra.core.global_hydra import GlobalHydra
-from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from prometheus_fastapi_instrumentator import Instrumentator
-
-# ИСПРАВЛЕНИЕ: Удален импорт Limiter и get_remote_address, чтобы не затирать переменную
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from src.api.rest.endpoints import chat, health
+from src.api.rest.endpoints import generate, health
 from src.api.rest.limiter import limiter
 from src.api.rest.middlewares import setup_middlewares
 from src.api.tg_bot.bot_webhook import dp, get_webhook_bot
+from src.core.prompts.manager import PromptManager
+from src.sdk.inference import LLMGenerationPipeline
 
 
 logger = logging.getLogger(__name__)
-
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-async def verify_api_key(api_key: str = Security(api_key_header)):
+async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
+    """Проверяет наличие и валидность API ключа в заголовке запроса.
+
+    Args:
+        api_key: Ключ из заголовка X-API-Key.
+
+    Returns:
+        Провалидированный API ключ.
+
+    Raises:
+        HTTPException: Если ключ отсутствует или неверен.
+    """
     expected_key = os.getenv("API_KEY")
     if expected_key and api_key != expected_key:
         raise HTTPException(status_code=403, detail="Invalid or missing API Key")
@@ -39,6 +50,15 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
 
 
 def create_app(load_ml: bool = True) -> FastAPI:
+    """Фабрика для создания инстанса FastAPI.
+
+    Args:
+        load_ml: Флаг загрузки тяжелых ML-моделей в память.
+            Полезно отключать для тестов или легковесных воркеров.
+
+    Returns:
+        Сконфигурированное приложение FastAPI.
+    """
     load_dotenv()
     config_dir = Path(__file__).resolve().parents[3] / "configs"
     GlobalHydra.instance().clear()
@@ -48,40 +68,34 @@ def create_app(load_ml: bool = True) -> FastAPI:
         OmegaConf.resolve(cfg)
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.ml_models = {}
+        concurrency_limit = cfg.api.get("concurrency_limit", 1)
+        app.state.gpu_semaphore = asyncio.Semaphore(concurrency_limit)
+
+        # Передаем промпты напрямую из конфига Hydra (cfg.prompts)
+        app.state.prompt_manager = PromptManager(templates=cfg.get("prompts", {}))
 
         if load_ml:
-            logger.info("Загрузка ML моделей в видеопамять...")
-            tokenizer = instantiate(cfg.model.tokenizer).build()
-            model = instantiate(cfg.model.builder, tokenizer=tokenizer).build()
-            generator = instantiate(cfg.model.generation, model=model, tokenizer=tokenizer)
-
-            retriever_cfg = cfg.get("rag", {}).get("retriever")
-            if retriever_cfg:
-                retriever = instantiate(retriever_cfg)
-            else:
-                from src.core.rag.retriever import RAGRetriever
-
-                # ИСПРАВЛЕНИЕ: Передаем обязательный persist_dir из конфига
-                retriever = RAGRetriever(persist_dir=cfg.rag.persist_dir)
-
-            prompt_manager = instantiate(cfg.model_module.get("prompt_manager_cfg", None))
-            if not prompt_manager:
-                from src.core.models.promts import PromptManager
-
-                prompt_manager = PromptManager
-
-            app.state.ml_models["generator"] = generator
-            app.state.ml_models["retriever"] = retriever
-            app.state.ml_models["prompt_manager"] = prompt_manager
+            logger.info("Загрузка LLM в видеопамять...")
+            try:
+                # Инициализация генератора
+                generator = LLMGenerationPipeline(config_name="main")
+                app.state.ml_models["generator"] = generator
+                logger.info("LLM успешно загружена.")
+            except Exception as e:
+                logger.warning("Не удалось загрузить LLM: %s. API запустится без неё.", e)
+                app.state.ml_models["generator"] = None
 
             bot_token = os.getenv("TG_BOT_TOKEN") or cfg.api.telegram.bot_token
             if bot_token:
                 bot = get_webhook_bot(bot_token)
                 app.state.tg_bot = bot
-                webhook_url = cfg.api.telegram.webhook_url
-                await bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+                try:
+                    webhook_url = cfg.api.telegram.webhook_url
+                    await bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+                except Exception as e:
+                    logger.warning("Не удалось установить вебхук: %s", e)
 
         yield
 
@@ -100,7 +114,6 @@ def create_app(load_ml: bool = True) -> FastAPI:
             except ImportError:
                 pass
 
-    # ИСПРАВЛЕНИЕ: Удалена глобальная зависимость verify_api_key
     app = FastAPI(
         title=cfg.api.title,
         description=cfg.api.description,
@@ -112,20 +125,20 @@ def create_app(load_ml: bool = True) -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.add_middleware(SlowAPIMiddleware)
 
+    # Сохраняем полный конфиг Hydra в стейт приложения
     app.state.config = cfg
     setup_middlewares(app, cors_origins=list(cfg.api.cors_origins))
 
-    # ИСПРАВЛЕНИЕ: Healthcheck остается открытым для K8s
     app.include_router(health.router)
-    # ИСПРАВЛЕНИЕ: Защищаем API-ключом только боевые эндпоинты
-    app.include_router(chat.router, dependencies=[Depends(verify_api_key)])
+    # Регистрируем новый роутер генерации
+    app.include_router(generate.router, dependencies=[Depends(verify_api_key)])
 
     Instrumentator(should_group_status_codes=False, should_ignore_untemplated=True).instrument(
         app
     ).expose(app, include_in_schema=False, endpoint="/metrics")
 
     @app.post(cfg.api.telegram_webhook.path, include_in_schema=False)
-    async def telegram_webhook_endpoint(update: dict):
+    async def telegram_webhook_endpoint(update: dict) -> dict[str, str]:
         bot = app.state.tg_bot
         if not bot:
             raise HTTPException(status_code=503, detail="Telegram bot service is unavailable")
@@ -134,8 +147,6 @@ def create_app(load_ml: bool = True) -> FastAPI:
             update=types.Update(**update),
             cfg=cfg,
             generator=app.state.ml_models.get("generator"),
-            retriever=app.state.ml_models.get("retriever"),
-            prompt_manager=app.state.ml_models.get("prompt_manager"),
         )
         return {"status": "ok"}
 

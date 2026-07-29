@@ -1,7 +1,7 @@
 # dags/quality_control.py
-"""
-DAG: Model Evaluation & Drift Detection
-"""
+"""DAG: Model Evaluation & Quality Drift Detection (Generative LLM)."""
+
+from typing import Any
 
 import pendulum
 from airflow import DAG
@@ -11,33 +11,24 @@ from airflow.providers.slack.operators.slack_webhook import SlackWebhookOperator
 from kubernetes.client import models as k8s
 
 
-# 1. ИНФРАСТРУКТУРА
-# ИСПРАВЛЕНИЕ: Меняем тег на trainer-latest, так как оценка требует ML-окружения
-IMAGE = Variable.get(
-    "PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:trainer-latest"
-)
-NAMESPACE = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
+IMAGE: str = Variable.get("PROJECT_IMAGE", default_var="my-company/decoder_template:trainer-latest")
+NAMESPACE: str = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
 
-# ИСПРАВЛЕНИЕ: Мощный fallback-словарь для защиты парсера
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "schedule": "@weekly",
     "default_args": {"owner": "mlops", "retries": 1, "retry_delay_minutes": 5},
     "resources": {
-        "requests": {"cpu": "2", "memory": "8Gi"},
-        "limits": {"cpu": "4", "memory": "16Gi", "nvidia.com/gpu": "1"},
+        "requests": {"cpu": "1", "memory": "4Gi"},
+        "limits": {"cpu": "2", "memory": "7Gi", "nvidia.com/gpu": "1"},
     },
-    "mount_path": "/app/models",
-    "pvc_name": "model-weights-pvc",
-    # КРИТИЧНО: Задаем порог по умолчанию, чтобы избежать KeyError при парсинге
-    "drift_threshold": 0.85,
+    "rouge1_threshold": 0.45,
 }
 
-# 2. БИЗНЕС-ЛОГИКА
-# ИСПРАВЛЕНИЕ: Передаем default_var
-CONFIG = Variable.get("evaluation_config", default_var=DEFAULT_CONFIG, deserialize_json=True)
+CONFIG: dict[str, Any] = Variable.get(
+    "evaluation_config", default_var=DEFAULT_CONFIG, deserialize_json=True
+)
 
-# 3. НАСТРОЙКИ ОТКАЗОУСТОЙЧИВОСТИ
-default_args = {
+default_args: dict[str, Any] = {
     "owner": CONFIG["default_args"]["owner"],
     "depends_on_past": False,
     "start_date": pendulum.datetime(2026, 1, 1, tz="UTC"),
@@ -47,43 +38,39 @@ default_args = {
 }
 
 with DAG(
-    "model_drift_detection",
+    "llm_quality_drift_detection",
     default_args=default_args,
-    schedule_interval=CONFIG["schedule"],
+    schedule=CONFIG["schedule"],
     catchup=False,
-    tags=["nlp", "monitoring"],
+    tags=["nlp", "monitoring", "llm"],
 ) as dag:
-    # 1. Запуск оценки
     evaluate_model = KubernetesPodOperator(
-        task_id="evaluate_model",
+        task_id="evaluate_llm",
         name="evaluator-pod",
         namespace=NAMESPACE,
         image=IMAGE,
         cmds=["python", "-m", "src.eval"],
-        arguments=[f"ckpt_path={CONFIG['mount_path']}/best.ckpt"],
-        container_resources=k8s.V1ResourceRequirements(**CONFIG["resources"]),
-        volume_mounts=[k8s.V1VolumeMount(name="model-weights", mount_path=CONFIG["mount_path"])],
-        volumes=[
-            k8s.V1Volume(
-                name="model-weights",
-                persistent_volume_claim=k8s.V1PersistentVolumeClaimVolumeSource(
-                    claim_name=CONFIG["pvc_name"]
-                ),
-            )
+        arguments=[
+            f"metric_thresholds.rouge1={CONFIG['rouge1_threshold']}",
+            "model.builder.mlflow_alias=Staging",
         ],
+        env_from=[
+            k8s.V1EnvFromSource(
+                config_map_ref=k8s.V1ConfigMapEnvSource(name="decoder-template-api-config")
+            ),
+        ],
+        service_account_name="airflow-worker-sa",
+        container_resources=k8s.V1ResourceRequirements(**CONFIG["resources"]),
         get_logs=True,
         is_delete_operator_pod=True,
-        # ИСПРАВЛЕНИЕ: Подключаем сервисный аккаунт
-        service_account_name="airflow-worker-sa",
     )
 
-    # 2. Динамический алерт
-    threshold_percent = int(CONFIG["drift_threshold"] * 100)
+    threshold_percent = int(CONFIG["rouge1_threshold"] * 100)
 
     notify_slack = SlackWebhookOperator(
         task_id="alert_if_drift",
         slack_webhook_conn_id="slack_conn",
-        message=f"⚠️ Внимание! Качество модели упало ниже порога {threshold_percent}%. Нужен ретрейн.",
+        message=f"Внимание! Качество генерации (ROUGE-1) упало ниже порога {threshold_percent}%. Требуется анализ данных и дообучение.",
         trigger_rule="one_failed",
     )
 

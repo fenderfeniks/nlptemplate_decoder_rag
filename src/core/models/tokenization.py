@@ -1,13 +1,17 @@
+# src/core/models/tokenization.py
 import logging
 from typing import Optional
+
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 logger = logging.getLogger(__name__)
 
+
 class HFTokenizerBuilder:
-    """
-    Фабрика для безопасной загрузки и настройки HuggingFace токенизаторов.
-    Решает индустриальные проблемы с pad_token и padding_side.
+    """Фабрика для безопасной загрузки и настройки HuggingFace токенизаторов.
+
+    Решает индустриальные проблемы с отсутствующим pad_token и 
+    выравниванием padding_side.
     """
 
     def __init__(
@@ -17,8 +21,9 @@ class HFTokenizerBuilder:
         padding_side: str = "right",
         add_eos_token: bool = False,
         chat_template: Optional[str] = None,
-    ):
-        """
+    ) -> None:
+        """Инициализирует фабрику токенизатора.
+
         Args:
             tokenizer_name: Путь к модели на HF Hub (напр., "meta-llama/Meta-Llama-3-8B").
             use_fast: Использовать ли Rust-версию токенизатора (быстрее, стандарт де-факто).
@@ -33,10 +38,12 @@ class HFTokenizerBuilder:
         self.chat_template = chat_template
 
     def build(self) -> PreTrainedTokenizerBase:
+        """Загружает токенизатор, применяет патчи и возвращает готовый объект.
+
+        Returns:
+            Инициализированный и пропатченный токенизатор.
         """
-        Загружает токенизатор, применяет патчи и возвращает готовый объект.
-        """
-        logger.info(f"Загрузка токенизатора: {self.tokenizer_name}")
+        logger.info("Загрузка токенизатора: %s", self.tokenizer_name)
         
         tokenizer = AutoTokenizer.from_pretrained(
             self.tokenizer_name,
@@ -50,8 +57,9 @@ class HFTokenizerBuilder:
         # Индустриальный фикс для моделей семейства Llama/Mistral, у которых нет pad_token
         if tokenizer.pad_token is None:
             logger.warning(
-                f"У токенизатора {self.tokenizer_name} нет pad_token. "
-                "Устанавливаем pad_token_id = eos_token_id"
+                "У токенизатора %s нет pad_token. "
+                "Устанавливаем pad_token_id = eos_token_id",
+                self.tokenizer_name,
             )
             tokenizer.pad_token = tokenizer.eos_token
             tokenizer.pad_token_id = tokenizer.eos_token_id

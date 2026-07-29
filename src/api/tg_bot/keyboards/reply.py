@@ -1,18 +1,20 @@
-"""
-Reply-клавиатуры (нижние кнопки).
-"""
+# src/api/tg_bot/keyboards/reply.py
+"""Reply-клавиатуры (нижние кнопки)."""
 
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
-    """Главная клавиатура бота."""
+    """Создает главную клавиатуру бота с кнопкой /start.
+
+    Returns:
+        Инициализированный объект ReplyKeyboardMarkup.
+    """
     keyboard = [
-        [KeyboardButton(text="🧹 Очистить контекст")],
-        [KeyboardButton(text="⚙️ RAG: Вкл"), KeyboardButton(text="⚙️ RAG: Выкл")],
+        [KeyboardButton(text="/start")],
     ]
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
-        resize_keyboard=True,  # Кнопки будут компактными
-        input_field_placeholder="Введите ваш вопрос...",
+        resize_keyboard=True,
+        input_field_placeholder="Отправьте промпт для генерации...",
     )

@@ -1,41 +1,43 @@
 # configs/main.yaml
+# Корневой конфиг. Запуск: python train.py
+# Оверрайды через CLI: python train.py model/architecture=Qwen2.5-1.5B data=sft environment=local
+
 defaults:
+  # ── Инфраструктура ───────────────────────────────────────────────────────
   - paths: default
-  - data: default
+  - system: default                 # num_proc, num_workers, pin_memory
+  - logger/pylightning: pylightning_mlflow
+  - logger/registry: registry_mlflow
+
+  # ── Данные ───────────────────────────────────────────────────────────────
+  - data: cpt                       # sft | cpt
+  # ── Модель ───────────────────────────────────────────────────────────────
   - model: default
+
+  # ── Обучение ─────────────────────────────────────────────────────────────
+  - optimizer: adamw
+  - scheduler: cosine_warmup
   - trainer: default
-  - rag: default
-  - logger: mlflow
+
+  # ── Инференс ─────────────────────────────────────────────────────────────
+  - inference: default
+
+  # ── Прочее ───────────────────────────────────────────────────────────────
+  - prompts: default
+  - strings: default
+  # ── API ──────────────────────────────────────────────────────────────────
   - api: fastapi
+  # ── Окружение (последним! перекрывает всё ниже) ─────────────────────────────
+  - environment: local               # local | prod
   - _self_
 
-# Глобальные параметры
+# ── Глобальные параметры ─────────────────────────────────────────────────────
+# Единственное место где они объявлены. Все конфиги ссылаются через ${seed}, ${max_length}.
 seed: 42
-# ХАРДКОД: Это название будет использоваться в логах MLFlow, 
-# в путях сохранения моделей и в метаданных экспериментов.
-project_name: "industrial_nlp_template"
+max_length: 2048          # Максимальная длина последовательности — тянется в data и model
 
-# 1. Настройка оркестратора обучения (LightningModule)
-model_module:
-  _target_: src.training.module.NLPModel
-  num_classes: 2  
-  
-  optimizer_cfg:
-    _target_: torch.optim.AdamW
-    lr: 2e-5
-    weight_decay: 0.01
-    
-  loss_fn_cfg: ${model.loss_fn}
-
-# 2. Настройка DataModule
-datamodule:
-  _target_: src.core.data.NLPDataModule  # Исправлен путь импорта таргета
-  data_cfg: ${data}
-
-# --- Настройка логирования и рабочей директории Гидры ---
-hydra:
-  run:
-    # Используем project_name для формирования структуры папок
-    dir: ${paths.log_dir}/${project_name}/runs/${now:%Y-%m-%d}_${now:%H-%M-%S}
-  job:
-    chdir: True
+# ── Системные ресурсы (переопределяются в environment) ───────────────────────
+system:
+  num_proc: 4             # CPU-процессы для обработки датасета (datasets.map)
+  num_workers: 4          # DataLoader workers
+  pin_memory: true        # Ускоряет CPU→GPU трансфер при num_workers > 0

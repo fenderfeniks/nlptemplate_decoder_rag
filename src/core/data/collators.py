@@ -1,87 +1,112 @@
+# src/core/data/collators.py
+from typing import Any, Optional
+
 import torch
-from typing import Any
 from transformers import PreTrainedTokenizerBase
 
-class DynamicTextCollator:
+
+class InstructionDataCollator:
+    """Облегченный коллатор для подготовки батчей инструктивных данных.
+
+    Принимает готовые input_ids, выполняет быструю сборку батча и
+    маскирование промптов для корректного расчета Loss только по ответам.
     """
-    Коллатор для сборки батчей, токенизации и динамического паддинга.
-    """
+
     def __init__(
-        self, 
-        tokenizer: PreTrainedTokenizerBase, 
-        max_length: int = 512,
-        text_column: str = "text",
-        target_column: str = "label",
-        is_causal_lm: bool = False
-    ):
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        max_sequence_length: int = 2048,
+        response_template: Optional[str] = None,
+        mask_prompt: bool = True,
+    ) -> None:
+        """Инициализирует коллатор.
+
+        Args:
+            tokenizer: Токенизатор модели.
+            max_sequence_length: Максимальная длина последовательности.
+                По умолчанию 2048.
+            response_template: Строковый шаблон, предваряющий ответ модели
+                (используется для поиска начала ответа, если текст склеен).
+            mask_prompt: Флаг маскирования промпта (Loss не считается по вопросу).
+        """
         self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.text_column = text_column
-        self.target_column = target_column
-        self.is_causal_lm = is_causal_lm
+        self.max_sequence_length = max_sequence_length
+        self.response_template = response_template
+        self.mask_prompt = mask_prompt
+
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
-        texts = [feature[self.text_column] for feature in features]
-        
-        batch = self.tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            max_length=self.max_length,
-            return_tensors="pt"
+        """Формирует батч из списка признаков.
+
+        Args:
+            features: Список словарей с ключами `input_ids`, `attention_mask`
+                и опционально `prompt_len`.
+
+        Returns:
+            Словарь с тензорами `input_ids`, `attention_mask` и `labels`.
+        """
+        input_ids = [f["input_ids"] for f in features]
+        attention_masks = [f["attention_mask"] for f in features]
+
+        # tokenizer.pad() не поддерживает truncation — обрезаем вручную до паддинга.
+        # Это страховка: датасет должен обрезать на этапе подготовки, но если
+        # последовательность всё же длиннее max_sequence_length — clip здесь.
+        input_ids = [ids[: self.max_sequence_length] for ids in input_ids]
+        attention_masks = [mask[: self.max_sequence_length] for mask in attention_masks]
+
+        # Динамический паддинг до длины самой длинной последовательности в батче.
+        # padding="longest" + max_length устраняет UserWarning, который возникал
+        # при padding=True: тогда max_length молча игнорировался.
+        batch = self.tokenizer.pad(
+            {"input_ids": input_ids, "attention_mask": attention_masks},
+            padding="longest",
+            max_length=self.max_sequence_length,
+            return_tensors="pt",
         )
-        
-        if self.is_causal_lm:
-            labels = batch["input_ids"].clone()
-            
-            # БЕЗОПАСНАЯ МАСКИРОВКА (Защита от бага pad_token == eos_token)
-            # Если attention_mask == 0, значит это паддинг. Туда ставим -100.
-            labels[batch["attention_mask"] == 0] = -100
-            
-            batch["labels"] = labels
-            
-        elif self.target_column in features[0]:
-            targets = [feature[self.target_column] for feature in features]
-            batch["labels"] = torch.tensor(targets, dtype=torch.long)
-            
+
+        labels = batch["input_ids"].clone()
+
+        # Маскирование промпта (Loss не считается по вопросу)
+        if self.mask_prompt:
+            # Вариант А: Если промпт токенизировался отдельно (есть prompt_len)
+            if "prompt_len" in features[0]:
+                for i, f in enumerate(features):
+                    p_len = f["prompt_len"]
+                    labels[i, :p_len] = -100
+
+            # Вариант Б: Если текст был единым, ищем место входа ответа
+            elif self.response_template:
+                response_token_ids = self.tokenizer.encode(
+                    self.response_template, add_special_tokens=False
+                )
+                for i in range(len(features)):
+                    labels[i] = self._mask_labels_before_response(
+                        labels[i], response_token_ids
+                    )
+
+        # Маскируем токены паддинга
+        labels[batch["attention_mask"] == 0] = -100
+        batch["labels"] = labels
+
         return batch
-  
-    
-class TripletTextCollator:
-    """Коллатор для подготовки батчей под Triplet Loss (Anchor, Positive, Negative)."""
-    def __init__(
-        self, 
-        tokenizer: PreTrainedTokenizerBase, 
-        max_length: int = 512,
-        anchor_column: str = "anchor",
-        positive_column: str = "positive",
-        negative_column: str = "negative"
-    ):
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.anchor_col = anchor_column
-        self.pos_col = positive_column
-        self.neg_col = negative_column
 
-    def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
-        # Вспомогательная функция для токенизации списка текстов
-        def _tokenize(texts):
-            return self.tokenizer(
-                texts, padding=True, truncation=True, 
-                max_length=self.max_length, return_tensors="pt"
-            )
+    def _mask_labels_before_response(
+        self, label_row: torch.Tensor, response_token_ids: list[int]
+    ) -> torch.Tensor:
+        """Ищет шаблон ответа в токенах и маскирует все, что до него.
 
-        # Собираем три отдельных батча
-        anchor_batch = _tokenize([f[self.anchor_col] for f in features])
-        pos_batch = _tokenize([f[self.pos_col] for f in features])
-        neg_batch = _tokenize([f[self.neg_col] for f in features])
+        Args:
+            label_row: Тензор лейблов для одной последовательности.
+            response_token_ids: Список токенов, обозначающих начало ответа.
 
-        # Отдаем словарь тензоров (модель будет ждать именно эти ключи в forward)
-        return {
-            "anchor_input_ids": anchor_batch["input_ids"],
-            "anchor_attention_mask": anchor_batch["attention_mask"],
-            "pos_input_ids": pos_batch["input_ids"],
-            "pos_attention_mask": pos_batch["attention_mask"],
-            "neg_input_ids": neg_batch["input_ids"],
-            "neg_attention_mask": neg_batch["attention_mask"],
-        }
+        Returns:
+            Обновленный тензор лейблов.
+        """
+        response_len = len(response_token_ids)
+        for idx in range(len(label_row) - response_len + 1):
+            if label_row[idx : idx + response_len].tolist() == response_token_ids:
+                label_row[: idx + response_len] = -100
+                return label_row
+        return label_row

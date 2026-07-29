@@ -1,12 +1,4 @@
 # configs/api/telegram/default.yaml
-
-# ИСПРАВЛЕНИЕ: Защита от отсутствующего .env. Возвращает пустую строку, если нет переменной
-bot_token: "${oc.env:TG_BOT_TOKEN,''}"
-
-default_use_rag: true
-max_tokens: 512
-
-messages:
-  welcome: "👋 Привет! Я корпоративный ML-ассистент.\nЯ умею отвечать на вопросы, используя базу знаний компании."
-  error: "❌ Произошла ошибка при генерации ответа. Попробуйте позже."
-  thinking: "🧠 Думаю, ищу в базе..."
+bot_token: ${oc.env:TG_BOT_TOKEN,""}
+# server.py обращается к cfg.api.telegram.webhook_url
+webhook_url: "${oc.env:API_DOMAIN,'http://localhost:8000'}/webhook/telegram"

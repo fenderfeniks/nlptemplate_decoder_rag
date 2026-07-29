@@ -1,122 +1,136 @@
 # src/training/module.py
+import logging
 from typing import Any
 
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
-from torchmetrics import MetricCollection
-
-# Импортируем готовые метрики
-from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
 
 
-class NLPModel(pl.LightningModule):
+logger = logging.getLogger(__name__)
+
+
+class CausalLMLightningModule(pl.LightningModule):
+    """Чистый LightningModule для обучения Causal LM.
+
+    Поддерживает динамическое сохранение: для LoRA сохраняет только адаптеры,
+    для Full Fine-Tuning сохраняет все обучаемые веса.
+    """
+
     def __init__(
         self,
         model: torch.nn.Module,
         optimizer_cfg: Any,
-        scheduler_cfg: Any = None,
-        loss_fn_cfg: Any = None,
-        num_classes: int = 2,
-    ):
+        scheduler_cfg: Any | None = None,
+        task_mode: str = "cpt",
+    ) -> None:
         super().__init__()
         self.model = model
         self.optimizer_cfg = optimizer_cfg
         self.scheduler_cfg = scheduler_cfg
+        self.task_mode = task_mode
 
-        self.save_hyperparameters(ignore=["model"])
+        # Маршрутизация метрик: избегаем if/else на каждом шаге
+        if self.task_mode == "cpt":
+            self._compute_extra_metrics = self._log_perplexity
+        else:
+            self._compute_extra_metrics = lambda loss, phase: None
 
-        self.loss_fn = instantiate(loss_fn_cfg) if loss_fn_cfg else None
+        self.save_hyperparameters(ignore=["model", "_compute_extra_metrics"])
 
-        metrics = MetricCollection(
-            {
-                "acc": MulticlassAccuracy(num_classes=num_classes, average="macro"),
-                "f1": MulticlassF1Score(num_classes=num_classes, average="macro"),
-            }
-        )
-        self.train_metrics = metrics.clone(prefix="train_")
-        self.val_metrics = metrics.clone(prefix="val_")
-        self.test_metrics = metrics.clone(prefix="test_")
+    def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Модифицирует чекпоинт перед сохранением на диск.
 
-    def forward(self, input_ids, attention_mask, labels=None, **kwargs):
-        # Прокидываем **kwargs на случай кастомных голов, которым нужны sentiment_labels и т.д.
+        Если используется PEFT, оставляет в чекпоинте только веса адаптера
+        для экономии дискового пространства.
+        """
+        from peft import PeftModel
+        from peft.utils import get_peft_model_state_dict
+
+        if isinstance(self.model, PeftModel):
+            checkpoint["state_dict"] = get_peft_model_state_dict(
+                self.model, state_dict=checkpoint["state_dict"]
+            )
+        else:
+            pass
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        labels: torch.Tensor | None = None,
+        **kwargs: Any,
+    ) -> Any:
         return self.model(
             input_ids=input_ids, attention_mask=attention_mask, labels=labels, **kwargs
         )
 
-    def _extract_loss_and_logits(self, outputs, batch):
-        """
-        Универсальный экстрактор.
-        Понимает HuggingFace ModelOutput и обычные Python словари (от MultiTaskBERT).
-        """
-        # 1. Достаем loss
-        if isinstance(outputs, dict):
-            loss = outputs.get("loss")
-        else:
-            loss = getattr(outputs, "loss", None)
-
-        # 2. Достаем logits
-        if isinstance(outputs, dict):
-            logits = outputs.get("logits")
-        else:
-            logits = getattr(outputs, "logits", None)
-
-        # 3. Применяем внешнюю функцию потерь, если loss не был вычислен внутри модели
-        if loss is None and logits is not None and "labels" in batch and self.loss_fn:
-            loss = self.loss_fn(logits, batch["labels"])
+    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        outputs = self(**batch)
+        loss = outputs.loss
 
         if loss is None:
-            raise ValueError(
-                "Model didn't return 'loss' and no external loss_fn was able to compute it. "
-                "Check your architecture configuration."
+            raise ValueError("Модель не вернула loss. Проверь передачу labels из коллатора.")
+
+        if not torch.isfinite(loss):
+            logger.warning(
+                "batch_idx=%d: loss=%s — пропускаем батч (возврат None).", batch_idx, loss.item()
             )
-
-        return loss, logits
-
-    def training_step(self, batch, batch_idx):
-        outputs = self(**batch)
-        loss, logits = self._extract_loss_and_logits(outputs, batch)
-
-        if logits is not None and "labels" in batch:
-            preds = torch.argmax(logits, dim=1)
-            self.train_metrics.update(preds, batch["labels"])
-            self.log_dict(
-                self.train_metrics, on_step=False, on_epoch=True, prog_bar=True, logger=True
-            )
+            return None
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
-    def validation_step(self, batch, batch_idx):
-        outputs = self(**batch)
-        loss, logits = self._extract_loss_and_logits(outputs, batch)
+    def _log_perplexity(self, loss: torch.Tensor, phase: str) -> None:
+        try:
+            perplexity = torch.exp(loss)
+            self.log(f"{phase}_perplexity", perplexity, on_epoch=True, prog_bar=True, logger=True)
+        except OverflowError:
+            self.log(f"{phase}_perplexity", float("inf"), on_epoch=True, prog_bar=True, logger=True)
 
-        if logits is not None and "labels" in batch:
-            preds = torch.argmax(logits, dim=1)
-            self.val_metrics.update(preds, batch["labels"])
-            self.log_dict(self.val_metrics, on_epoch=True, prog_bar=True, logger=True)
+    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+        outputs = self(**batch)
+        loss = outputs.loss
 
         self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        self._compute_extra_metrics(loss, "val")
 
-    def test_step(self, batch, batch_idx):
+    def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
         outputs = self(**batch)
-        loss, logits = self._extract_loss_and_logits(outputs, batch)
-
-        if logits is not None and "labels" in batch:
-            preds = torch.argmax(logits, dim=1)
-            self.test_metrics.update(preds, batch["labels"])
-            self.log_dict(self.test_metrics, on_epoch=True, prog_bar=True, logger=True)
+        loss = outputs.loss
 
         self.log("test_loss", loss, on_epoch=True, prog_bar=True, logger=True)
-        return loss
+        self._compute_extra_metrics(loss, "test")
 
-    def configure_optimizers(self):
-        optimizer = instantiate(self.optimizer_cfg, params=self.model.parameters())
+    def configure_optimizers(self) -> dict[str, Any] | torch.optim.Optimizer:
+        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+
+        if not trainable_params:
+            logger.warning("Нет параметров для обучения! Проверь конфигурацию модификаторов.")
+
+        if callable(self.optimizer_cfg):
+            optimizer = self.optimizer_cfg(trainable_params)
+        else:
+            optimizer = instantiate(self.optimizer_cfg, params=trainable_params)
+
         if self.scheduler_cfg is None:
             return optimizer
 
-        scheduler = instantiate(self.scheduler_cfg, optimizer=optimizer)
+        if callable(self.scheduler_cfg):
+            total_steps = self.trainer.estimated_stepping_batches
+            if total_steps == float("inf"):
+                raise ValueError(
+                    "estimated_stepping_batches=inf: задайте max_steps в конфиге тренера."
+                )
+            scheduler = self.scheduler_cfg(optimizer=optimizer, num_training_steps=total_steps)
+        else:
+            scheduler = instantiate(self.scheduler_cfg, optimizer=optimizer)
+
         return {
             "optimizer": optimizer,
-            "lr_scheduler": {"scheduler": scheduler, "interval": "step", "frequency": 1},
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1,
+            },
         }

@@ -1,4 +1,5 @@
 # tests/conftest.py
+import asyncio
 import os
 from unittest.mock import MagicMock
 
@@ -7,69 +8,77 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 
-# Настройка окружения
+# Настройка окружения до импортов
 os.environ["PROJECT_ROOT"] = os.getcwd()
-os.environ.setdefault("PROJECT_NAME", "Test NLP API")
+os.environ.setdefault("PROJECT_NAME", "Test NLP Generator API")
 os.environ.setdefault("PROJECT_VERSION", "0.1.0")
-os.environ.setdefault("PROJECT_DESCRIPTION", "Test API")
 os.environ.setdefault("API_PORT", "8000")
 os.environ.setdefault("ENVIRONMENT", "testing")
-os.environ.setdefault("HUGGINGFACE_TOKEN", "test_token")
-# ИСПРАВЛЕНИЕ: Добавлен мок для токена телеграма, чтобы OmegaConf.resolve не падал
+os.environ.setdefault("HF_TOKEN", "test_token")
 os.environ.setdefault("TG_BOT_TOKEN", "test_bot_token")
 
-# Импортируем фабрику, а не глобальный app
-from src.api.rest.dependencies import get_generator, get_prompt_manager, get_retriever
+from src.api.rest.dependencies import get_generator, get_prompt_manager
 from src.api.rest.server import create_app
-from src.core.models.promts import PromptManager
 
 
 @pytest.fixture(scope="function")
 def test_app():
-    """Фабрика: создает чистое приложение для каждого теста без загрузки моделей."""
+    """Чистое приложение для каждого теста без загрузки ML-моделей."""
     app = create_app(load_ml=False)
-    # Инициализируем state, чтобы не было ошибок доступа
     app.state.ml_models = {}
     return app
 
 
 @pytest.fixture
 def mock_generator() -> MagicMock:
-    generator = MagicMock(name="HFTextGenerator")
-    generator.generation_kwargs = {"max_new_tokens": 256}
-    generator.generate.return_value = ["Мок-ответ модели."]
+    """Мок пайплайна — имитирует src.sdk.inference.LLMGenerationPipeline.__call__"""
+    generator = MagicMock(name="LLMGenerationPipeline")
+    # SDK возвращает список словарей
+    generator.return_value = [
+        {"prompt": "test prompt", "generated_text": "test generated response"}
+    ]
+    # Внутренний генератор, который может вызываться напрямую в некоторых сценариях
+    generator.generator = MagicMock()
+    generator.generator.generate.return_value = ["test generated response"]
     return generator
 
 
 @pytest.fixture
-def mock_retriever() -> MagicMock:
-    retriever = MagicMock(name="RAGRetriever")
-    retriever.retrieve_context.return_value = "Контекст из FAISS."
-    return retriever
+def mock_prompt_manager() -> MagicMock:
+    """Мок PromptManager."""
+    manager = MagicMock(name="PromptManager")
+    manager.render.return_value = "Rendered prompt: test"
+    return manager
 
 
 @pytest.fixture
-def override_ml_deps(test_app, mock_generator, mock_retriever):
-    """Переопределяем зависимости для экземпляра приложения test_app."""
+def override_ml_deps(test_app, mock_generator, mock_prompt_manager):
+    """Переопределяем ML-зависимости для test_app."""
     test_app.dependency_overrides[get_generator] = lambda: mock_generator
-    test_app.dependency_overrides[get_retriever] = lambda: mock_retriever
-    test_app.dependency_overrides[get_prompt_manager] = lambda: PromptManager
-
-    # Также обновляем state, если код эндпоинтов берет моки оттуда напрямую
-    test_app.state.ml_models = {
-        "generator": mock_generator,
-        "retriever": mock_retriever,
-        "prompt_manager": PromptManager,
-    }
-
+    test_app.dependency_overrides[get_prompt_manager] = lambda: mock_prompt_manager
+    test_app.state.ml_models = {"generator": mock_generator}
+    test_app.state.prompt_manager = mock_prompt_manager
+    test_app.state.gpu_semaphore = asyncio.Semaphore(1)
     yield test_app
-
     test_app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
 async def async_client(test_app, override_ml_deps):
-    """Клиент использует свежий test_app с переопределенными зависимостями."""
+    """Async HTTP-клиент с мокнутыми ML-зависимостями."""
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest.fixture(scope="session")
+def tiny_tokenizer():
+    """Минимальный реальный токенизатор для тестов коллатора и генерации."""
+    pytest.importorskip("transformers", reason="transformers not installed")
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    return tokenizer

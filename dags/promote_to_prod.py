@@ -1,8 +1,10 @@
 # dags/promote_to_prod.py
+"""DAG: Model Promotion (Manual Approval Gate).
+
+Переводит генеративную модель из Staging в Production и перезапускает API.
 """
-DAG: Model Promotion (Manual Approval Gate).
-Переводит модель из Staging в Production и перезапускает API.
-"""
+
+from typing import Any
 
 import pendulum
 from airflow import DAG
@@ -11,71 +13,68 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from kubernetes.client import models as k8s
 
 
-# ИСПРАВЛЕНИЕ: Меняем дефолтный тег на api-latest
-IMAGE = Variable.get("PROJECT_IMAGE", default_var="my-company/industrial_nlp_template:api-latest")
-NAMESPACE = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
+IMAGE: str = Variable.get("PROJECT_IMAGE", default_var="my-company/decoder_template:api-latest")
+NAMESPACE: str = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
 
-# ИСПРАВЛЕНИЕ: Защитный словарь-заглушка от краша парсера Airflow
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "default_args": {
         "owner": "mlops",
     },
     "mount_path": "/app/models",
     "pvc_name": "model-weights-pvc",
+    "deployment_name": "decoder-template-api",
+    "configmap_name": "decoder-template-api-config",
 }
 
-# ИСПРАВЛЕНИЕ: Передаем default_var
-CONFIG = Variable.get("training_config", default_var=DEFAULT_CONFIG, deserialize_json=True)
+CONFIG: dict[str, Any] = Variable.get(
+    "promotion_config", default_var=DEFAULT_CONFIG, deserialize_json=True
+)
 
-default_args = {
+default_args: dict[str, Any] = {
     "owner": CONFIG["default_args"]["owner"],
     "depends_on_past": False,
     "start_date": pendulum.datetime(2026, 1, 1, tz="UTC"),
 }
 
 with DAG(
-    "promote_to_prod",
+    "promote_llm_to_prod",
     default_args=default_args,
-    schedule_interval=None,  # СТРОГО РУЧНОЙ ЗАПУСК
+    schedule=None,  # СТРОГО РУЧНОЙ ЗАПУСК
     catchup=False,
-    tags=["nlp", "mlops", "production"],
+    tags=["nlp", "mlops", "production", "llm"],
 ) as dag:
-    promote_weights = KubernetesPodOperator(
-        task_id="copy_weights_to_prod",
-        name="promote-weights-pod",
+    promote_model = KubernetesPodOperator(
+        task_id="promote_staging_to_prod",
+        name="promote-model-pod",
         namespace=NAMESPACE,
         image=IMAGE,
-        cmds=["bash", "-c"],
-        # ИСПРАВЛЕНИЕ: Безопасное копирование с созданием директории prod
-        arguments=[
-            f"mkdir -p {CONFIG['mount_path']}/prod && cp {CONFIG['mount_path']}/staging/best.ckpt {CONFIG['mount_path']}/prod/best.ckpt && echo 'Weights promoted!'"
-        ],
-        volume_mounts=[k8s.V1VolumeMount(name="model-weights", mount_path=CONFIG["mount_path"])],
-        volumes=[
-            k8s.V1Volume(
-                name="model-weights",
-                persistent_volume_claim=k8s.V1PersistentVolumeClaimVolumeSource(
-                    claim_name=CONFIG["pvc_name"]
-                ),
-            )
+        cmds=["python", "-m", "src.jobs.promote"],
+        service_account_name="airflow-worker-sa",
+        env_from=[
+            k8s.V1EnvFromSource(
+                config_map_ref=k8s.V1ConfigMapEnvSource(name=CONFIG["configmap_name"])
+            ),
         ],
         get_logs=True,
         is_delete_operator_pod=True,
-        # ИСПРАВЛЕНИЕ: Подключаем сервисный аккаунт
-        service_account_name="airflow-worker-sa",
     )
 
     restart_api = KubernetesPodOperator(
         task_id="restart_api_deployment",
         name="restart-api-pod",
         namespace=NAMESPACE,
-        image="bitnami/kubectl:latest",
-        # ИСПРАВЛЕНИЕ: Исправлено имя деплоймента на то, которое задано в K8s манифестах
-        cmds=["kubectl", "rollout", "restart", "deployment/industrial-nlp-api", "-n", NAMESPACE],
+        image="bitnami/kubectl:1.29",
+        cmds=[
+            "kubectl",
+            "rollout",
+            "restart",
+            f"deployment/{CONFIG['deployment_name']}",
+            "-n",
+            NAMESPACE,
+        ],
         get_logs=True,
         is_delete_operator_pod=True,
-        # ИСПРАВЛЕНИЕ: Подключаем сервисный аккаунт (критично для kubectl)
         service_account_name="airflow-worker-sa",
     )
 
-    promote_weights >> restart_api
+    promote_model >> restart_api

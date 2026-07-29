@@ -1,0 +1,51 @@
+defaults:
+  - source: local
+  - splitter: default
+  - collator: sft
+  - transforms/cleaning: default
+  - transforms/validation: default
+  - transforms/deduplication: minhash
+  - transforms/tokenization: default
+  - transforms/filtering: default
+  - _self_
+
+task: "sft"
+
+dataset_name: "sft_dataset"
+seed: ${seed}               # Тянем из корня
+max_samples: null
+force_reprocess: false
+
+val_size: 0.1
+test_size: 0.1
+
+text_column: null
+prompt_column: "ru"
+target_column: "ab"
+
+max_length: ${max_length}   # Тянем из корня
+num_proc: ${system.num_proc} # Тянем из настроек системы
+batch_size: 1000
+
+cleaner:
+  _target_: src.core.data.cleaners.TextCleaningPipeline
+  cleaners: []
+
+# Вся логика путей ушла в ${paths}
+paths:
+  # Мы можем добавить специфичный префикс для SFT
+  processed_data_dir: "${paths.processed_data_dir}/sft"
+
+dataloader:
+  batch_size: 8
+  num_workers: ${system.num_workers} # Тянем из настроек системы
+  pin_memory: ${system.pin_memory}
+# ==========================================
+# ГРУППА 4: ПАРАМЕТРЫ ТРАНСФОРМАЦИЙ (токенизация, паковка)
+# Требуются transforms/tokenization и transforms/packing
+# ==========================================
+use_chat_template: false      # true — форматировать через tokenizer.apply_chat_template
+messages_column: null         # Колонка с историей диалога в формате [{role, content}]
+separator: "Перевод на абхазский: "             # Разделитель между prompt и target при конкатенации
+writer_batch_size: 1000       # Размер батча при записи в Arrow (datasets внутренний)
+drop_remainder: false         # Выбрасывать ли неполный последний чанк при паковке

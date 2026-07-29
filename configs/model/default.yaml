@@ -1,34 +1,25 @@
+# @package model
 defaults:
+  - architecture: test
+  - tokenizer: default
+  - quantization: none
+  - modifiers/embedding_resize: default
+  - modifiers/finetuning: lora
   - _self_
-  - architecture: bert_classifier
 
-tokenizer:
-  _target_: src.core.models.tokenization.HFTokenizerBuilder
-  tokenizer_name: ${model.model_name}
-  use_fast: True
-  padding_side: "right"
-  add_eos_token: False
-
+# Этот узел передается в instantiate()
 builder:
   _target_: src.core.models.builder.HFModelBuilder
-  model_name_or_path: ${model.model_name}
-  cache_dir: "${paths.hf_cache_dir}"
-  trust_remote_code: False
-  auto_model_class: "transformers.AutoModel" 
-  torch_dtype: "auto"
-
-generation:
-  _target_: src.core.models.generation.HFTextGenerator
-  generation_kwargs:
-    max_new_tokens: 256
-    temperature: 0.7
-    top_p: 0.9
-    do_sample: True
-    repetition_penalty: 1.1
-
-cleaner:
-  _target_: src.core.models.parsers.ResponseCleaner
-  strip_prompt: true
-  remove_special_tokens: true
-  remove_extra_spaces: true
-  trim_incomplete_sentence: true
+  _recursive_: false
+  
+  # Прокидываем необходимые параметры
+  model_name_or_path: ${model.architecture.model_name_or_path}
+  auto_model_class: ${model.architecture.auto_model_class}
+  cache_dir: ${paths.data_dir}/weights
+  trust_remote_code: ${model.architecture.trust_remote_code}
+  torch_dtype: ${model.architecture.torch_dtype}
+  attn_implementation: ${model.architecture.attn_implementation}
+  
+  # Прокидываем конфигурации, собранные Hydra в корне узла model
+  quantization_config: ${model.quantization}
+  modifiers: ${model.modifiers}

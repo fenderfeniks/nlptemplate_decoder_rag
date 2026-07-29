@@ -1,50 +1,39 @@
 # .github/workflows/ci.yml
-name: Python NLP CI
+name: Fake News Classifier CI
 
-# 1. ТРИГГЕРЫ: Запускаем при пуше в main И при создании Pull Request в main
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
-# 2. РАБОТЫ (Jobs)
 jobs:
   build-and-test:
     runs-on: ubuntu-latest 
 
-    # Подстраховка: задаем фейковые переменные окружения на уровне сервера
     env:
       ENVIRONMENT: testing
       TG_BOT_TOKEN: ci_dummy_token
       API_KEY: ci_dummy_key
 
     steps:
-    # Шаг 1: Клонируем код
     - name: Checkout code
       uses: actions/checkout@v4
 
-    # Шаг 2: Устанавливаем uv и Python 3.10 за один шаг + включаем кэш
     - name: Install uv and Set up Python
-      uses: astral-sh/setup-uv@v5 # Используем актуальную мажорную версию
+      uses: astral-sh/setup-uv@v5 
       with:
         python-version: "3.10"
-        enable-cache: true      # Кэширует скачанные пакеты для ускорения будущих сборок
+        enable-cache: true      
 
-    # Шаг 3: Устанавливаем зависимости проекта
-    # Флаг -e (editable) гарантирует, что импорты вида from src... будут работать корректно
     - name: Install dependencies
       run: uv pip install --system -e ".[api,dev]"
 
-    # Шаг 4: Проверяем, отформатирован ли код (заменяет Black)
     - name: Check code formatting
       run: ruff format --check .
 
-    # Шаг 5: Запускаем линтер (поиск багов и кривых импортов)
-    # --output-format=github позволяет GitHub Actions красиво подсвечивать ошибки прямо в коде PR
     - name: Run Ruff Linter
       run: ruff check --output-format=github .
 
-    # Шаг 6: Прогон всех тестов
     - name: Run Pytest
       run: pytest tests/ -v

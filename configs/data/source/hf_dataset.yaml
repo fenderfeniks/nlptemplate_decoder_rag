@@ -1,3 +1,0 @@
-# configs/data/source/hf_dataset.yaml
-_target_: datasets.load_dataset
-path: "imdb"
