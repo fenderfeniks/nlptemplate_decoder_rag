@@ -3,6 +3,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
+import torch
 from omegaconf import DictConfig, OmegaConf
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
@@ -19,7 +20,15 @@ class BaseModelModifier(ABC):
 
 
 class EmbeddingResizeModifier(BaseModelModifier):
-    """Синхронизирует размер матрицы эмбеддингов с размером словаря токенизатора."""
+    """Синхронизирует размер матрицы эмбеддингов с размером словаря токенизатора.
+
+    Применяется когда в токенизатор добавлены новые специальные токены
+    (например, для нового языка или задачи), и embedding-матрица модели
+    не покрывает весь словарь.
+
+    Новые строки инициализируются средним значением существующих эмбеддингов —
+    это устойчивый к масштабу старт, лучше нулей и случайной инициализации.
+    """
 
     def __init__(self, tokenizer: PreTrainedTokenizerBase) -> None:
         self.tokenizer = tokenizer
@@ -28,32 +37,46 @@ class EmbeddingResizeModifier(BaseModelModifier):
         vocab_size = len(self.tokenizer)
         old_vocab_size = model.config.vocab_size
 
-        if old_vocab_size != vocab_size:
-            logger.warning(
-                "Изменение размера матрицы эмбеддингов (%d -> %d). "
-                "Это увеличит потребление VRAM.",
-                old_vocab_size, vocab_size
-            )
-            model.resize_token_embeddings(vocab_size)
-
-            if vocab_size > old_vocab_size:
-                input_embeddings = model.get_input_embeddings().weight.data
-                input_mean = input_embeddings[:old_vocab_size].mean(dim=0, keepdim=True)
-                input_embeddings[old_vocab_size:] = input_mean
-
-                output_embeddings = model.get_output_embeddings()
-                if output_embeddings is not None:
-                    output_weight = output_embeddings.weight.data
-                    output_mean = output_weight[:old_vocab_size].mean(dim=0, keepdim=True)
-                    output_weight[old_vocab_size:] = output_mean
-        else:
+        if old_vocab_size == vocab_size:
             logger.info("Размер словаря совпадает (%d). Ресайз не требуется.", vocab_size)
+            return model
 
+        logger.warning(
+            "Изменение размера матрицы эмбеддингов: %d → %d. Увеличение потребления VRAM.",
+            old_vocab_size,
+            vocab_size,
+        )
+
+        # pad_to_multiple_of=8 выравнивает размер словаря до кратного 8 —
+        # это ускоряет матричные операции на Tensor Core (NVIDIA Ampere+).
+        model.resize_token_embeddings(vocab_size, pad_to_multiple_of=8)
+
+        if vocab_size > old_vocab_size:
+            # Инициализируем новые токены средним по существующим эмбеддингам.
+            # Использует no_grad() явно — resize_token_embeddings не всегда
+            # гарантирует отсутствие градиентов для новых строк.
+            with torch.no_grad():
+                input_emb = model.get_input_embeddings()
+                w = input_emb.weight.data
+                mean_vec = w[:old_vocab_size].mean(dim=0, keepdim=True)
+                w[old_vocab_size:] = mean_vec
+
+                output_emb = model.get_output_embeddings()
+                if output_emb is not None and output_emb is not input_emb:
+                    # Проверяем что lm_head — отдельная матрица (не weight-tied)
+                    ow = output_emb.weight.data
+                    out_mean = ow[:old_vocab_size].mean(dim=0, keepdim=True)
+                    ow[old_vocab_size:] = out_mean
+
+        logger.info(
+            "Ресайз завершён. Новый vocab_size модели: %d",
+            model.config.vocab_size,
+        )
         return model
 
 
 class PEFTModifier(BaseModelModifier):
-    """Подготавливает модель и применяет LoRA-адаптеры."""
+    """Подготавливает модель и применяет LoRA-адаптеры через PEFT."""
 
     def __init__(
         self,
@@ -62,6 +85,15 @@ class PEFTModifier(BaseModelModifier):
         gradient_checkpointing: bool = True,
         is_quantized: bool = True,
     ) -> None:
+        """
+        Args:
+            peft_config: DictConfig или LoraConfig с параметрами адаптера.
+            lora_resume_path: Путь к сохранённому PEFT-адаптеру для продолжения
+                обучения. ``None`` → инициализируется новый адаптер.
+            gradient_checkpointing: Включить gradient checkpointing для экономии VRAM.
+            is_quantized: Если True — вызывает ``prepare_model_for_kbit_training``
+                перед применением LoRA (обязательно для 4bit/8bit моделей).
+        """
         self.peft_config = peft_config
         self.lora_resume_path = lora_resume_path
         self.gradient_checkpointing = gradient_checkpointing
@@ -70,24 +102,24 @@ class PEFTModifier(BaseModelModifier):
     def __call__(self, model: PreTrainedModel) -> PreTrainedModel:
         from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 
-        # Подготовка к квантованному обучению (заморозка базовых весов, касты fp32)
         if self.is_quantized:
+            # prepare_model_for_kbit_training замораживает базовые веса,
+            # кастит LayerNorm в fp32 и включает checkpointing если нужно
             model = prepare_model_for_kbit_training(
                 model,
                 use_gradient_checkpointing=self.gradient_checkpointing,
             )
         elif self.gradient_checkpointing:
-            # use_reentrant=False обязателен с PyTorch ≥ 2.1 + PEFT:
+            # use_reentrant=False обязателен с PyTorch >= 2.1 + PEFT:
             # reentrant-режим несовместим с LoRA hooks и даёт некорректные градиенты
-            # для modules_to_save. Без флага PyTorch бросает UserWarning и использует
-            # устаревший путь.
+            # для modules_to_save.
             model.gradient_checkpointing_enable({"use_reentrant": False})
 
         if self.lora_resume_path is not None:
-            logger.info("PEFT: загрузка существующего адаптера из %s", self.lora_resume_path)
+            logger.info("PEFT: загрузка адаптера из '%s'", self.lora_resume_path)
             model = PeftModel.from_pretrained(model, self.lora_resume_path, is_trainable=True)
         else:
-            logger.info("PEFT: Инициализация нового LoRA адаптера.")
+            logger.info("PEFT: инициализация нового LoRA-адаптера.")
             if isinstance(self.peft_config, LoraConfig):
                 lora_config = self.peft_config
             else:
@@ -101,26 +133,39 @@ class PEFTModifier(BaseModelModifier):
             model = get_peft_model(model, lora_config)
 
         trainable, all_param = model.get_nb_trainable_parameters()
-        logger.info("LoRA: %d обучаемых из %d (%.4f%%)", trainable, all_param, 100 * trainable / all_param)
-
+        logger.info(
+            "LoRA: %d обучаемых из %d параметров (%.4f%%)",
+            trainable,
+            all_param,
+            100 * trainable / all_param,
+        )
         return model
 
+
 class FullFinetuningModifier(BaseModelModifier):
-    """Подготавливает модель для полного дообучения (Full Fine-Tuning)."""
+    """Подготавливает модель для полного дообучения (Full Fine-Tuning).
+
+    Размораживает все параметры и включает gradient checkpointing.
+    """
 
     def __init__(self, gradient_checkpointing: bool = True) -> None:
+        """
+        Args:
+            gradient_checkpointing: Включить gradient checkpointing.
+                Существенно снижает потребление VRAM при минимальном overhead по времени.
+        """
         self.gradient_checkpointing = gradient_checkpointing
 
     def __call__(self, model: PreTrainedModel) -> PreTrainedModel:
         if self.gradient_checkpointing:
-            logger.info("Активация Gradient Checkpointing для Full Fine-Tuning.")
+            logger.info("Full FT: активация gradient checkpointing.")
             model.gradient_checkpointing_enable({"use_reentrant": False})
 
-        # Принудительно размораживаем все веса (на случай, если базовый класс их заморозил)
+        # Принудительно размораживаем все веса — на случай если базовый класс
+        # или предыдущий модификатор их заморозил
         for param in model.parameters():
             param.requires_grad = True
 
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        logger.info("Full Fine-Tuning: %d обучаемых параметров (100%%)", trainable)
-
+        logger.info("Full FT: %d обучаемых параметров (100%%).", trainable)
         return model
