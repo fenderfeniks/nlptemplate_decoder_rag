@@ -1,7 +1,7 @@
 # src/api/rest/dependencies.py
 from fastapi import HTTPException, Request
 
-from decoder_pipeline.core.prompts.manager import PromptManager
+from src.decoder_pipeline.core.prompts.manager import PromptManager
 from src.sdk.inference import LLMGenerationPipeline
 
 

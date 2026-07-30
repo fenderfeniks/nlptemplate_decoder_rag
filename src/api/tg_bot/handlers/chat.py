@@ -13,8 +13,6 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from omegaconf import DictConfig
 
-from decoder_pipeline.core.prompts.manager import PromptManager
-
 # Импортируем метрики
 from src.api.metrics import (
     LLM_GENERATED_TOKENS_TOTAL,
@@ -23,6 +21,7 @@ from src.api.metrics import (
 )
 from src.api.tg_bot.keyboards.reply import get_main_keyboard
 from src.api.tg_bot.states import ChatProcess
+from src.decoder_pipeline.core.prompts.manager import PromptManager
 
 
 logger = logging.getLogger(__name__)
