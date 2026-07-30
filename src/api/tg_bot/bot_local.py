@@ -11,10 +11,10 @@ import os
 
 import hydra
 from aiogram import Bot, Dispatcher
-from decoder_pipeline.core.prompts.manager import PromptManager
 from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
+from decoder_pipeline.core.prompts.manager import PromptManager
 from src.api.tg_bot.handlers.chat import router as chat_router
 
 

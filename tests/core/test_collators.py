@@ -6,6 +6,7 @@
 
 import pytest
 import torch
+
 from decoder_pipeline.core.data.collators import InstructionDataCollator
 
 

@@ -5,6 +5,7 @@
 """
 
 import pytest
+
 from decoder_pipeline.core.data.cleaners import RegexCleaner, TextCleaningPipeline
 
 

@@ -11,8 +11,9 @@ from aiogram import F, Router, types
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from decoder_pipeline.core.prompts.manager import PromptManager
 from omegaconf import DictConfig
+
+from decoder_pipeline.core.prompts.manager import PromptManager
 
 # Импортируем метрики
 from src.api.metrics import (
