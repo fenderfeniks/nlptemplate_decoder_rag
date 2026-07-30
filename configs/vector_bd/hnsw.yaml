@@ -1,0 +1,8 @@
+# @package _global_
+vector_db:
+  _target_: src.utils.vector_db.FAISSVectorDB
+  embedding_dim: 1024
+  index_type: "hnsw"
+  m: 16
+  ef_construction: 200
+  ef_search: 50

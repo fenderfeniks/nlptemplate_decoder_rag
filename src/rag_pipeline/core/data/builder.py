@@ -1,4 +1,4 @@
-# src/rag_pipeline/core/data/builder.py
+# src/core/data/builder.py
 import hashlib
 import json
 import logging
@@ -15,11 +15,12 @@ from transformers import PreTrainedTokenizerBase
 logger = logging.getLogger(__name__)
 
 
-class RAGDataModule(pl.LightningDataModule):
-    """Универсальный DataModule для работы с RAG-датасетами.
+class NLPDataModule(pl.LightningDataModule):
+    """Универсальный DataModule для работы с NLP датасетами.
 
-    Поддерживает режимы 'indexing' и 'contrastive' за счет делегирования 
-    работы пайплайну трансформаций. Обработанные данные кэшируются на диске.
+    Делегирует получение сырых данных fetcher'у, разбиение — сплиттеру,
+    а подготовку данных — пайплайну трансформаций. 
+    Обработанные данные кэшируются на диске по хэшу конфигурации.
     """
 
     def __init__(self, data_cfg: Any, tokenizer: PreTrainedTokenizerBase) -> None:
@@ -27,10 +28,12 @@ class RAGDataModule(pl.LightningDataModule):
         self.data_cfg = data_cfg
         self.tokenizer = tokenizer
 
-        # Хэшируем конфигурацию данных
+        # Хэшируем конфигурацию данных для DVC/кэширования
         hash_dict = {
             "source": OmegaConf.to_container(self.data_cfg.source, resolve=True),
             "splitter": OmegaConf.to_container(self.data_cfg.splitter, resolve=True),
+            # transforms — DictConfig с именованными ключами (validation, deduplication, ...),
+            # порядок определяется defaults в sft/cpt.yaml
             "transforms": OmegaConf.to_container(self.data_cfg.transforms, resolve=True),
             "seed": self.data_cfg.get("seed"),
             "tokenizer_name": getattr(tokenizer, "name_or_path", "custom_tokenizer"),
@@ -39,8 +42,8 @@ class RAGDataModule(pl.LightningDataModule):
         hash_str = json.dumps(hash_dict, sort_keys=True)
         config_hash = hashlib.md5(hash_str.encode("utf-8")).hexdigest()[:8]
 
-        dataset_name = self.data_cfg.get("dataset_name", "rag_dataset")
-        self.processed_dir = Path(self.data_cfg.paths.processed_data_dir) / f"{dataset_name}_{config_hash}"
+        dataset_name = self.data_cfg.get("dataset_name", "nlp_dataset")
+        self.processed_dir = Path(self.data_cfg.paths.processed_data_dir) / f"{dataset_name}_processed_{config_hash}"
 
     def _maybe_subsample(self, dataset: Any, name: str) -> Any:
         max_samples = self.data_cfg.get("max_samples", None)
@@ -58,13 +61,20 @@ class RAGDataModule(pl.LightningDataModule):
             logger.info("Нашли кэш обработанных данных: %s. Подготовка пропущена.", self.processed_dir)
             return
 
-        logger.info("Начинаем загрузку и применение трансформаций RAG...")
+        logger.info("Начинаем загрузку и применение трансформаций...")
 
+        # 1. Загрузка данных
         fetcher = instantiate(self.data_cfg.source)
         raw_datasets = fetcher.load()
 
+        # 2. Разбиение датасета (логика вынесена в сплиттер)
         splitter = instantiate(self.data_cfg.splitter)
         split_datasets = splitter(raw_datasets)
+
+        # 3. Инициализация трансформаций
+        # data.transforms — DictConfig: {validation: {...}, deduplication: {...}, ...}
+        # Порядок применения = порядок defaults в sft.yaml / cpt.yaml (Hydra его сохраняет).
+        # TokenizationTransform требует tokenizer как runtime-аргумент — пробрасываем отдельно.
 
         transforms = []
         for transform_cfg in self.data_cfg.transforms.values():
@@ -78,6 +88,7 @@ class RAGDataModule(pl.LightningDataModule):
                 dataset_split = transform(dataset_split)
             return dataset_split
 
+        # 4. Применение пайплайна
         processed_dataset = DatasetDict({
             "train": _apply_transforms(self._maybe_subsample(split_datasets["train"], "train")),
             "validation": _apply_transforms(self._maybe_subsample(split_datasets["validation"], "validation")),
@@ -93,8 +104,10 @@ class RAGDataModule(pl.LightningDataModule):
         if stage == "fit" or stage is None:
             self.train_dataset = processed_dataset["train"]
             self.val_dataset = processed_dataset["validation"]
+
         if stage == "test" or stage is None:
             self.test_dataset = processed_dataset["test"]
+
         if stage == "validate" or stage is None:
             self.val_dataset = processed_dataset["validation"]
 

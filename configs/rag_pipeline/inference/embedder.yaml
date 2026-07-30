@@ -1,0 +1,5 @@
+# @package _self_
+_target_: src.rag_pipeline.inference.embedder.RAGInferenceEmbedder
+device: "cuda"
+precision: "bf16"
+max_length: 512

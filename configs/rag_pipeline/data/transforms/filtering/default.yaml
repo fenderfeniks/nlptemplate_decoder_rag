@@ -1,0 +1,3 @@
+_target_: src.rag_pipeline.core.data.transforms.filtering.LengthFilterTransform
+max_length: ${rag_pipeline.data.max_length}
+num_proc: ${rag_pipeline.data.num_proc}

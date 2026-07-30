@@ -1,0 +1,7 @@
+model_name_or_path: "BAAI/bge-m3"
+mlflow_model_name: "bge-m3"
+auto_model_class: "transformers.AutoModel"
+torch_dtype: "bfloat16"
+attn_implementation: "sdpa"    # sdpa: Ampere не обязателен в отличие от fa2
+trust_remote_code: false
+rope_scaling: null

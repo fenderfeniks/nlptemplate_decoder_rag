@@ -1,112 +1,93 @@
-# src/core/data/collators.py
-from typing import Any, Optional
+# src/rag_pipeline/core/data/collators.py
+from typing import Any
 
 import torch
 from transformers import PreTrainedTokenizerBase
 
 
-class InstructionDataCollator:
-    """Облегченный коллатор для подготовки батчей инструктивных данных.
-
-    Принимает готовые input_ids, выполняет быструю сборку батча и
-    маскирование промптов для корректного расчета Loss только по ответам.
+class IndexingDataCollator:
+    """Коллатор для режима подготовки векторной базы (Offline Indexing).
+    
+    Собирает батчи из текстов (и метаданных) и выполняет динамический 
+    паддинг токенизированных представлений (input_ids, attention_mask).
     """
 
-    def __init__(
-        self,
-        tokenizer: PreTrainedTokenizerBase,
-        max_sequence_length: int = 2048,
-        response_template: Optional[str] = None,
-        mask_prompt: bool = True,
-    ) -> None:
-        """Инициализирует коллатор.
-
-        Args:
-            tokenizer: Токенизатор модели.
-            max_sequence_length: Максимальная длина последовательности.
-                По умолчанию 2048.
-            response_template: Строковый шаблон, предваряющий ответ модели
-                (используется для поиска начала ответа, если текст склеен).
-            mask_prompt: Флаг маскирования промпта (Loss не считается по вопросу).
-        """
+    def __init__(self, tokenizer: PreTrainedTokenizerBase) -> None:
         self.tokenizer = tokenizer
-        self.max_sequence_length = max_sequence_length
-        self.response_template = response_template
-        self.mask_prompt = mask_prompt
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
+    def __call__(self, features: list[dict[str, Any]]) -> dict[str, Any]:
+        input_ids = [f["input_ids"] for f in features]
+        attention_masks = [f["attention_mask"] for f in features]
+
+        # Динамический паддинг до длины самого длинного элемента в батче
+        batch = self.tokenizer.pad(
+            {"input_ids": input_ids, "attention_mask": attention_masks},
+            padding=True,
+            return_tensors="pt",
+        )
+
+        # Переносим остальные поля (text, metadata), если они есть, для сохранения в БД
+        if "text" in features[0]:
+            batch["text"] = [f["text"] for f in features]
+        if "metadata" in features[0]:
+            batch["metadata"] = [f["metadata"] for f in features]
+
+        return batch
+
+
+class ContrastiveDataCollator:
+    """Коллатор для режима обучения (Contrastive Learning).
+    
+    Собирает независимые батчи для запросов (queries) и документов (positives/negatives),
+    так как они прогоняются через энкодер раздельно (или через два разных энкодера 
+    в архитектуре bi-encoder).
+    """
+
+    def __init__(self, tokenizer: PreTrainedTokenizerBase) -> None:
+        self.tokenizer = tokenizer
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
-        """Формирует батч из списка признаков.
-
-        Args:
-            features: Список словарей с ключами `input_ids`, `attention_mask`
-                и опционально `prompt_len`.
-
-        Returns:
-            Словарь с тензорами `input_ids`, `attention_mask` и `labels`.
-        """
-        input_ids = [f["input_ids"] for f in features]
-        attention_masks = [f["attention_mask"] for f in features]
-
-        # tokenizer.pad() не поддерживает truncation — обрезаем вручную до паддинга.
-        # Это страховка: датасет должен обрезать на этапе подготовки, но если
-        # последовательность всё же длиннее max_sequence_length — clip здесь.
-        input_ids = [ids[: self.max_sequence_length] for ids in input_ids]
-        attention_masks = [mask[: self.max_sequence_length] for mask in attention_masks]
-
-        # Динамический паддинг до длины самой длинной последовательности в батче.
-        # padding="longest" + max_length устраняет UserWarning, который возникал
-        # при padding=True: тогда max_length молча игнорировался.
-        batch = self.tokenizer.pad(
-            {"input_ids": input_ids, "attention_mask": attention_masks},
-            padding="longest",
-            max_length=self.max_sequence_length,
+        batch = {}
+        
+        # Паддинг для Queries
+        q_batch = self.tokenizer.pad(
+            {
+                "input_ids": [f["query_input_ids"] for f in features],
+                "attention_mask": [f["query_attention_mask"] for f in features],
+            },
+            padding=True,
             return_tensors="pt",
         )
+        batch["query_input_ids"] = q_batch["input_ids"]
+        batch["query_attention_mask"] = q_batch["attention_mask"]
 
-        labels = batch["input_ids"].clone()
+        # Паддинг для Positive Documents
+        p_batch = self.tokenizer.pad(
+            {
+                "input_ids": [f["pos_input_ids"] for f in features],
+                "attention_mask": [f["pos_attention_mask"] for f in features],
+            },
+            padding=True,
+            return_tensors="pt",
+        )
+        batch["pos_input_ids"] = p_batch["input_ids"]
+        batch["pos_attention_mask"] = p_batch["attention_mask"]
 
-        # Маскирование промпта (Loss не считается по вопросу)
-        if self.mask_prompt:
-            # Вариант А: Если промпт токенизировался отдельно (есть prompt_len)
-            if "prompt_len" in features[0]:
-                for i, f in enumerate(features):
-                    p_len = f["prompt_len"]
-                    labels[i, :p_len] = -100
-
-            # Вариант Б: Если текст был единым, ищем место входа ответа
-            elif self.response_template:
-                response_token_ids = self.tokenizer.encode(
-                    self.response_template, add_special_tokens=False
-                )
-                for i in range(len(features)):
-                    labels[i] = self._mask_labels_before_response(
-                        labels[i], response_token_ids
-                    )
-
-        # Маскируем токены паддинга
-        labels[batch["attention_mask"] == 0] = -100
-        batch["labels"] = labels
+        # Паддинг для Negative Documents (если есть)
+        if "neg_input_ids" in features[0]:
+            n_batch = self.tokenizer.pad(
+                {
+                    "input_ids": [f["neg_input_ids"] for f in features],
+                    "attention_mask": [f["neg_attention_mask"] for f in features],
+                },
+                padding=True,
+                return_tensors="pt",
+            )
+            batch["neg_input_ids"] = n_batch["input_ids"]
+            batch["neg_attention_mask"] = n_batch["attention_mask"]
 
         return batch
-
-    def _mask_labels_before_response(
-        self, label_row: torch.Tensor, response_token_ids: list[int]
-    ) -> torch.Tensor:
-        """Ищет шаблон ответа в токенах и маскирует все, что до него.
-
-        Args:
-            label_row: Тензор лейблов для одной последовательности.
-            response_token_ids: Список токенов, обозначающих начало ответа.
-
-        Returns:
-            Обновленный тензор лейблов.
-        """
-        response_len = len(response_token_ids)
-        for idx in range(len(label_row) - response_len + 1):
-            if label_row[idx : idx + response_len].tolist() == response_token_ids:
-                label_row[: idx + response_len] = -100
-                return label_row
-        return label_row

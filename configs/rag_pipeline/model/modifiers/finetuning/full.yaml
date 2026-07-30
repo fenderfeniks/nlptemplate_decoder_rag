@@ -1,0 +1,2 @@
+_target_: src.rag_pipeline.core.models.modifiers.FullFinetuningModifier
+gradient_checkpointing: true

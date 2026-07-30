@@ -9,7 +9,7 @@ import pytest
 class TestDriftDetection:
     def test_exits_1_when_perplexity_above_threshold(self) -> None:
         """Perplexity выше порога означает деградацию, скрипт падает с exit(1)."""
-        from scripts.eval import _check_drift
+        from scripts.decoder_pipeline.eval import _check_drift
 
         with pytest.raises(SystemExit) as exc_info:
             _check_drift(
@@ -21,7 +21,7 @@ class TestDriftDetection:
 
     def test_does_not_exit_when_perplexity_below_threshold(self) -> None:
         """Perplexity ниже порога означает, что модель в норме."""
-        from scripts.eval import _check_drift
+        from scripts.decoder_pipeline.eval import _check_drift
 
         _check_drift(
             metrics={"test_perplexity": 15.0, "test_loss": 2.7},
@@ -31,7 +31,7 @@ class TestDriftDetection:
 
     def test_exits_1_when_loss_above_threshold(self) -> None:
         """Проверка для test_loss (меньше — лучше)."""
-        from scripts.eval import _check_drift
+        from scripts.decoder_pipeline.eval import _check_drift
 
         with pytest.raises(SystemExit) as exc_info:
             _check_drift(
@@ -43,7 +43,7 @@ class TestDriftDetection:
 
     def test_warns_when_metric_key_missing(self) -> None:
         """Если ключ метрики отсутствует, выводится warning без падения."""
-        from scripts.eval import _check_drift
+        from scripts.decoder_pipeline.eval import _check_drift
 
         with patch("logging.Logger.warning") as mock_warn:
             _check_drift(
@@ -65,7 +65,7 @@ class TestDriftDetection:
     def test_various_perplexity_values(
         self, perplexity: float, threshold: float, should_exit: bool
     ) -> None:
-        from scripts.eval import _check_drift
+        from scripts.decoder_pipeline.eval import _check_drift
 
         if should_exit:
             with pytest.raises(SystemExit):

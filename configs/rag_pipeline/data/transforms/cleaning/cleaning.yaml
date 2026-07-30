@@ -1,0 +1,11 @@
+_target_: src.rag_pipeline.core.data.transforms.validation.CleaningTransform
+# Перечисляем все возможные колонки. Класс сам отфильтрует отсутствующие.
+columns_to_clean:
+  - ${rag_pipeline.data.text_column}
+  - ${rag_pipeline.data.query_column}
+  - ${rag_pipeline.data.positive_column}
+  - ${rag_pipeline.data.negative_column}
+num_proc: ${rag_pipeline.data.num_proc}
+batch_size: ${rag_pipeline.data.batch_size}
+# Инжектим собранный пайплайн клинеров (regex и т.д.) из родительского конфига
+pipeline: ${rag_pipeline.data.cleaner}

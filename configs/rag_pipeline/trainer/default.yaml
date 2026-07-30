@@ -1,0 +1,39 @@
+defaults:
+  - callbacks/checkpoint@callbacks.model_checkpoint
+  - callbacks/lr_monitor@callbacks.lr_monitor
+  - callbacks/rich_progress@callbacks.rich_progress_bar
+  - callbacks/retrieval_eval@callbacks.retrieval_eval
+  - _self_
+
+_target_: pytorch_lightning.Trainer
+default_root_dir: ${paths.log_dir}
+
+# ── Железо ───────────────────────────────────────────────────────────────────
+accelerator: "gpu"
+devices: 1
+precision: "bf16-mixed"
+
+# ── Длина обучения ───────────────────────────────────────────────────────────
+max_steps: 2000
+max_epochs: -1
+
+# ── Валидация ────────────────────────────────────────────────────────────────
+val_check_interval: 200
+check_val_every_n_epoch: null
+
+# ── Батчинг ──────────────────────────────────────────────────────────────────
+# Для MNRL accumulate_grad_batches ломает математику in-batch negatives!
+# Устанавливаем в 1. Батч-сайз нужно увеличивать за счет GPU VRAM, а не градиентов.
+accumulate_grad_batches: 1
+
+# ── Градиенты ────────────────────────────────────────────────────────────────
+gradient_clip_val: 1.0
+gradient_clip_algorithm: "norm"
+
+# ── Логирование ──────────────────────────────────────────────────────────────
+log_every_n_steps: 10
+logger: ${logger.pylightning}
+
+# ── Прочее ───────────────────────────────────────────────────────────────────
+num_sanity_val_steps: 2
+deterministic: false
