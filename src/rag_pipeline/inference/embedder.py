@@ -1,6 +1,5 @@
 # src/rag_pipeline/inference/embedder.py
 import logging
-from typing import Any
 
 import numpy as np
 import torch

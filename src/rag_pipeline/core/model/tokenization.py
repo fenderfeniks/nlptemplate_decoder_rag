@@ -1,8 +1,8 @@
 # src/core/models/tokenization.py
 import logging
-from typing import Optional
 
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
+
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class HFTokenizerBuilder:
     """Фабрика для безопасной загрузки и настройки HuggingFace токенизаторов.
 
-    Решает индустриальные проблемы с отсутствующим pad_token и 
+    Решает индустриальные проблемы с отсутствующим pad_token и
     выравниванием padding_side.
     """
 
@@ -20,7 +20,7 @@ class HFTokenizerBuilder:
         use_fast: bool = True,
         padding_side: str = "right",
         add_eos_token: bool = False,
-        chat_template: Optional[str] = None,
+        chat_template: str | None = None,
     ) -> None:
         """Инициализирует фабрику токенизатора.
 
@@ -44,7 +44,7 @@ class HFTokenizerBuilder:
             Инициализированный и пропатченный токенизатор.
         """
         logger.info("Загрузка токенизатора: %s", self.tokenizer_name)
-        
+
         tokenizer = AutoTokenizer.from_pretrained(
             self.tokenizer_name,
             use_fast=self.use_fast,
@@ -57,8 +57,7 @@ class HFTokenizerBuilder:
         # Индустриальный фикс для моделей семейства Llama/Mistral, у которых нет pad_token
         if tokenizer.pad_token is None:
             logger.warning(
-                "У токенизатора %s нет pad_token. "
-                "Устанавливаем pad_token_id = eos_token_id",
+                "У токенизатора %s нет pad_token. Устанавливаем pad_token_id = eos_token_id",
                 self.tokenizer_name,
             )
             tokenizer.pad_token = tokenizer.eos_token

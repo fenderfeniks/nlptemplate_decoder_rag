@@ -1,6 +1,6 @@
 # src/rag_pipeline/training/module.py
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import pytorch_lightning as pl
 import torch
@@ -19,7 +19,7 @@ class RAGLightningModule(pl.LightningModule):
         pooler: torch.nn.Module,
         loss_fn: torch.nn.Module,
         optimizer_cfg: Any,
-        scheduler_cfg: Optional[Any] = None,
+        scheduler_cfg: Any | None = None,
     ) -> None:
         super().__init__()
         self.model = model

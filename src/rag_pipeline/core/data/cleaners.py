@@ -42,12 +42,17 @@ class RegexCleaner(BaseCleaner):
     def clean(self, text: str) -> str:
         """Применяет регулярное выражение к тексту.
 
+        Если text не является строкой (например, None из HF датасета),
+        возвращает его без изменений.
+
         Args:
             text: Исходный текст.
 
         Returns:
             Текст после применения регулярного выражения.
         """
+        if not isinstance(text, str):
+            return text
         return self.pattern.sub(self.replacement, text)
 
 
@@ -65,12 +70,16 @@ class TextCleaningPipeline:
     def __call__(self, text: str) -> str:
         """Прогоняет текст через все клинеры по очереди.
 
+        Если text не является строкой, возвращает его без изменений.
+
         Args:
             text: Исходный текст.
 
         Returns:
             Текст после прохождения всех этапов очистки.
         """
+        if not isinstance(text, str):
+            return text
         for cleaner in self.cleaners:
             text = cleaner.clean(text)
         return text

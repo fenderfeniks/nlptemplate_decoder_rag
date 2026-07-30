@@ -1,7 +1,7 @@
 # src/core/models/builder.py
 import importlib
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from hydra.utils import instantiate
@@ -19,16 +19,16 @@ class HFModelBuilder:
         self,
         model_name_or_path: str,
         auto_model_class: str = "transformers.AutoModel",
-        cache_dir: Optional[str] = None,
-        quantization_config: Optional[Any] = None,
+        cache_dir: str | None = None,
+        quantization_config: Any | None = None,
         trust_remote_code: bool = False,
         torch_dtype: str = "auto",
-        attn_implementation: Optional[str] = "flash_attention_2",
-        rope_scaling: Optional[dict[str, Any]] = None,
+        attn_implementation: str | None = "flash_attention_2",
+        rope_scaling: dict[str, Any] | None = None,
         # modifiers — DictConfig из model.modifiers (embedding_resize, finetuning, ...).
         # Не список: Hydra мержит подгруппы как dict с ключами по имени группы.
         # build() итерирует .values() в порядке defaults из model/default.yaml.
-        modifiers: Optional[Any] = None,
+        modifiers: Any | None = None,
     ) -> None:
         self.model_name_or_path = model_name_or_path
         self.auto_model_class = auto_model_class
@@ -39,10 +39,10 @@ class HFModelBuilder:
         self.attn_implementation = attn_implementation
         self.rope_scaling = rope_scaling
         self.modifiers_cfg = modifiers  # DictConfig | None
-        self.lora_resume_path: Optional[str] = None  # устанавливается снаружи через train.py
+        self.lora_resume_path: str | None = None  # устанавливается снаружи через train.py
 
     @staticmethod
-    def _resolve_attn_implementation(requested: Optional[str]) -> Optional[str]:
+    def _resolve_attn_implementation(requested: str | None) -> str | None:
         """Выбирает реализацию внимания с автоматическим fallback.
 
         Flash Attention 2 требует:
@@ -79,7 +79,7 @@ class HFModelBuilder:
         logger.info("Flash Attention 2: железо и пакет совместимы, используем fa2.")
         return "flash_attention_2"
 
-    def _build_modifiers(self, tokenizer: Any, lora_resume_path: Optional[str] = None) -> list:
+    def _build_modifiers(self, tokenizer: Any, lora_resume_path: str | None = None) -> list:
         """Инстанциирует модификаторы из DictConfig в порядке defaults.
 
         Порядок ключей в model.modifiers соответствует порядку в defaults

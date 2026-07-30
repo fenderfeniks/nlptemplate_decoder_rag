@@ -1,7 +1,6 @@
 # src/rag_pipeline/indexing/indexer.py
 import hashlib
 import logging
-from typing import Any
 
 import numpy as np
 import torch

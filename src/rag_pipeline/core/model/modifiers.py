@@ -1,10 +1,11 @@
 # src/core/models/modifiers.py
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class EmbeddingResizeModifier(BaseModelModifier):
         if old_vocab_size != vocab_size:
             logger.warning(
                 "Изменение размера матрицы эмбеддингов (%d -> %d). "
-                "Это увеличит потребление VRAM.", 
+                "Это увеличит потребление VRAM.",
                 old_vocab_size, vocab_size
             )
             model.resize_token_embeddings(vocab_size)
@@ -55,9 +56,9 @@ class PEFTModifier(BaseModelModifier):
     """Подготавливает модель и применяет LoRA-адаптеры."""
 
     def __init__(
-        self, 
-        peft_config: Any, 
-        lora_resume_path: Optional[str] = None,
+        self,
+        peft_config: Any,
+        lora_resume_path: str | None = None,
         gradient_checkpointing: bool = True,
         is_quantized: bool = True,
     ) -> None:
@@ -96,7 +97,7 @@ class PEFTModifier(BaseModelModifier):
                     else dict(self.peft_config)
                 )
                 lora_config = LoraConfig(**peft_dict)
-                
+
             model = get_peft_model(model, lora_config)
 
         trainable, all_param = model.get_nb_trainable_parameters()
@@ -114,12 +115,12 @@ class FullFinetuningModifier(BaseModelModifier):
         if self.gradient_checkpointing:
             logger.info("Активация Gradient Checkpointing для Full Fine-Tuning.")
             model.gradient_checkpointing_enable({"use_reentrant": False})
-        
+
         # Принудительно размораживаем все веса (на случай, если базовый класс их заморозил)
         for param in model.parameters():
             param.requires_grad = True
-            
+
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         logger.info("Full Fine-Tuning: %d обучаемых параметров (100%%)", trainable)
-        
+
         return model

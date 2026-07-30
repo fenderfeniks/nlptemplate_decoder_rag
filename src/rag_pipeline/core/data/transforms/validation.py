@@ -5,6 +5,7 @@ from typing import Any, Optional
 from datasets import Dataset as HFDataset
 from pydantic import ValidationError
 
+from src.rag_pipeline.core.data.cleaners import TextCleaningPipeline
 from src.rag_pipeline.core.data.schemas import RAGIndexingRecord, RAGTrainingRecord
 from src.rag_pipeline.core.data.transforms.base import BaseDatasetTransform
 
@@ -15,9 +16,15 @@ class ValidationTransform(BaseDatasetTransform):
     """Фильтрует датасет через Pydantic-схемы RAG.
 
     Режимы:
-    - 'indexing' -> проверяет колонку `text` и опционально `metadata`
-    - 'contrastive' -> проверяет `query`, `positive_doc` и `negative_doc`
+    - ``'indexing'``: проверяет колонку ``text`` и опционально ``metadata``.
+    - ``'contrastive'``: проверяет ``query``, ``positive_doc`` и ``negative_doc``.
+
+    Невалидные записи помечаются пустой строкой и удаляются вторым проходом filter,
+    что позволяет запускать map параллельно (filter по условию быстрее, чем
+    сохранение индексов внутри map).
     """
+
+    _VALID_MODES = ("indexing", "contrastive")
 
     def __init__(
         self,
@@ -29,6 +36,11 @@ class ValidationTransform(BaseDatasetTransform):
         num_proc: int = 4,
         batch_size: int = 1000,
     ) -> None:
+        if mode not in self._VALID_MODES:
+            raise ValueError(
+                f"Неизвестный режим валидации: '{mode}'. "
+                f"Допустимые значения: {self._VALID_MODES}"
+            )
         self.mode = mode
         self.text_column = text_column
         self.query_column = query_column
@@ -49,7 +61,11 @@ class ValidationTransform(BaseDatasetTransform):
                 num_proc=self.num_proc,
                 desc="Validating indexing records",
             )
-            dataset = dataset.filter(lambda x: bool(x[self.text_column]), num_proc=self.num_proc)
+            dataset = dataset.filter(
+                lambda x: bool(x[self.text_column]),
+                num_proc=self.num_proc,
+            )
+
         elif self.mode == "contrastive":
             dataset = dataset.map(
                 self._validate_contrastive_batch,
@@ -58,33 +74,46 @@ class ValidationTransform(BaseDatasetTransform):
                 num_proc=self.num_proc,
                 desc="Validating contrastive records",
             )
-            dataset = dataset.filter(lambda x: bool(x[self.query_column]), num_proc=self.num_proc)
-        else:
-            raise ValueError(f"Неизвестный режим валидации: {self.mode}")
+            dataset = dataset.filter(
+                lambda x: bool(x[self.query_column]),
+                num_proc=self.num_proc,
+            )
 
-        logger.info("Валидация завершена: %d -> %d записей", initial_count, len(dataset))
+        logger.info(
+            "Валидация завершена: %d → %d записей (отброшено %d)",
+            initial_count, len(dataset), initial_count - len(dataset),
+        )
         return dataset
 
-    def _validate_indexing_batch(self, batch: dict[str, list[Any]]) -> dict[str, list[Any]]:
-        valid_texts, valid_meta = [], []
-        # Если метаданных нет в датасете, создаем пустые словари
-        meta_col = batch.get("metadata", [{}] * len(batch[self.text_column]))
+    def _validate_indexing_batch(
+        self, batch: dict[str, list[Any]]
+    ) -> dict[str, list[Any]]:
+        valid_texts: list[str] = []
+        valid_meta: list[dict] = []
 
-        for text, meta in zip(batch.get(self.text_column, []), meta_col):
+        texts = batch.get(self.text_column, [])
+        # Если колонки metadata нет — подставляем пустые словари
+        meta_col: list = batch.get("metadata", [{}] * len(texts))
+
+        for text, meta in zip(texts, meta_col):
             try:
-                record = RAGIndexingRecord(text=text, metadata=meta)
+                record = RAGIndexingRecord(text=text, metadata=meta or {})
                 valid_texts.append(record.text)
                 valid_meta.append(record.metadata)
             except ValidationError as e:
                 logger.debug("Отброшена битая запись (indexing): %s", e)
                 valid_texts.append("")
                 valid_meta.append({})
-                
+
         return {self.text_column: valid_texts, "metadata": valid_meta}
 
-    def _validate_contrastive_batch(self, batch: dict[str, list[Any]]) -> dict[str, list[Any]]:
-        valid_queries, valid_pos, valid_neg = [], [], []
-        
+    def _validate_contrastive_batch(
+        self, batch: dict[str, list[Any]]
+    ) -> dict[str, list[Any]]:
+        valid_queries: list[str] = []
+        valid_pos: list[str] = []
+        valid_neg: list[Optional[str]] = []
+
         queries = batch.get(self.query_column, [])
         positives = batch.get(self.positive_column, [])
         negatives = batch.get(self.negative_column, [None] * len(queries))
@@ -100,40 +129,61 @@ class ValidationTransform(BaseDatasetTransform):
                 valid_queries.append("")
                 valid_pos.append("")
                 valid_neg.append(None)
-                
+
         return {
             self.query_column: valid_queries,
             self.positive_column: valid_pos,
-            self.negative_column: valid_neg
+            self.negative_column: valid_neg,
         }
 
 
 class CleaningTransform(BaseDatasetTransform):
-    """Трансформация для очистки текста через кастомные клинеры."""
+    """Трансформация для очистки текста через кастомные клинеры.
+
+    Список ``columns_to_clean`` может содержать ``None`` (Hydra интерполирует
+    отсутствующие поля как ``null``). Такие значения фильтруются автоматически.
+    Колонки, которых нет в датасете, тоже пропускаются без ошибки.
+    """
 
     def __init__(
         self,
-        pipeline,
-        columns_to_clean: list[str] = ["text", "query", "positive_doc", "negative_doc"],
+        pipeline: TextCleaningPipeline,
+        columns_to_clean: list[Optional[str]],
         num_proc: int = 4,
         batch_size: int = 1000,
     ) -> None:
+        """
+        Args:
+            pipeline: Инстанс TextCleaningPipeline с набором клинеров.
+            columns_to_clean: Список имён колонок для очистки. Значения None
+                (например, от Hydra-интерполяции null-полей) игнорируются.
+            num_proc: Число процессов для параллельного map.
+            batch_size: Размер батча.
+        """
         self.pipeline = pipeline
-        self.columns_to_clean = columns_to_clean
+        # Убираем None сразу при инициализации — нет смысла проверять их каждый раз
+        self.columns_to_clean: list[str] = [c for c in columns_to_clean if c is not None]
         self.num_proc = num_proc
         self.batch_size = batch_size
 
     def __call__(self, dataset: HFDataset) -> HFDataset:
-        logger.info("Применение пайплайна очистки текста...")
+        # Пересекаем с реальными колонками датасета
+        active_cols = [c for c in self.columns_to_clean if c in dataset.column_names]
 
-        # Оставляем в списке только те колонки, которые реально есть в датасете
-        active_cols = [col for col in self.columns_to_clean if col in dataset.column_names]
+        if not active_cols:
+            logger.info(
+                "CleaningTransform: ни одна из колонок %s не найдена в датасете — пропущено.",
+                self.columns_to_clean,
+            )
+            return dataset
+
+        logger.info("Применение пайплайна очистки текста по колонкам: %s...", active_cols)
 
         def _clean_batch(batch: dict[str, list[Any]]) -> dict[str, list[Any]]:
-            res = {}
-            for col in active_cols:
-                res[col] = [self.pipeline(t) if t is not None else None for t in batch[col]]
-            return res
+            return {
+                col: [self.pipeline(t) for t in batch[col]]
+                for col in active_cols
+            }
 
         return dataset.map(
             _clean_batch,

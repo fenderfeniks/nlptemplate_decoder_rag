@@ -1,7 +1,9 @@
 _target_: src.rag_pipeline.core.data.transforms.deduplication.MinHashDeduplicationTransform
-text_column: ${rag_pipeline.data.text_column}
-prompt_column: ${rag_pipeline.data.prompt_column}
-num_perm: 128          # 128 - стандартный баланс скорости и точности
-threshold: 0.85        # Тексты, совпадающие на 85%, будут считаться дубликатами
-ngram_size: 5          # Разбиваем на окна по 5 слов
+# Для indexing-режима дедупликация по тексту документа.
+# При необходимости можно добавить несколько колонок — значения склеиваются перед хэшированием.
+target_columns:
+  - ${rag_pipeline.data.text_column}
+num_perm: 128          # Стандартный баланс скорости и точности
+threshold: 0.85        # Тексты, совпадающие на 85% по Jaccard, считаются дубликатами
+ngram_size: 5          # Окно по 5 словам (шинглы)
 num_proc: ${system.num_proc}

@@ -6,3 +6,13 @@ vector_db:
   m: 16
   ef_construction: 200
   ef_search: 50
+  # Нормализация обязательна для HNSW: METRIC_INNER_PRODUCT == косинусное сходство
+  # только для L2-единичных векторов.
+  normalize_embeddings: true
+  # Батчевая индексация: сколько векторов добавляется за один insert_batched вызов.
+  insert_batch_size: 10000
+  # Начальный множитель over-fetch при поиске с фильтром по метаданным.
+  # При filter_metadata поиск начнёт с top_k * filter_fetch_multiplier кандидатов
+  # и будет удваивать до filter_max_fetch_multiplier, пока не наберёт top_k.
+  filter_fetch_multiplier: 5
+  filter_max_fetch_multiplier: 50
