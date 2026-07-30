@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 def merge_and_export(cfg: DictConfig) -> None:
     """Сливает LoRA адаптер с базовой моделью."""
 
-    base_model_name = cfg.main_model.model.architecture.model_name_or_path
+    base_model_name = cfg.decoder_pipeline.model.architecture.model_name_or_path
     cache_dir = cfg.paths.hf_cache_dir
 
     # Проверяем кеш перед загрузкой — HF хранит как models--<org>--<name>/
@@ -56,7 +56,7 @@ def merge_and_export(cfg: DictConfig) -> None:
     tracking_uri = cfg.logger.pylightning.tracking_uri
     logger.info("MLflow tracking URI из конфига: %s", tracking_uri)
 
-    mlflow_model_name = cfg.main_model.model.architecture.mlflow_model_name
+    mlflow_model_name = cfg.decoder_pipeline.model.architecture.mlflow_model_name
 
     lora_cfg = OmegaConf.create(
         {
@@ -80,7 +80,7 @@ def merge_and_export(cfg: DictConfig) -> None:
         merged_model.generation_config.pad_token_id = tokenizer.eos_token_id
 
     model_short_name = Path(base_model_name).name
-    output_path = Path(cfg.paths.root_dir) / "models" / f"merged_{model_short_name}"
+    output_path = Path(cfg.paths.model_dir) / f"merged_{model_short_name}"
     output_path.mkdir(parents=True, exist_ok=True)
 
     logger.info("Сохранение монолитной модели в: %s", output_path)

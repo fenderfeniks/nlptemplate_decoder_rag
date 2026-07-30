@@ -11,7 +11,7 @@ system:
   num_workers: 4
   pin_memory: true
 
-main_model:
+decoder_pipeline:
   trainer:
     accelerator: "gpu"
     precision: "bf16-mixed"

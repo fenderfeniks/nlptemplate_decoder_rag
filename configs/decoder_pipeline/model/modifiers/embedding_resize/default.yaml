@@ -1,0 +1,2 @@
+_target_: src.decoder_pipeline.core.models.modifiers.EmbeddingResizeModifier
+tokenizer: ${decoder_pipeline.model.tokenizer}

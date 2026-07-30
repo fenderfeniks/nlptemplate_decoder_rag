@@ -1,0 +1,57 @@
+defaults:
+  - source: local
+  - splitter: default
+  - collator: cpt
+  - transforms/cleaning: default
+  - transforms/validation: default
+  - transforms/deduplication: minhash
+  - transforms/tokenization: default
+  - transforms/filtering: default
+  - transforms/packing: default  # Обязательный шаг для CPT
+  - _self_
+
+task: "cpt"
+# ==========================================
+# ГРУППА 1: БАЗОВЫЕ НАСТРОЙКИ
+# ==========================================
+dataset_name: "cpt_dataset"
+seed: ${seed}
+max_samples: null
+force_reprocess: false
+
+val_size: 0.05
+test_size: 0.05
+
+# ==========================================
+# ГРУППА 2: ПАРАМЕТРЫ ТРАНСФОРМАЦИЙ
+# ==========================================
+text_column: "text"
+prompt_column: null
+target_column: null
+
+max_length: ${max_length}
+num_proc: ${system.num_proc}
+batch_size: 1000
+
+cleaner:
+  _target_: src.decoder_pipeline.core.data.cleaners.TextCleaningPipeline
+  cleaners: []
+
+# ==========================================
+# ГРУППА 3: DATALOADER И ПУТИ
+# ==========================================
+paths:
+  processed_data_dir: "${paths.processed_data_dir}/cpt"
+
+dataloader:
+  batch_size: 4
+  num_workers: ${system.num_workers}
+  pin_memory: ${system.pin_memory}
+# ==========================================
+# ГРУППА 4: ПАРАМЕТРЫ ТРАНСФОРМАЦИЙ (токенизация, паковка)
+# ==========================================
+use_chat_template: false
+messages_column: null
+separator: "\n\n"
+writer_batch_size: 1000
+drop_remainder: false         # false = оставляем неполный последний чанк

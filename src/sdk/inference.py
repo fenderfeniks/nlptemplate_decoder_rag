@@ -10,7 +10,7 @@ from hydra.core.global_hydra import GlobalHydra
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
-from main_model.inference.generator import HFTextGenerator
+from src.decoder_pipeline.inference.generator import HFTextGenerator
 from src.utils.checkpoint_utils import load_checkpoint
 from src.utils.logger import setup_logging
 from src.utils.mlflow import resolve_lora_resume_path
@@ -37,21 +37,21 @@ class LLMGenerationPipeline:
             self.cfg = compose(config_name=config_name)
             OmegaConf.resolve(self.cfg)
 
-        self.tokenizer = instantiate(self.cfg.main_model.model.tokenizer).build()
+        self.tokenizer = instantiate(self.cfg.decoder_pipeline.model.tokenizer).build()
 
-        resume_cfg = self.cfg.main_model.model.get("lora_resume", {})
+        resume_cfg = self.cfg.decoder_pipeline.model.get("lora_resume", {})
         lora_resume_path = resolve_lora_resume_path(resume_cfg)
         if lora_resume_path:
             logger.info("LoRA адаптер будет загружен из: %s", lora_resume_path)
             OmegaConf.update(
                 self.cfg,
-                "main_model.model.modifiers.finetuning.lora_resume_path",
+                "decoder_pipeline.model.modifiers.finetuning.lora_resume_path",
                 lora_resume_path,
                 force_add=True,
             )
 
-        builder = instantiate(self.cfg.main_model.model.builder)
-        builder.modifiers_cfg = self.cfg.main_model.model.get("modifiers")
+        builder = instantiate(self.cfg.decoder_pipeline.model.builder)
+        builder.modifiers_cfg = self.cfg.decoder_pipeline.model.get("modifiers")
         self.model = builder.build(tokenizer=self.tokenizer)
 
         if checkpoint_path:
@@ -65,7 +65,7 @@ class LLMGenerationPipeline:
         self.generator = HFTextGenerator(
             model=self.model,
             tokenizer=self.tokenizer,
-            generation_kwargs=self.cfg.main_model.inference.get("generation_kwargs", {}),
+            generation_kwargs=self.cfg.decoder_pipeline.inference.get("generation_kwargs", {}),
         )
 
     @torch.no_grad()

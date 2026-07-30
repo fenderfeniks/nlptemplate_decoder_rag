@@ -10,8 +10,8 @@ from omegaconf import DictConfig, OmegaConf
 
 
 load_dotenv()
-from main_model.core.data.builder import NLPDataModule  # noqa
-from main_model.training.module import CausalLMLightningModule  # noqa
+from src.decoder_pipeline.core.data.builder import NLPDataModule  # noqa
+from src.decoder_pipeline.training.module import CausalLMLightningModule  # noqa
 from src.utils.checkpoint_utils import load_checkpoint  # noqa
 from src.utils.hydra_utils import setup_config  # noqa
 from src.utils.logger import setup_logging  # noqa
@@ -48,33 +48,33 @@ def evaluate(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
 
     logger.info("Инициализация компонентов для оценки...")
-    tokenizer = hydra.utils.instantiate(cfg.main_model.model.tokenizer).build()
+    tokenizer = hydra.utils.instantiate(cfg.decoder_pipeline.model.tokenizer).build()
 
-    resume_cfg = cfg.main_model.model.get("lora_resume", {})
+    resume_cfg = cfg.decoder_pipeline.model.get("lora_resume", {})
     lora_resume_path = resolve_lora_resume_path(resume_cfg)
     if lora_resume_path:
         logger.info("LoRA адаптер будет загружен из: %s", lora_resume_path)
         OmegaConf.update(
             cfg,
-            "main_model.model.modifiers.finetuning.lora_resume_path",
+            "decoder_pipeline.model.modifiers.finetuning.lora_resume_path",
             lora_resume_path,
             force_add=True,
         )
 
     # Единая точка сборки модели со всеми модификаторами
-    builder = hydra.utils.instantiate(cfg.main_model.model.builder)
-    builder.modifiers_cfg = cfg.main_model.model.get("modifiers")
+    builder = hydra.utils.instantiate(cfg.decoder_pipeline.model.builder)
+    builder.modifiers_cfg = cfg.decoder_pipeline.model.get("modifiers")
     base_model = builder.build(tokenizer=tokenizer)
 
     model_module = CausalLMLightningModule(
         model=base_model,
-        optimizer_cfg=hydra.utils.instantiate(cfg.main_model.optimizer),
-        scheduler_cfg=hydra.utils.instantiate(cfg.main_model.scheduler)
-        if "scheduler" in cfg.main_model
+        optimizer_cfg=hydra.utils.instantiate(cfg.decoder_pipeline.optimizer),
+        scheduler_cfg=hydra.utils.instantiate(cfg.decoder_pipeline.scheduler)
+        if "scheduler" in cfg.decoder_pipeline
         else None,
     )
-    datamodule = NLPDataModule(data_cfg=cfg.main_model.data, tokenizer=tokenizer)
-    trainer = hydra.utils.instantiate(cfg.main_model.trainer)
+    datamodule = NLPDataModule(data_cfg=cfg.decoder_pipeline.data, tokenizer=tokenizer)
+    trainer = hydra.utils.instantiate(cfg.decoder_pipeline.trainer)
 
     ckpt_path = cfg.get("ckpt_path")
     if ckpt_path:

@@ -7,7 +7,7 @@
 import pytest
 
 # ИСПРАВЛЕНИЕ: Добавлен префикс src.
-from main_model.inference.response_cleaner import ResponseCleaner
+from decoder_pipeline.inference.response_cleaner import ResponseCleaner
 
 
 @pytest.fixture

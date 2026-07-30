@@ -13,7 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 
 load_dotenv()
 
-from main_model.inference.generator import HFTextGenerator  # noqa
+from src.decoder_pipeline.inference.generator import HFTextGenerator  # noqa
 from src.utils.checkpoint_utils import load_checkpoint  # noqa
 from src.utils.hydra_utils import setup_config  # noqa
 from src.utils.logger import setup_logging  # noqa
@@ -29,11 +29,11 @@ def infer(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
 
     logger.info("Загрузка токенизатора...")
-    tokenizer = hydra.utils.instantiate(cfg.main_model.model.tokenizer).build()
+    tokenizer = hydra.utils.instantiate(cfg.decoder_pipeline.model.tokenizer).build()
 
     # === 1. ЗАГРУЗКА АДАПТЕРОВ (если нужно) ===
-    # Квантование теперь применяется автоматически через cfg.main_model.model.quantization!
-    resume_cfg = cfg.main_model.model.get("lora_resume", {})
+    # Квантование теперь применяется автоматически через cfg.decoder_pipeline.model.quantization!
+    resume_cfg = cfg.decoder_pipeline.model.get("lora_resume", {})
     lora_resume_path = resolve_lora_resume_path(resume_cfg)
 
     if lora_resume_path:
@@ -41,7 +41,7 @@ def infer(cfg: DictConfig) -> None:
         # Динамически прокидываем путь в модификатор перед сборкой
         OmegaConf.update(
             cfg,
-            "main_model.model.modifiers.finetuning.lora_resume_path",
+            "decoder_pipeline.model.modifiers.finetuning.lora_resume_path",
             lora_resume_path,
             force_add=True,
         )
@@ -49,8 +49,8 @@ def infer(cfg: DictConfig) -> None:
         logger.warning("lora_resume не задан — инференс на базовой архитектуре.")
 
     logger.info("Загрузка модели...")
-    builder = hydra.utils.instantiate(cfg.main_model.model.builder)
-    builder.modifiers_cfg = cfg.main_model.model.get("modifiers")
+    builder = hydra.utils.instantiate(cfg.decoder_pipeline.model.builder)
+    builder.modifiers_cfg = cfg.decoder_pipeline.model.get("modifiers")
     model = builder.build(tokenizer=tokenizer)
 
     # Опциональная загрузка кастомного чекпоинта поверх
@@ -62,15 +62,15 @@ def infer(cfg: DictConfig) -> None:
     generator = HFTextGenerator(
         model=model,
         tokenizer=tokenizer,
-        generation_kwargs=cfg.main_model.inference.get("generation_kwargs", {}),
+        generation_kwargs=cfg.decoder_pipeline.inference.get("generation_kwargs", {}),
     )
 
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    input_file = cfg.main_model.inference.get("input_file")
-    output_file = cfg.main_model.inference.get("output_file", "predictions.jsonl")
+    input_file = cfg.decoder_pipeline.inference.get("input_file")
+    output_file = cfg.decoder_pipeline.inference.get("output_file", "predictions.jsonl")
 
     # === 2. ПАКЕТНАЯ ИЛИ ОДИНОЧНАЯ ГЕНЕРАЦИЯ ===
     if input_file and Path(input_file).exists():

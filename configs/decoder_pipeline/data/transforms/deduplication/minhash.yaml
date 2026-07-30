@@ -1,0 +1,7 @@
+_target_: src.decoder_pipeline.core.data.transforms.deduplication.MinHashDeduplicationTransform
+text_column: ${decoder_pipeline.data.text_column}
+prompt_column: ${decoder_pipeline.data.prompt_column}
+num_perm: 128          # 128 - стандартный баланс скорости и точности
+threshold: 0.85        # Тексты, совпадающие на 85%, будут считаться дубликатами
+ngram_size: 5          # Разбиваем на окна по 5 слов
+num_proc: ${system.num_proc}

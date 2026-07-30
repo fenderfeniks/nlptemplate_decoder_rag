@@ -1,0 +1,10 @@
+_target_: src.decoder_pipeline.core.data.transforms.tokenization.TokenizationTransform
+use_chat_template: ${decoder_pipeline.data.use_chat_template}
+text_column: ${decoder_pipeline.data.text_column}
+prompt_column: ${decoder_pipeline.data.prompt_column}
+target_column: ${decoder_pipeline.data.target_column}
+messages_column: ${decoder_pipeline.data.messages_column}
+separator: ${decoder_pipeline.data.separator}
+num_proc: ${decoder_pipeline.data.num_proc}
+batch_size: ${decoder_pipeline.data.batch_size}
+writer_batch_size: ${decoder_pipeline.data.writer_batch_size}

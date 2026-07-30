@@ -1,2 +1,0 @@
-_target_: src.core.models.modifiers.FullFinetuningModifier
-gradient_checkpointing: true

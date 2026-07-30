@@ -23,10 +23,11 @@ class PathsConfig:
     root_dir: str = "."
     data_dir: str = "${paths.root_dir}/data"
     hf_cache_dir: str = "${paths.data_dir}/cache/hf_models"
-    processed_data_dir: str = "${paths.data_dir}/processed"
-    model_dir: str = "${paths.root_dir}/models"
-    log_dir: str = "${paths.root_dir}/logs"
-    output_dir: str = "${paths.root_dir}/outputs"
+    processed_data_dir: str = "${paths.data_dir}/processed/${pipeline_name}"
+    log_dir: str = "${paths.root_dir}/logs/${pipeline_name}"
+    mlflow_bd_dir: str = "${paths.root_dir}/logs"
+    output_dir: str = "${paths.root_dir}/outputs/${pipeline_name}"
+    model_dir: str = "${paths.root_dir}/models/${pipeline_name}"
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +59,7 @@ class EnvironmentConfig:
 
 @dataclass
 class MLFlowRegistryConfig:
-    model_name: str = "${main_model.model.architecture.mlflow_model_name}"
+    model_name: str = "${decoder_pipeline.model.architecture.mlflow_model_name}"
     register_on_success: bool = True
     artifact_path: str = "lora_weights"
     promote_to_staging: bool = True
@@ -88,7 +89,7 @@ class RootLoggerConfig:
 
 @dataclass
 class DataSourceConfig:
-    _target_: str = "src.core.data.fetcher.RawDataFetcher"
+    _target_: str = "src.decoder_pipeline.core.data.fetcher.RawDataFetcher"
     source_type: str = "local"
     raw_dir: str = "${paths.data_dir}/raw"
     dataset_name: str | None = None
@@ -98,15 +99,15 @@ class DataSourceConfig:
 
 @dataclass
 class DataSplitterConfig:
-    _target_: str = "src.core.data.splitters.RandomDatasetSplitter"
+    _target_: str = "src.decoder_pipeline.core.data.splitters.RandomDatasetSplitter"
     val_size: float = 0.1
     test_size: float = 0.1
-    seed: int = "${data.seed}"  # type: ignore[assignment]
+    seed: int = "${decoder_pipeline.data.seed}"  # type: ignore[assignment]
 
 
 @dataclass
 class DataCollatorConfig:
-    _target_: str = "src.core.data.collators.InstructionDataCollator"
+    _target_: str = "src.decoder_pipeline.core.data.collators.InstructionDataCollator"
     max_sequence_length: int = 2048
     mask_prompt: bool = False
     response_template: str | None = None
@@ -122,7 +123,7 @@ class DataLoaderConfig:
 
 @dataclass
 class CleanerConfig:
-    _target_: str = "src.core.data.cleaners.TextCleaningPipeline"
+    _target_: str = "src.decoder_pipeline.core.data.cleaners.TextCleaningPipeline"
     cleaners: Any = field(default_factory=list)
 
 
@@ -195,8 +196,8 @@ class ModelArchitectureConfig:
 
 @dataclass
 class TokenizerConfig:
-    _target_: str = "src.core.models.tokenization.HFTokenizerBuilder"
-    tokenizer_name: str = "${main_model.model.architecture.model_name_or_path}"
+    _target_: str = "src.decoder_pipeline.core.models.tokenization.HFTokenizerBuilder"
+    tokenizer_name: str = "${decoder_pipeline.model.architecture.model_name_or_path}"
     use_fast: bool = True
     padding_side: str = "right"
     add_eos_token: bool = False
@@ -226,13 +227,13 @@ class PEFTLoraConfig:
 
 @dataclass
 class EmbeddingResizeModifierConfig:
-    _target_: str = "src.core.models.modifiers.EmbeddingResizeModifier"
-    tokenizer: Any = "${main_model.model.tokenizer}"  # type: ignore[assignment]
+    _target_: str = "src.decoder_pipeline.core.models.modifiers.EmbeddingResizeModifier"
+    tokenizer: Any = "${decoder_pipeline.model.tokenizer}"  # type: ignore[assignment]
 
 
 @dataclass
 class PEFTModifierConfig:
-    _target_: str = "src.core.models.modifiers.PEFTModifier"
+    _target_: str = "src.decoder_pipeline.core.models.modifiers.PEFTModifier"
     gradient_checkpointing: bool = True
     is_quantized: bool = True
     lora_resume_path: str | None = None
@@ -241,7 +242,7 @@ class PEFTModifierConfig:
 
 @dataclass
 class FullFTModifierConfig:
-    _target_: str = "src.core.models.modifiers.FullFinetuningModifier"
+    _target_: str = "src.decoder_pipeline.core.models.modifiers.FullFinetuningModifier"
     gradient_checkpointing: bool = True
 
 
@@ -266,7 +267,7 @@ class LoraResumeConfig:
 class HFModelBuilderConfig:
     """Конфигурация параметров, передаваемых строго в HFModelBuilder.__init__"""
 
-    _target_: str = "src.core.models.builder.HFModelBuilder"
+    _target_: str = "src.decoder_pipeline.core.models.builder.HFModelBuilder"
     _recursive_: bool = False
     model_name_or_path: str = MISSING
     auto_model_class: str = "transformers.AutoModelForCausalLM"
@@ -361,8 +362,8 @@ class EarlyStoppingConfig:
 
 @dataclass
 class GenerationEvalConfig:
-    _target_: str = "src.training.callbacks.GenerationEvaluationCallback"
-    model_name: str = "${main_model.model.architecture.mlflow_model_name}"
+    _target_: str = "src.decoder_pipeline.training.callbacks.GenerationEvaluationCallback"
+    model_name: str = "${decoder_pipeline.model.architecture.mlflow_model_name}"
     num_random: int = 5
     generation_batch_size: int = 2
     mode: str = "auto"
@@ -427,7 +428,7 @@ class TrainerConfig:
 
 @dataclass
 class ResponseCleanerConfig:
-    _target_: str = "src.core.models.response_cleaner.ResponseCleaner"
+    _target_: str = "src.decoder_pipeline.core.models.response_cleaner.ResponseCleaner"
     strip_prompt: bool = True
     remove_special_tokens: bool = True
     remove_markdown_blocks: bool = False
@@ -437,7 +438,7 @@ class ResponseCleanerConfig:
 
 @dataclass
 class InferenceConfig:
-    _target_: str = "src.core.models.generator.HFTextGenerator"
+    _target_: str = "src.decoder_pipeline.core.models.generator.HFTextGenerator"
     generation_kwargs: dict[str, Any] = field(
         default_factory=lambda: {
             "max_new_tokens": 512,
@@ -547,7 +548,7 @@ class HydraConfig:
 # Root Schema  →  configs/main.yaml
 # ---------------------------------------------------------------------------
 @dataclass
-class MainModelConfig:
+class DecoderPipelineConfig:
     data: DataConfig = field(default_factory=DataConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
@@ -563,6 +564,8 @@ class ConfigSchema:
     max_length: int = 2048
     project_name: str = "industrial_nlp_template"
     resume_training: bool = False
+    project_name: str = "industrial_nlp_template"
+    pipeline_name: str = "decoder_pipeline"
 
     # Инфраструктурные группы (Остаются в корне)
     paths: PathsConfig = field(default_factory=PathsConfig)
@@ -575,7 +578,7 @@ class ConfigSchema:
     hydra: HydraConfig = field(default_factory=HydraConfig)
 
     # === НОВЫЙ НЕЙМСПЕЙС ===
-    main_model: MainModelConfig = field(default_factory=MainModelConfig)
+    decoder_pipeline: DecoderPipelineConfig = field(default_factory=DecoderPipelineConfig)
 
     # eval.py / infer.py — CLI-параметры
     ckpt_path: str | None = None

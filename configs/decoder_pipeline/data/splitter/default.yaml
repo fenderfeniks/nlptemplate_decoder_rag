@@ -1,0 +1,4 @@
+_target_: src.decoder_pipeline.core.data.splitters.RandomDatasetSplitter
+val_size: ${decoder_pipeline.data.val_size}
+test_size: ${decoder_pipeline.data.test_size}
+seed: ${decoder_pipeline.data.seed}

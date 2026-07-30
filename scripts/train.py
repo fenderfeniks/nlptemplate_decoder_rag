@@ -15,8 +15,8 @@ from peft import PeftModel
 
 load_dotenv()
 
-from main_model.core.data.builder import NLPDataModule  # noqa: E402
-from main_model.training.module import CausalLMLightningModule  # noqa: E402
+from src.decoder_pipeline.core.data.builder import NLPDataModule  # noqa: E402
+from src.decoder_pipeline.training.module import CausalLMLightningModule  # noqa: E402
 from src.utils.hydra_utils import setup_config  # noqa: E402
 from src.utils.logger import setup_logging  # noqa: E402
 from src.utils.mlflow import log_lora_to_mlflow, resolve_lora_resume_path  # noqa: E402
@@ -79,33 +79,35 @@ def train(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
     logger.info("Старт обучения...")
 
-    if cfg.main_model.trainer.accelerator == "gpu" and not torch.cuda.is_available():
+    if cfg.decoder_pipeline.trainer.accelerator == "gpu" and not torch.cuda.is_available():
         raise RuntimeError(
-            "cfg.main_model.trainer.accelerator='gpu', но CUDA недоступна. "
+            "cfg.decoder_pipeline.trainer.accelerator='gpu', но CUDA недоступна. "
             "Используй environment=local для запуска на CPU."
         )
 
     pl.seed_everything(cfg.seed, workers=True)
 
     # ── 1. Токенизатор ───────────────────────────────────────────────────────
-    logger.info("Загрузка токенизатора: %s", cfg.main_model.model.architecture.model_name_or_path)
-    tokenizer = hydra.utils.instantiate(cfg.main_model.model.tokenizer).build()
+    logger.info(
+        "Загрузка токенизатора: %s", cfg.decoder_pipeline.model.architecture.model_name_or_path
+    )
+    tokenizer = hydra.utils.instantiate(cfg.decoder_pipeline.model.tokenizer).build()
 
     # ── 2. Модель ────────────────────────────────────────────────────────────
-    lora_resume_path = resolve_lora_resume_path(cfg.main_model.model.get("lora_resume", {}))
+    lora_resume_path = resolve_lora_resume_path(cfg.decoder_pipeline.model.get("lora_resume", {}))
 
     logger.info("Сборка модели...")
-    builder = hydra.utils.instantiate(cfg.main_model.model.builder)
+    builder = hydra.utils.instantiate(cfg.decoder_pipeline.model.builder)
     builder.lora_resume_path = lora_resume_path
-    builder.modifiers_cfg = cfg.main_model.model.get("modifiers")
+    builder.modifiers_cfg = cfg.decoder_pipeline.model.get("modifiers")
     base_model = builder.build(tokenizer=tokenizer)
 
     # ── 3. DataModule ─────────────────────────────────────────────────────────
     logger.info("Инициализация DataModule...")
-    datamodule = NLPDataModule(data_cfg=cfg.main_model.data, tokenizer=tokenizer)
+    datamodule = NLPDataModule(data_cfg=cfg.decoder_pipeline.data, tokenizer=tokenizer)
 
     # ── 4. LightningModule (с определением task_mode) ─────────────────────────
-    data_cfg = cfg.main_model.data
+    data_cfg = cfg.decoder_pipeline.data
     task_val = (
         data_cfg.get("task") if isinstance(data_cfg, dict) else getattr(data_cfg, "task", None)
     )
@@ -122,20 +124,20 @@ def train(cfg: DictConfig) -> None:
 
     model_module = CausalLMLightningModule(
         model=base_model,
-        optimizer_cfg=hydra.utils.instantiate(cfg.main_model.optimizer),
-        scheduler_cfg=hydra.utils.instantiate(cfg.main_model.scheduler)
-        if "scheduler" in cfg.main_model
+        optimizer_cfg=hydra.utils.instantiate(cfg.decoder_pipeline.optimizer),
+        scheduler_cfg=hydra.utils.instantiate(cfg.decoder_pipeline.scheduler)
+        if "scheduler" in cfg.decoder_pipeline
         else None,
         task_mode=task_mode,
     )
 
-    if cfg.main_model.model.get("compile", False):
+    if cfg.decoder_pipeline.model.get("compile", False):
         logger.info("torch.compile включён — компиляция графа вычислений...")
         model_module.model = torch.compile(model_module.model)
 
     # ── 5. Trainer ────────────────────────────────────────────────────────────
     logger.info("Инициализация Trainer...")
-    trainer = hydra.utils.instantiate(cfg.main_model.trainer)
+    trainer = hydra.utils.instantiate(cfg.decoder_pipeline.trainer)
 
     # ── 6. Auto-resume ────────────────────────────────────────────────────────
     resume_path = None
@@ -149,6 +151,7 @@ def train(cfg: DictConfig) -> None:
 
     # ── 7. Обучение ───────────────────────────────────────────────────────────
     register_safe_globals()
+    best_score = None
     try:
         trainer.fit(model=model_module, datamodule=datamodule, ckpt_path=resume_path)
         logger.info("Обучение завершено.")
@@ -161,7 +164,7 @@ def train(cfg: DictConfig) -> None:
         mlflow_run_id = _extract_mlflow_run_id(trainer)
         logger.info("MLflow run_id: %s", mlflow_run_id)
 
-        if not trainer.tested:  # атрибут есть в PL 2.x
+        if not getattr(trainer, "tested", False):
             best_score = _run_post_training_evaluation(trainer, model_module, datamodule)
 
         logger.info("Очистка памяти GPU...")

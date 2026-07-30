@@ -1,0 +1,4 @@
+_target_: src.decoder_pipeline.core.data.transforms.deduplication.ExactDeduplicationTransform
+text_column: ${decoder_pipeline.data.text_column}
+prompt_column: ${decoder_pipeline.data.prompt_column}
+num_proc: ${system.num_proc}

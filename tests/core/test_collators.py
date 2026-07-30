@@ -6,8 +6,7 @@
 
 import pytest
 import torch
-
-from main_model.core.data.collators import InstructionDataCollator
+from decoder_pipeline.core.data.collators import InstructionDataCollator
 
 
 @pytest.fixture

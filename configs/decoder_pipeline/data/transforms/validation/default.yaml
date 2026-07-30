@@ -1,0 +1,7 @@
+_target_: src.decoder_pipeline.core.data.transforms.validation.ValidationTransform
+text_column: ${decoder_pipeline.data.text_column}
+prompt_column: ${decoder_pipeline.data.prompt_column}
+target_column: ${decoder_pipeline.data.target_column}
+num_proc: ${decoder_pipeline.data.num_proc}
+batch_size: ${decoder_pipeline.data.batch_size}
+pipeline: ${decoder_pipeline.data.transforms.cleaning}

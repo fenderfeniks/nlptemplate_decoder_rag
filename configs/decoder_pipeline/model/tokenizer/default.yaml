@@ -1,0 +1,6 @@
+_target_: src.decoder_pipeline.core.models.tokenization.HFTokenizerBuilder
+tokenizer_name: ${decoder_pipeline.model.architecture.model_name_or_path}
+use_fast: true
+padding_side: "right"
+add_eos_token: false
+chat_template: null

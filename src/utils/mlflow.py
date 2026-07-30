@@ -13,7 +13,6 @@ from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
-# Подтягиваем нашу утилиту безопасности
 from src.utils.torch_utils import register_safe_globals
 
 
@@ -75,11 +74,9 @@ def _ensure_tracking_uri() -> None:
 
 def _find_adapter_config(root: Path) -> Path | None:
     """Ищет adapter_config.json рекурсивно — на случай вложенных структур артефактов."""
-    # Сначала проверяем корень и типичные подпапки
     for candidate in [root, root / "peft", root / "lora_weights", root / "adapter"]:
         if (candidate / "adapter_config.json").exists():
             return candidate
-    # Рекурсивный поиск как последний вариант
     matches = list(root.rglob("adapter_config.json"))
     if matches:
         return matches[0].parent
@@ -97,7 +94,7 @@ def resolve_lora_resume_path(
     - model_name + alias: ищет версию в Model Registry по алиасу
 
     Args:
-        resume_cfg: конфиг с параметрами поиска адаптера
+        resume_cfg: конфиг с параметрами поиска адаптера.
         tracking_uri: MLflow tracking URI — берётся из cfg, не из env.
                       Если None — откатывается к MLFLOW_TRACKING_URI из env.
     """
@@ -140,8 +137,6 @@ def resolve_lora_resume_path(
             model_version.source,
         )
 
-        # run_id может быть None если модель зарегистрирована через register_model(artifact_uri)
-        # В этом случае берём source URI напрямую из версии
         if model_version.run_id:
             downloaded = Path(
                 mlflow.artifacts.download_artifacts(
@@ -184,6 +179,16 @@ def _patch_peft_config_for_hydra(model: Any) -> None:
                 setattr(peft_cfg, key, OmegaConf.to_container(value, resolve=True))
 
 
+def _build_reg_model_name(cfg: Any) -> str:
+    """Единственное место, где собирается имя модели в Registry.
+
+    Имя всегда берётся из cfg.decoder_pipeline.model.architecture.mlflow_model_name
+    и получает суффикс _LoRA — так же как в merge_lora.py и promote.py.
+    """
+    mlflow_model_name = cfg.decoder_pipeline.model.architecture.mlflow_model_name
+    return f"{mlflow_model_name}_LoRA"
+
+
 def log_lora_to_mlflow(
     cfg: Any,
     model_module: Any,
@@ -198,7 +203,8 @@ def log_lora_to_mlflow(
         adapter_config.json  ← конфиг LoRA (ranks, targets, ...)
         adapter_model.safetensors  ← только дельта-веса адаптера
 
-    Это то что умеет читать PeftModel.from_pretrained() и resolve_lora_resume_path().
+    Имя модели в Registry берётся из cfg.decoder_pipeline.model.architecture.mlflow_model_name
+    — единственный источник правды, согласованный с merge_lora.py и promote.py.
     """
     import tempfile
 
@@ -210,26 +216,25 @@ def log_lora_to_mlflow(
     model_to_save = model_module.model
     client = MlflowClient()
 
+    # Имя модели — единственный источник правды
+    reg_model_name = _build_reg_model_name(cfg)
+
     registry_cfg = cfg.get("logger", {}).get("registry", {})
-    base_model_name = registry_cfg.get("model_name", "GenerativeLLM")
-    reg_model_name = f"{base_model_name}_LoRA"
     artifact_path = registry_cfg.get("artifact_path", "lora_weights")
     register_on_success = registry_cfg.get("register_on_success", True)
     promote_to_staging = registry_cfg.get("promote_to_staging", True)
 
-    # Патчим Hydra-типы в peft_config чтобы save_pretrained не упал на ListConfig
+    logger.info("Registry модель: %s | artifact_path: %s", reg_model_name, artifact_path)
+
     _patch_peft_config_for_hydra(model_to_save)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
 
-        # Сохраняем только адаптер (adapter_config.json + adapter_model.safetensors)
-        # НЕ всю модель — это несколько МБ вместо десятков ГБ
         logger.info("Сохранение PEFT-адаптера во временную директорию: %s", tmp_path)
         model_to_save.save_pretrained(tmp_path)
         tokenizer.save_pretrained(tmp_path)
 
-        # Проверяем что adapter_config.json реально создался
         if not (tmp_path / "adapter_config.json").exists():
             raise FileNotFoundError(
                 f"save_pretrained не создал adapter_config.json в {tmp_path}. "
@@ -240,7 +245,6 @@ def log_lora_to_mlflow(
         logger.info("Файлы адаптера: %s", saved_files)
 
         with mlflow.start_run(run_id=run_id):
-            # Логируем всю папку как артефакт — сохраняется структура директории
             mlflow.log_artifacts(str(tmp_path), artifact_path=artifact_path)
             logger.info("LoRA адаптер сохранён в run_id=%s artifact_path=%s", run_id, artifact_path)
 
@@ -251,7 +255,6 @@ def log_lora_to_mlflow(
                 logger.info("Регистрация в Model Registry отключена (register_on_success=false).")
                 return
 
-            # Регистрируем артефакт как версию модели в Registry
             artifact_uri = mlflow.get_artifact_uri(artifact_path)
             mv_version = mlflow.register_model(
                 model_uri=artifact_uri,

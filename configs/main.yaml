@@ -7,22 +7,22 @@ defaults:
   - logger/registry: registry_mlflow
 
   # ── Данные (переехали физически, но остались на месте логически) ──────────
-  - main_model/data: sft      # sft | cpt                
+  - decoder_pipeline/data: sft      # sft | cpt                
   
   # ── Модель ───────────────────────────────────────────────────────────────
-  - main_model/model: default
+  - decoder_pipeline/model: default
 
   # ── Обучение ─────────────────────────────────────────────────────────────
-  - main_model/optimizer: adamw
-  - main_model/scheduler: cosine_warmup
-  - main_model/trainer: default
+  - decoder_pipeline/optimizer: adamw
+  - decoder_pipeline/scheduler: cosine_warmup
+  - decoder_pipeline/trainer: default
 
   # ── Инференс ─────────────────────────────────────────────────────────────
-  - main_model/inference: default
+  - decoder_pipeline/inference: default
 
   # ── Прочее ───────────────────────────────────────────────────────────────
-  - main_model/prompts@prompts: default
-  - main_model/strings@strings: default
+  - prompts: default
+  - strings: default
   
   # ── API ──────────────────────────────────────────────────────────────────
   - api: fastapi
@@ -34,6 +34,8 @@ defaults:
 # ── Глобальные параметры ───────────────────────────────────────────────────
 seed: 42
 max_length: 2048          
+pipeline_name: "decoder_pipeline"
+project_name: "industrial_nlp_template" 
 
 # ── Системные ресурсы ──────────────────────────────────────────────────────
 system:

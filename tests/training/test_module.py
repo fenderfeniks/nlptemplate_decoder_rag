@@ -51,7 +51,7 @@ def fake_causal_model():
 
 @pytest.fixture
 def causal_module(fake_causal_model):
-    from main_model.training.module import CausalLMLightningModule
+    from decoder_pipeline.training.module import CausalLMLightningModule
 
     optimizer_cfg = MagicMock()
     optimizer_cfg._target_ = "torch.optim.AdamW"
@@ -155,10 +155,10 @@ class TestConfigureOptimizers:
 
         import torch
 
-        from main_model.training.module import CausalLMLightningModule
+        from decoder_pipeline.training.module import CausalLMLightningModule
 
         opt_cfg = NonCallableMagicMock()  # ← не callable → пойдёт в ветку instantiate
-        with patch("src.training.module.instantiate") as mock_inst:
+        with patch("src.decoder_pipeline.training.module.instantiate") as mock_inst:
             mock_inst.return_value = torch.optim.AdamW(fake_causal_model.parameters(), lr=1e-3)
             module = CausalLMLightningModule(
                 model=fake_causal_model,
@@ -175,11 +175,11 @@ class TestConfigureOptimizers:
 
         import torch
 
-        from main_model.training.module import CausalLMLightningModule
+        from decoder_pipeline.training.module import CausalLMLightningModule
 
         opt_cfg = MagicMock()
         sched_cfg = MagicMock()
-        with patch("src.training.module.instantiate") as mock_inst:
+        with patch("src.decoder_pipeline.training.module.instantiate") as mock_inst:
             optimizer = torch.optim.AdamW(fake_causal_model.parameters(), lr=1e-3)
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
             mock_inst.side_effect = [optimizer, scheduler]
@@ -201,12 +201,12 @@ class TestConfigureOptimizers:
 
         import torch
 
-        from main_model.training.module import CausalLMLightningModule
+        from decoder_pipeline.training.module import CausalLMLightningModule
 
         for p in fake_causal_model.parameters():
             p.requires_grad = False
         captured = []
-        with patch("src.training.module.instantiate") as mock_inst:
+        with patch("src.decoder_pipeline.training.module.instantiate") as mock_inst:
 
             def fake_instantiate(cfg, params):
                 captured.extend(list(params))
@@ -228,7 +228,7 @@ class TestConfigureOptimizers:
         """Тестирует новую архитектуру с _partial_: true (callable config)."""
         import torch
 
-        from main_model.training.module import CausalLMLightningModule
+        from decoder_pipeline.training.module import CausalLMLightningModule
 
         # Имитируем поведение Hydra с _partial_: true
         def fake_partial_optimizer(params):

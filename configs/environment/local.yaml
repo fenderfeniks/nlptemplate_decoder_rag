@@ -14,7 +14,7 @@ system:
   num_workers: 0                
   pin_memory: false             
 
-main_model:
+decoder_pipeline:
   trainer:
     accelerator: "auto"           
     precision: "32-true"          

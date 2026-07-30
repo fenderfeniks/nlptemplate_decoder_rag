@@ -1,0 +1,4 @@
+_target_: src.decoder_pipeline.core.data.collators.InstructionDataCollator
+max_sequence_length: 4096
+response_template: null
+mask_prompt: false

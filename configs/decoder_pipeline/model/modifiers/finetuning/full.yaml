@@ -1,0 +1,2 @@
+_target_: src.decoder_pipeline.core.models.modifiers.FullFinetuningModifier
+gradient_checkpointing: true

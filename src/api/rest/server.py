@@ -9,6 +9,7 @@ from pathlib import Path
 
 import hydra
 from aiogram import types
+from decoder_pipeline.core.prompts.manager import PromptManager
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.security import APIKeyHeader
@@ -19,7 +20,6 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from main_model.core.prompts.manager import PromptManager
 from src.api.rest.endpoints import generate, health
 from src.api.rest.limiter import limiter
 from src.api.rest.middlewares import setup_middlewares
