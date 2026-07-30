@@ -1,7 +1,7 @@
 # tests/training/test_callbacks.py
 """Тесты пользовательских коллбэков PyTorch Lightning."""
 
-from src.training.callbacks import _MODE_CPT, _MODE_SFT, GenerationEvaluationCallback
+from main_model.training.callbacks import _MODE_CPT, _MODE_SFT, GenerationEvaluationCallback
 
 
 class TestGenerationEvaluationCallback:

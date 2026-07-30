@@ -58,7 +58,7 @@ class EnvironmentConfig:
 
 @dataclass
 class MLFlowRegistryConfig:
-    model_name: str = "${model.architecture.mlflow_model_name}"
+    model_name: str = "${main_model.model.architecture.mlflow_model_name}"
     register_on_success: bool = True
     artifact_path: str = "lora_weights"
     promote_to_staging: bool = True
@@ -196,7 +196,7 @@ class ModelArchitectureConfig:
 @dataclass
 class TokenizerConfig:
     _target_: str = "src.core.models.tokenization.HFTokenizerBuilder"
-    tokenizer_name: str = "${model.architecture.model_name_or_path}"
+    tokenizer_name: str = "${main_model.model.architecture.model_name_or_path}"
     use_fast: bool = True
     padding_side: str = "right"
     add_eos_token: bool = False
@@ -227,7 +227,7 @@ class PEFTLoraConfig:
 @dataclass
 class EmbeddingResizeModifierConfig:
     _target_: str = "src.core.models.modifiers.EmbeddingResizeModifier"
-    tokenizer: Any = "${model.tokenizer}"  # type: ignore[assignment]
+    tokenizer: Any = "${main_model.model.tokenizer}"  # type: ignore[assignment]
 
 
 @dataclass
@@ -362,7 +362,7 @@ class EarlyStoppingConfig:
 @dataclass
 class GenerationEvalConfig:
     _target_: str = "src.training.callbacks.GenerationEvaluationCallback"
-    model_name: str = "${model.architecture.mlflow_model_name}"
+    model_name: str = "${main_model.model.architecture.mlflow_model_name}"
     num_random: int = 5
     generation_batch_size: int = 2
     mode: str = "auto"
@@ -546,31 +546,36 @@ class HydraConfig:
 # ---------------------------------------------------------------------------
 # Root Schema  →  configs/main.yaml
 # ---------------------------------------------------------------------------
-
-
 @dataclass
-class ConfigSchema:
-    # Глобальные скаляры — объявлены в main.yaml, тянутся через ${seed}, ${max_length}
-    seed: int = 42
-    max_length: int = 2048
-    project_name: str = "industrial_nlp_template"
-    resume_training: bool = False
-
-    # Группы конфигов
-    paths: PathsConfig = field(default_factory=PathsConfig)
-    system: SystemConfig = field(default_factory=SystemConfig)
-    environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
-    logger: RootLoggerConfig = field(default_factory=RootLoggerConfig)
+class MainModelConfig:
     data: DataConfig = field(default_factory=DataConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     trainer: Any = field(default_factory=dict)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
+
+
+@dataclass
+class ConfigSchema:
+    # Глобальные скаляры
+    seed: int = 42
+    max_length: int = 2048
+    project_name: str = "industrial_nlp_template"
+    resume_training: bool = False
+
+    # Инфраструктурные группы (Остаются в корне)
+    paths: PathsConfig = field(default_factory=PathsConfig)
+    system: SystemConfig = field(default_factory=SystemConfig)
+    environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
+    logger: RootLoggerConfig = field(default_factory=RootLoggerConfig)
     api: APIConfig = field(default_factory=APIConfig)
     prompts: PromptsConfig = field(default_factory=PromptsConfig)
     strings: StringsConfig = field(default_factory=StringsConfig)
     hydra: HydraConfig = field(default_factory=HydraConfig)
+
+    # === НОВЫЙ НЕЙМСПЕЙС ===
+    main_model: MainModelConfig = field(default_factory=MainModelConfig)
 
     # eval.py / infer.py — CLI-параметры
     ckpt_path: str | None = None

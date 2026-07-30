@@ -22,7 +22,7 @@ def _make_hf_dataset(records: list[dict]) -> Dataset:
 def null_pipeline():
     """Пустой pipeline-заглушка для ValidationTransform (валидация через Pydantic,
     очистка не нужна)."""
-    from src.core.data.cleaners import TextCleaningPipeline
+    from main_model.core.data.cleaners import TextCleaningPipeline
 
     return TextCleaningPipeline(cleaners=[])
 
@@ -30,7 +30,7 @@ def null_pipeline():
 @pytest.fixture()
 def html_strip_pipeline():
     """Pipeline, удаляющий HTML-теги — для тестов CleaningTransform."""
-    from src.core.data.cleaners import RegexCleaner, TextCleaningPipeline
+    from main_model.core.data.cleaners import RegexCleaner, TextCleaningPipeline
 
     return TextCleaningPipeline(cleaners=[RegexCleaner(pattern="<.*?>", replacement="")])
 
@@ -38,7 +38,7 @@ def html_strip_pipeline():
 @pytest.fixture()
 def newline_escape_pipeline():
     """Pipeline, заменяющий '\\n' на пробел — для тестов CleaningTransform."""
-    from src.core.data.cleaners import RegexCleaner, TextCleaningPipeline
+    from main_model.core.data.cleaners import RegexCleaner, TextCleaningPipeline
 
     return TextCleaningPipeline(cleaners=[RegexCleaner(pattern="\\\\n", replacement=" ")])
 
@@ -50,7 +50,7 @@ def newline_escape_pipeline():
 
 class TestValidationTransform:
     def test_filters_empty_prompts(self, null_pipeline):
-        from src.core.data.transforms.validation import ValidationTransform
+        from main_model.core.data.transforms.validation import ValidationTransform
 
         ds = _make_hf_dataset(
             [
@@ -65,7 +65,7 @@ class TestValidationTransform:
         assert all(r["prompt"] for r in result)
 
     def test_filters_short_prompts(self, null_pipeline):
-        from src.core.data.transforms.validation import ValidationTransform
+        from main_model.core.data.transforms.validation import ValidationTransform
 
         ds = _make_hf_dataset(
             [
@@ -78,7 +78,7 @@ class TestValidationTransform:
         assert len(result) == 1
 
     def test_cpt_mode_validates_text_column(self, null_pipeline):
-        from src.core.data.transforms.validation import ValidationTransform
+        from main_model.core.data.transforms.validation import ValidationTransform
 
         ds = _make_hf_dataset(
             [
@@ -92,7 +92,7 @@ class TestValidationTransform:
         assert len(result) == 2
 
     def test_raises_without_required_columns(self, null_pipeline):
-        from src.core.data.transforms.validation import ValidationTransform
+        from main_model.core.data.transforms.validation import ValidationTransform
 
         ds = _make_hf_dataset([{"unknown_col": "data"}])
         transform = ValidationTransform(pipeline=null_pipeline, num_proc=1, batch_size=10)
@@ -107,8 +107,8 @@ class TestValidationTransform:
 
 class TestLengthFilterTransform:
     def test_removes_long_sequences(self, tiny_tokenizer):
-        from src.core.data.transforms.filtering import LengthFilterTransform
-        from src.core.data.transforms.tokenization import TokenizationTransform
+        from main_model.core.data.transforms.filtering import LengthFilterTransform
+        from main_model.core.data.transforms.tokenization import TokenizationTransform
 
         ds = _make_hf_dataset(
             [
@@ -131,7 +131,7 @@ class TestLengthFilterTransform:
 
 class TestTokenizationTransform:
     def test_text_column_mode(self, tiny_tokenizer):
-        from src.core.data.transforms.tokenization import TokenizationTransform
+        from main_model.core.data.transforms.tokenization import TokenizationTransform
 
         ds = _make_hf_dataset([{"text": "Hello world"}, {"text": "Test input"}])
         transform = TokenizationTransform(
@@ -145,7 +145,7 @@ class TestTokenizationTransform:
         assert len(result) == 2
 
     def test_prompt_response_mode_adds_prompt_len(self, tiny_tokenizer):
-        from src.core.data.transforms.tokenization import TokenizationTransform
+        from main_model.core.data.transforms.tokenization import TokenizationTransform
 
         ds = _make_hf_dataset(
             [
@@ -163,7 +163,7 @@ class TestTokenizationTransform:
         assert result[0]["prompt_len"] > 0
 
     def test_removes_original_columns(self, tiny_tokenizer):
-        from src.core.data.transforms.tokenization import TokenizationTransform
+        from main_model.core.data.transforms.tokenization import TokenizationTransform
 
         ds = _make_hf_dataset([{"text": "Hello"}, {"text": "World"}])
         transform = TokenizationTransform(tokenizer=tiny_tokenizer, text_column="text", num_proc=1)
@@ -178,8 +178,8 @@ class TestTokenizationTransform:
 
 class TestSequencePackingTransform:
     def test_packing_creates_equal_length_chunks(self, tiny_tokenizer):
-        from src.core.data.transforms.packing import SequencePackingTransform
-        from src.core.data.transforms.tokenization import TokenizationTransform
+        from main_model.core.data.transforms.packing import SequencePackingTransform
+        from main_model.core.data.transforms.tokenization import TokenizationTransform
 
         ds = _make_hf_dataset([{"text": "word " * 20}] * 10)
         tok = TokenizationTransform(tokenizer=tiny_tokenizer, text_column="text", num_proc=1)
@@ -189,8 +189,8 @@ class TestSequencePackingTransform:
         assert all(len(r["input_ids"]) == 32 for r in result)
 
     def test_drop_remainder_true_drops_incomplete_chunk(self, tiny_tokenizer):
-        from src.core.data.transforms.packing import SequencePackingTransform
-        from src.core.data.transforms.tokenization import TokenizationTransform
+        from main_model.core.data.transforms.packing import SequencePackingTransform
+        from main_model.core.data.transforms.tokenization import TokenizationTransform
 
         ds = _make_hf_dataset([{"text": "word " * 5}] * 3)
         tok = TokenizationTransform(tokenizer=tiny_tokenizer, text_column="text", num_proc=1)
@@ -213,7 +213,7 @@ class TestSequencePackingTransform:
 class TestCleaningTransform:
     def test_cleans_prompt_target_columns(self, html_strip_pipeline):
         # CleaningTransform живёт в validation.py
-        from src.core.data.transforms.validation import CleaningTransform
+        from main_model.core.data.transforms.validation import CleaningTransform
 
         ds = _make_hf_dataset(
             [
@@ -232,7 +232,7 @@ class TestCleaningTransform:
 
     def test_cleans_text_column(self, newline_escape_pipeline):
         # CleaningTransform живёт в validation.py (не в filtering.py)
-        from src.core.data.transforms.validation import CleaningTransform
+        from main_model.core.data.transforms.validation import CleaningTransform
 
         ds = _make_hf_dataset([{"text": "Текст\\nс\\nпереносами"}])
         transform = CleaningTransform(

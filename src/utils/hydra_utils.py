@@ -69,7 +69,7 @@ def setup_config(cfg: DictConfig) -> DictConfig:
     OmegaConf.set_struct(cfg, False)
 
     # Вынимаем trainer до валидации схемой — он слишком динамичный
-    trainer_cfg = cfg.pop("trainer")
+    trainer_cfg = cfg.main_model.pop("trainer")
 
     project_root = str(Path(__file__).resolve().parents[2])
     cfg.paths.root_dir = project_root
@@ -83,7 +83,7 @@ def setup_config(cfg: DictConfig) -> DictConfig:
 
     # Конвертируем callbacks dict -> list и возвращаем trainer
     trainer_cfg = _resolve_trainer_callbacks(trainer_cfg)
-    validated_cfg.trainer = trainer_cfg
+    validated_cfg.main_model.trainer = trainer_cfg
 
     OmegaConf.set_struct(validated_cfg, True)
 

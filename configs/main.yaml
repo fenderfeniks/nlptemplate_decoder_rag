@@ -1,43 +1,42 @@
 # configs/main.yaml
-# Корневой конфиг. Запуск: python train.py
-# Оверрайды через CLI: python train.py model/architecture=Qwen2.5-1.5B data=sft environment=local
-
 defaults:
-  # ── Инфраструктура ───────────────────────────────────────────────────────
+  # ── Инфраструктура (осталась на месте) ───────────────────────────────────
   - paths: default
-  - system: default                 # num_proc, num_workers, pin_memory
+  - system: default                 
   - logger/pylightning: pylightning_mlflow
   - logger/registry: registry_mlflow
 
-  # ── Данные ───────────────────────────────────────────────────────────────
-  - data: cpt                       # sft | cpt
+  # ── Данные (переехали физически, но остались на месте логически) ──────────
+  - main_model/data: sft      # sft | cpt                
+  
   # ── Модель ───────────────────────────────────────────────────────────────
-  - model: default
+  - main_model/model: default
 
   # ── Обучение ─────────────────────────────────────────────────────────────
-  - optimizer: adamw
-  - scheduler: cosine_warmup
-  - trainer: default
+  - main_model/optimizer: adamw
+  - main_model/scheduler: cosine_warmup
+  - main_model/trainer: default
 
   # ── Инференс ─────────────────────────────────────────────────────────────
-  - inference: default
+  - main_model/inference: default
 
   # ── Прочее ───────────────────────────────────────────────────────────────
-  - prompts: default
-  - strings: default
+  - main_model/prompts@prompts: default
+  - main_model/strings@strings: default
+  
   # ── API ──────────────────────────────────────────────────────────────────
   - api: fastapi
-  # ── Окружение (последним! перекрывает всё ниже) ─────────────────────────────
-  - environment: local               # local | prod
+  
+  # ── Окружение (последним!) ───────────────────────────────────────────────
+  - environment: local          # local | prod      
   - _self_
 
-# ── Глобальные параметры ─────────────────────────────────────────────────────
-# Единственное место где они объявлены. Все конфиги ссылаются через ${seed}, ${max_length}.
+# ── Глобальные параметры ───────────────────────────────────────────────────
 seed: 42
-max_length: 2048          # Максимальная длина последовательности — тянется в data и model
+max_length: 2048          
 
-# ── Системные ресурсы (переопределяются в environment) ───────────────────────
+# ── Системные ресурсы ──────────────────────────────────────────────────────
 system:
-  num_proc: 4             # CPU-процессы для обработки датасета (datasets.map)
-  num_workers: 4          # DataLoader workers
-  pin_memory: true        # Ускоряет CPU→GPU трансфер при num_workers > 0
+  num_proc: 4             
+  num_workers: 4          
+  pin_memory: true

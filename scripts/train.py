@@ -15,8 +15,8 @@ from peft import PeftModel
 
 load_dotenv()
 
-from src.core.data.builder import NLPDataModule  # noqa: E402
-from src.training.module import CausalLMLightningModule  # noqa: E402
+from main_model.core.data.builder import NLPDataModule  # noqa: E402
+from main_model.training.module import CausalLMLightningModule  # noqa: E402
 from src.utils.hydra_utils import setup_config  # noqa: E402
 from src.utils.logger import setup_logging  # noqa: E402
 from src.utils.mlflow import log_lora_to_mlflow, resolve_lora_resume_path  # noqa: E402
@@ -79,33 +79,33 @@ def train(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
     logger.info("Старт обучения...")
 
-    if cfg.trainer.accelerator == "gpu" and not torch.cuda.is_available():
+    if cfg.main_model.trainer.accelerator == "gpu" and not torch.cuda.is_available():
         raise RuntimeError(
-            "cfg.trainer.accelerator='gpu', но CUDA недоступна. "
+            "cfg.main_model.trainer.accelerator='gpu', но CUDA недоступна. "
             "Используй environment=local для запуска на CPU."
         )
 
     pl.seed_everything(cfg.seed, workers=True)
 
     # ── 1. Токенизатор ───────────────────────────────────────────────────────
-    logger.info("Загрузка токенизатора: %s", cfg.model.architecture.model_name_or_path)
-    tokenizer = hydra.utils.instantiate(cfg.model.tokenizer).build()
+    logger.info("Загрузка токенизатора: %s", cfg.main_model.model.architecture.model_name_or_path)
+    tokenizer = hydra.utils.instantiate(cfg.main_model.model.tokenizer).build()
 
     # ── 2. Модель ────────────────────────────────────────────────────────────
-    lora_resume_path = resolve_lora_resume_path(cfg.model.get("lora_resume", {}))
+    lora_resume_path = resolve_lora_resume_path(cfg.main_model.model.get("lora_resume", {}))
 
     logger.info("Сборка модели...")
-    builder = hydra.utils.instantiate(cfg.model.builder)
+    builder = hydra.utils.instantiate(cfg.main_model.model.builder)
     builder.lora_resume_path = lora_resume_path
-    builder.modifiers_cfg = cfg.model.get("modifiers")
+    builder.modifiers_cfg = cfg.main_model.model.get("modifiers")
     base_model = builder.build(tokenizer=tokenizer)
 
     # ── 3. DataModule ─────────────────────────────────────────────────────────
     logger.info("Инициализация DataModule...")
-    datamodule = NLPDataModule(data_cfg=cfg.data, tokenizer=tokenizer)
+    datamodule = NLPDataModule(data_cfg=cfg.main_model.data, tokenizer=tokenizer)
 
     # ── 4. LightningModule (с определением task_mode) ─────────────────────────
-    data_cfg = cfg.data
+    data_cfg = cfg.main_model.data
     task_val = (
         data_cfg.get("task") if isinstance(data_cfg, dict) else getattr(data_cfg, "task", None)
     )
@@ -122,18 +122,20 @@ def train(cfg: DictConfig) -> None:
 
     model_module = CausalLMLightningModule(
         model=base_model,
-        optimizer_cfg=hydra.utils.instantiate(cfg.optimizer),
-        scheduler_cfg=hydra.utils.instantiate(cfg.scheduler) if "scheduler" in cfg else None,
+        optimizer_cfg=hydra.utils.instantiate(cfg.main_model.optimizer),
+        scheduler_cfg=hydra.utils.instantiate(cfg.main_model.scheduler)
+        if "scheduler" in cfg.main_model
+        else None,
         task_mode=task_mode,
     )
 
-    if cfg.model.get("compile", False):
+    if cfg.main_model.model.get("compile", False):
         logger.info("torch.compile включён — компиляция графа вычислений...")
         model_module.model = torch.compile(model_module.model)
 
     # ── 5. Trainer ────────────────────────────────────────────────────────────
     logger.info("Инициализация Trainer...")
-    trainer = hydra.utils.instantiate(cfg.trainer)
+    trainer = hydra.utils.instantiate(cfg.main_model.trainer)
 
     # ── 6. Auto-resume ────────────────────────────────────────────────────────
     resume_path = None

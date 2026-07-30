@@ -7,7 +7,7 @@
 import pytest
 import torch
 
-from src.core.data.collators import InstructionDataCollator
+from main_model.core.data.collators import InstructionDataCollator
 
 
 @pytest.fixture

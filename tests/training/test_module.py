@@ -51,7 +51,7 @@ def fake_causal_model():
 
 @pytest.fixture
 def causal_module(fake_causal_model):
-    from src.training.module import CausalLMLightningModule
+    from main_model.training.module import CausalLMLightningModule
 
     optimizer_cfg = MagicMock()
     optimizer_cfg._target_ = "torch.optim.AdamW"
@@ -155,7 +155,7 @@ class TestConfigureOptimizers:
 
         import torch
 
-        from src.training.module import CausalLMLightningModule
+        from main_model.training.module import CausalLMLightningModule
 
         opt_cfg = NonCallableMagicMock()  # ← не callable → пойдёт в ветку instantiate
         with patch("src.training.module.instantiate") as mock_inst:
@@ -175,7 +175,7 @@ class TestConfigureOptimizers:
 
         import torch
 
-        from src.training.module import CausalLMLightningModule
+        from main_model.training.module import CausalLMLightningModule
 
         opt_cfg = MagicMock()
         sched_cfg = MagicMock()
@@ -201,7 +201,7 @@ class TestConfigureOptimizers:
 
         import torch
 
-        from src.training.module import CausalLMLightningModule
+        from main_model.training.module import CausalLMLightningModule
 
         for p in fake_causal_model.parameters():
             p.requires_grad = False
@@ -228,7 +228,7 @@ class TestConfigureOptimizers:
         """Тестирует новую архитектуру с _partial_: true (callable config)."""
         import torch
 
-        from src.training.module import CausalLMLightningModule
+        from main_model.training.module import CausalLMLightningModule
 
         # Имитируем поведение Hydra с _partial_: true
         def fake_partial_optimizer(params):

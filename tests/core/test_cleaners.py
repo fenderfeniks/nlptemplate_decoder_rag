@@ -6,7 +6,7 @@
 
 import pytest
 
-from src.core.data.cleaners import RegexCleaner, TextCleaningPipeline
+from main_model.core.data.cleaners import RegexCleaner, TextCleaningPipeline
 
 
 class TestRegexCleaner:
@@ -68,7 +68,7 @@ class TestTextCleaningPipeline:
         assert callable(self._make_pipeline())
 
     def test_pipeline_single_cleaner(self):
-        from src.core.data.cleaners import RegexCleaner, TextCleaningPipeline
+        from main_model.core.data.cleaners import RegexCleaner, TextCleaningPipeline
 
         # Исправлено: r"\\d" заменено на r"\d"
         pipeline = TextCleaningPipeline(cleaners=[RegexCleaner(pattern=r"\d", replacement="")])

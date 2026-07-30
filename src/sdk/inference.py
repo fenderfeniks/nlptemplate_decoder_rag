@@ -10,7 +10,7 @@ from hydra.core.global_hydra import GlobalHydra
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
-from src.core.inference.generator import HFTextGenerator
+from main_model.inference.generator import HFTextGenerator
 from src.utils.checkpoint_utils import load_checkpoint
 from src.utils.logger import setup_logging
 from src.utils.mlflow import resolve_lora_resume_path
@@ -37,21 +37,21 @@ class LLMGenerationPipeline:
             self.cfg = compose(config_name=config_name)
             OmegaConf.resolve(self.cfg)
 
-        self.tokenizer = instantiate(self.cfg.model.tokenizer).build()
+        self.tokenizer = instantiate(self.cfg.main_model.model.tokenizer).build()
 
-        resume_cfg = self.cfg.get("lora_resume", {})
+        resume_cfg = self.cfg.main_model.model.get("lora_resume", {})
         lora_resume_path = resolve_lora_resume_path(resume_cfg)
         if lora_resume_path:
             logger.info("LoRA адаптер будет загружен из: %s", lora_resume_path)
             OmegaConf.update(
                 self.cfg,
-                "model.modifiers.finetuning.lora_resume_path",
+                "main_model.model.modifiers.finetuning.lora_resume_path",
                 lora_resume_path,
                 force_add=True,
             )
 
-        builder = instantiate(self.cfg.model.builder)
-        builder.modifiers_cfg = self.cfg.model.get("modifiers")
+        builder = instantiate(self.cfg.main_model.model.builder)
+        builder.modifiers_cfg = self.cfg.main_model.model.get("modifiers")
         self.model = builder.build(tokenizer=self.tokenizer)
 
         if checkpoint_path:
@@ -65,7 +65,7 @@ class LLMGenerationPipeline:
         self.generator = HFTextGenerator(
             model=self.model,
             tokenizer=self.tokenizer,
-            generation_kwargs=self.cfg.get("inference", {}).get("generation_kwargs", {}),
+            generation_kwargs=self.cfg.main_model.inference.get("generation_kwargs", {}),
         )
 
     @torch.no_grad()

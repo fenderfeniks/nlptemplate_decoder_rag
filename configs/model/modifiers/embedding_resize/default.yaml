@@ -1,3 +1,0 @@
-# @package model.modifiers.embedding_resize
-_target_: src.core.models.modifiers.EmbeddingResizeModifier
-tokenizer: ${model.tokenizer}

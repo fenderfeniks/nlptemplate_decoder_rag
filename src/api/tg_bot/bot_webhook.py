@@ -12,8 +12,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
 
+from main_model.core.prompts.manager import PromptManager
 from src.api.tg_bot.handlers.chat import router as chat_router
-from src.core.prompts.manager import PromptManager
 
 
 logger = logging.getLogger(__name__)

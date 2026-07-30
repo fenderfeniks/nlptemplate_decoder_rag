@@ -19,11 +19,11 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+from main_model.core.prompts.manager import PromptManager
 from src.api.rest.endpoints import generate, health
 from src.api.rest.limiter import limiter
 from src.api.rest.middlewares import setup_middlewares
 from src.api.tg_bot.bot_webhook import dp, get_webhook_bot
-from src.core.prompts.manager import PromptManager
 from src.sdk.inference import LLMGenerationPipeline
 
 

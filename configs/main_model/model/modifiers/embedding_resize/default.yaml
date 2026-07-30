@@ -1,0 +1,2 @@
+_target_: src.core.models.modifiers.EmbeddingResizeModifier
+tokenizer: ${model.tokenizer}
