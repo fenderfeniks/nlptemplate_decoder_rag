@@ -2,7 +2,7 @@
 import logging
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from src.api_gateway.dependencies import get_orchestrator
@@ -21,21 +21,21 @@ async def chat_stream_endpoint(
 ) -> StreamingResponse:
     """Принимает вопрос пользователя, ретривает документы и стримит ответ LLM."""
 
+    # 1. Ретривал выполняется ДО начала стриминга.
+    # Если RAG упадет, FastAPI корректно перехватит HTTPException и вернет 502 JSON.
+    prompt = await orchestrator.build_prompt(
+        query=body.query,
+        top_k=body.top_k,
+        filters=body.filters,
+    )
+
+    # 2. Генератор занимается ИСКЛЮЧИТЕЛЬНО стримингом LLM
     async def _stream_generator() -> AsyncIterator[str]:
         try:
-            async for chunk in orchestrator.ask_stream(
-                query=body.query,
-                top_k=body.top_k,
-                filters=body.filters,
-            ):
+            async for chunk in orchestrator.llm_client.generate_stream(prompt):
                 yield chunk
-        except HTTPException:
-            # Пробрасываем HTTP-ошибки (например, 502 от RAG API) как есть —
-            # они уже несут корректный статус-код, не нужно их поглощать.
-            raise
         except Exception as e:
-            # Непредвиденные ошибки: логируем и сигнализируем клиенту
-            # маркером внутри SSE-потока (HTTP-заголовки уже отправлены).
+            # Ошибки самой генерации (когда заголовки 200 уже ушли) глушим маркером
             logger.exception("Непредвиденная ошибка при генерации ответа: %s", e)
             yield "\n[Ошибка при получении ответа]"
 

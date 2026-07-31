@@ -32,7 +32,7 @@ CONFIG: dict[str, Any] = Variable.get(
 
 with DAG(
     "rag_batch_analytics_reporting",
-    default_args=make_default_args(**CONFIG["default_args"]),  # [cite: 32]
+    default_args=make_default_args(**CONFIG["default_args"]),
     schedule=CONFIG["schedule"],
     catchup=False,
     tags=["nlp", "analytics", "rag"],
@@ -45,7 +45,7 @@ with DAG(
         cmds=["python", "-m", "src.tools.batch_analytics", "pipeline_name=rag_pipeline"],
         container_resources=k8s.V1ResourceRequirements(**CONFIG["resources"]),
         service_account_name="airflow-worker-sa",
-        env_from=COMMON_ENV_FROM,  # [cite: 32]
+        env_from=COMMON_ENV_FROM,
         env_vars=[
             k8s.V1EnvVar(
                 name="DB_CONN",
@@ -60,7 +60,5 @@ with DAG(
         is_delete_operator_pod=True,
     )
 
-    notify_failure = make_failure_slack_alert(
-        "notify_on_failure", "rag_batch_analytics_reporting"
-    )  # [cite: 32]
+    notify_failure = make_failure_slack_alert("notify_on_failure", "rag_batch_analytics_reporting")
     run_batch_inference >> notify_failure

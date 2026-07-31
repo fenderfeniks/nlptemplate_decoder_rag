@@ -39,14 +39,14 @@ CONFIG: dict[str, Any] = Variable.get(
 
 with DAG(
     "rag_encoder_finetuning",
-    default_args=make_default_args(**CONFIG["default_args"]),  # [cite: 32]
+    default_args=make_default_args(**CONFIG["default_args"]),
     schedule=CONFIG["schedule"],
     catchup=False,
     tags=["nlp", "rag", "training"],
 ) as dag:
     model_vol, model_mount = make_pvc_volume(
         "model-weights", CONFIG["pvc_name"], CONFIG["mount_path"]
-    )  # [cite: 32]
+    )
 
     train_model_task = KubernetesPodOperator(
         task_id="run_contrastive_learning",
@@ -70,9 +70,8 @@ with DAG(
         image=IMAGE,
         cmds=["python", "-m", "src.tools.merge_lora", "pipeline_name=rag_pipeline"],
         service_account_name="airflow-worker-sa",
-        container_resources=k8s.V1ResourceRequirements(
-            **CONFIG["resources_cpu"]
-        ),  # Исправлено: CPU для merge
+        container_resources=k8s.V1ResourceRequirements(**CONFIG["resources_cpu"]),
+        env_from=COMMON_ENV_FROM,
         volume_mounts=[model_mount],
         volumes=[model_vol],
         get_logs=True,
@@ -87,6 +86,7 @@ with DAG(
         service_account_name="airflow-worker-sa",
         cmds=["python", "-m", "scripts.rag_pipeline.eval"],
         container_resources=k8s.V1ResourceRequirements(**CONFIG["resources_gpu"]),
+        env_from=COMMON_ENV_FROM,
         volume_mounts=[model_mount],
         volumes=[model_vol],
         get_logs=True,
@@ -96,12 +96,10 @@ with DAG(
     request_approval = SlackWebhookOperator(
         task_id="request_manual_approval",
         slack_webhook_conn_id="slack_conn",
-        message="✅ Обучение RAG-энкодера завершено. Модель ждет в Staging. Проверьте метрики MRR.",
+        message="✅ Обучение RAG-энкодера завершено. Модель ждёт в Staging. Проверьте метрики MRR.",
     )
 
-    notify_failure = make_failure_slack_alert(
-        "notify_on_failure", "rag_encoder_finetuning"
-    )  # [cite: 32]
+    notify_failure = make_failure_slack_alert("notify_on_failure", "rag_encoder_finetuning")
 
     train_model_task >> merge_weights_task >> evaluate_staging_task >> request_approval
-    [train_model_task, merge_weights_task, evaluate_staging_task] >> notify_failure
+    evaluate_staging_task >> notify_failure

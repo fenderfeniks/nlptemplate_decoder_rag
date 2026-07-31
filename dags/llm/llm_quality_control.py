@@ -33,13 +33,14 @@ CONFIG: dict[str, Any] = Variable.get(
 
 with DAG(
     "llm_quality_drift_detection",
-    default_args=make_default_args(**CONFIG["default_args"]),  # [cite: 32]
+    default_args=make_default_args(**CONFIG["default_args"]),
     schedule=CONFIG["schedule"],
     catchup=False,
     tags=["nlp", "monitoring", "llm"],
 ) as dag:
-    # ВАЖНО: Скрипт scripts.decoder_pipeline.eval ДОЛЖЕН падать (sys.exit(1)),
-    # если метрика не проходит порог, чтобы Airflow зарегистрировал failure.
+    # ВАЖНО: scripts.decoder_pipeline.eval должен завершаться с sys.exit(1)
+    # при нарушении порога метрики — иначе Airflow не зарегистрирует failure
+    # и Slack-алерт не сработает.
     evaluate_model = KubernetesPodOperator(
         task_id="evaluate_llm",
         name="evaluator-pod",
@@ -60,8 +61,13 @@ with DAG(
     notify_drift = SlackWebhookOperator(
         task_id="alert_if_drift",
         slack_webhook_conn_id="slack_conn",
-        message=f"Внимание! Качество генерации (ROUGE-1) упало ниже {int(CONFIG['rouge1_threshold'] * 100)}%.",
+        message=(
+            f"Внимание! Качество генерации (ROUGE-1) упало ниже "
+            f"{int(CONFIG['rouge1_threshold'] * 100)}%. Требуется дообучение LLM."
+        ),
         trigger_rule="one_failed",
     )
 
-    evaluate_model >> notify_drift
+    notify_failure = make_failure_slack_alert("notify_on_failure", "llm_quality_drift_detection")
+
+    evaluate_model >> [notify_drift, notify_failure]

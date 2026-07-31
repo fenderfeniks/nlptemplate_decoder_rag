@@ -33,7 +33,7 @@ CONFIG: dict[str, Any] = Variable.get(
 
 with DAG(
     "rag_quality_drift_detection",
-    default_args=make_default_args(**CONFIG["default_args"]),  # [cite: 32]
+    default_args=make_default_args(**CONFIG["default_args"]),
     schedule=CONFIG["schedule"],
     catchup=False,
     tags=["nlp", "monitoring", "rag"],
@@ -55,12 +55,16 @@ with DAG(
         is_delete_operator_pod=True,
     )
 
-    # Исправлено #12: Укороченный текст сообщения для Slack
     notify_drift = SlackWebhookOperator(
         task_id="alert_if_drift",
         slack_webhook_conn_id="slack_conn",
-        message=f"Внимание! MRR ниже {int(CONFIG['mrr_threshold'] * 100)}%. Нужен дообуч.",
+        message=(
+            f"Внимание! Качество поиска (MRR) упало ниже порога "
+            f"{int(CONFIG['mrr_threshold'] * 100)}%. Требуется дообучение энкодера."
+        ),
         trigger_rule="one_failed",
     )
 
-    evaluate_model >> notify_drift
+    notify_failure = make_failure_slack_alert("notify_on_failure", "rag_quality_drift_detection")
+
+    evaluate_model >> [notify_drift, notify_failure]

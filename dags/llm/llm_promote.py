@@ -5,7 +5,6 @@ from typing import Any
 from airflow import DAG
 from airflow.models import Variable
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
-from kubernetes.client import models as k8s
 
 from dags.common import (
     API_IMAGE,

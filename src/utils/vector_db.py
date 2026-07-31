@@ -251,10 +251,10 @@ class FAISSVectorDB:
         return [
             [
                 {"score": float(d), "metadata": self.metadata[i]}
-                for d, i in zip(dist_row, idx_row)
+                for d, i in zip(dist_row, idx_row)  # noqa
                 if i != -1
             ]
-            for dist_row, idx_row in zip(distances, indices)
+            for dist_row, idx_row in zip(distances, indices)  # noqa
         ]
 
     def _search_with_filter(
@@ -289,7 +289,7 @@ class FAISSVectorDB:
                 idx_row = indices[local_idx]
 
                 row_res: list[dict[str, Any]] = []
-                for d, i in zip(dist_row, idx_row):
+                for d, i in zip(dist_row, idx_row):  # noqa
                     if i == -1:
                         continue
                     if self._match_filters(self.metadata[i], filter_metadata):

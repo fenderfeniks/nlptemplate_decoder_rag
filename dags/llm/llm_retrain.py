@@ -39,14 +39,14 @@ CONFIG: dict[str, Any] = Variable.get(
 
 with DAG(
     "llm_weekly_finetuning",
-    default_args=make_default_args(**CONFIG["default_args"]),  # [cite: 32]
+    default_args=make_default_args(**CONFIG["default_args"]),
     schedule=CONFIG["schedule"],
     catchup=False,
     tags=["nlp", "llm", "training"],
 ) as dag:
     model_vol, model_mount = make_pvc_volume(
         "model-weights", CONFIG["pvc_name"], CONFIG["mount_path"]
-    )  # [cite: 32]
+    )
 
     train_model_task = KubernetesPodOperator(
         task_id="run_lora_finetuning",
@@ -56,7 +56,7 @@ with DAG(
         cmds=["python", "-m", "scripts.decoder_pipeline.train"],
         service_account_name="airflow-worker-sa",
         container_resources=k8s.V1ResourceRequirements(**CONFIG["resources_gpu"]),
-        env_from=COMMON_ENV_FROM,  # [cite: 32]
+        env_from=COMMON_ENV_FROM,
         volume_mounts=[model_mount],
         volumes=[model_vol],
         get_logs=True,
@@ -70,9 +70,8 @@ with DAG(
         image=IMAGE,
         cmds=["python", "-m", "src.tools.merge_lora", "pipeline_name=decoder_pipeline"],
         service_account_name="airflow-worker-sa",
-        container_resources=k8s.V1ResourceRequirements(
-            **CONFIG["resources_cpu"]
-        ),  # Исправлено: CPU для merge
+        container_resources=k8s.V1ResourceRequirements(**CONFIG["resources_cpu"]),
+        env_from=COMMON_ENV_FROM,
         volume_mounts=[model_mount],
         volumes=[model_vol],
         get_logs=True,
@@ -87,6 +86,7 @@ with DAG(
         service_account_name="airflow-worker-sa",
         cmds=["python", "-m", "scripts.decoder_pipeline.eval"],
         container_resources=k8s.V1ResourceRequirements(**CONFIG["resources_gpu"]),
+        env_from=COMMON_ENV_FROM,
         volume_mounts=[model_mount],
         volumes=[model_vol],
         get_logs=True,
@@ -99,9 +99,11 @@ with DAG(
         message="✅ Обучение LLM завершено. Монолитная модель ждет в Staging. Проверьте MLflow.",
     )
 
-    notify_failure = make_failure_slack_alert(
-        "notify_on_failure", "llm_weekly_finetuning"
-    )  # [cite: 32]
+    notify_failure = make_failure_slack_alert("notify_on_failure", "llm_weekly_finetuning")
 
+    # Линейная цепочка успешного пути
     train_model_task >> merge_weights_task >> evaluate_staging_task >> request_approval
-    [train_model_task, merge_weights_task, evaluate_staging_task] >> notify_failure
+    # notify_failure подключён к последнему таску успешного пути:
+    # trigger_rule="one_failed" позаботится о том, чтобы он сработал
+    # при падении любого из предшественников через стандартный механизм Airflow
+    evaluate_staging_task >> notify_failure

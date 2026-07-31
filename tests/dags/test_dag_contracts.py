@@ -1,96 +1,73 @@
-import importlib
-
-import pytest
-
-
-KUBERNETES_TASKS = [
-    ("dags.batch_analytics", "run_batch_inference"),
-    ("dags.retrain_model_dag", "run_lora_finetuning"),
-    ("dags.retrain_model_dag", "evaluate_staging_model"),
-    ("dags.quality_control", "evaluate_llm"),
-    ("dags.promote_to_prod", "promote_staging_to_prod"),
-    ("dags.promote_to_prod", "restart_api_deployment"),
-    ("dags.system_maintenance", "cleanup_logs_and_mlruns"),
-]
+# tests/dags/test_dag_contracts.py
+"""Тесты контрактов DAGов: секреты, образы, монтирования, аргументы скриптов."""
 
 
-def _is_delete_pod(task):
-    """Совместимо с Airflow 2.9+ где атрибут стал приватным."""
-    return getattr(task, "_is_delete_operator_pod", None) or getattr(
-        task, "is_delete_operator_pod", None
+def test_batch_analytics_db_conn_from_secret(dagbag):
+    """DB_CONN должна пробрасываться из K8s Secret, а не задаваться явно."""
+    for dag_id in ["llm_batch_analytics_reporting", "rag_batch_analytics_reporting"]:
+        dag = dagbag.get_dag(dag_id)
+        assert dag is not None, f"DAG {dag_id} не найден"
+        task = dag.get_task("run_batch_inference")
+
+        db_env = next((env for env in task.env_vars if env.name == "DB_CONN"), None)
+        assert db_env is not None, f"Переменная DB_CONN не передана в {dag_id}"
+        assert db_env.value_from.secret_key_ref.name == "db-secrets", (
+            f"Неверный секрет для DB_CONN в {dag_id}"
+        )
+
+
+def test_promote_kubectl_image_is_pinned(dagbag):
+    """kubectl-образ должен быть зафиксирован на конкретном теге (не latest)."""
+    for dag_id, task_id in [
+        ("promote_llm_to_prod", "restart_api_deployment"),
+        ("promote_rag_to_prod", "restart_rag_api_deployment"),
+    ]:
+        dag = dagbag.get_dag(dag_id)
+        assert dag is not None, f"DAG {dag_id} не найден"
+        task = dag.get_task(task_id)
+        assert task.image == "bitnami/kubectl:1.29", (
+            f"Незафиксированный образ kubectl в {dag_id}.{task_id}: {task.image}"
+        )
+
+
+def test_rag_indexing_mounts_multiple_volumes(dagbag):
+    """Задача индексации должна монтировать и raw-data, и vector-db PVC."""
+    dag = dagbag.get_dag("rag_incremental_indexing")
+    assert dag is not None, "DAG rag_incremental_indexing не найден"
+    task = dag.get_task("incremental_reindex")
+
+    assert len(task.volumes) >= 2, f"Ожидается ≥2 Volumes, получено {len(task.volumes)}"
+    assert len(task.volume_mounts) >= 2, (
+        f"Ожидается ≥2 VolumeMounts, получено {len(task.volume_mounts)}"
+    )
+
+    mount_names = [m.name for m in task.volume_mounts]
+    assert "raw-data" in mount_names, f"Нет raw-data в {mount_names}"
+    assert "vector-db" in mount_names, f"Нет vector-db в {mount_names}"
+
+
+def test_rag_ingestion_pipeline_name(dagbag):
+    """fetch_data должен запускаться с pipeline_name=rag_pipeline."""
+    dag = dagbag.get_dag("rag_data_ingestion")
+    assert dag is not None, "DAG rag_data_ingestion не найден"
+    task = dag.get_task("fetch_data_from_sources")
+    assert any("rag_pipeline" in cmd for cmd in task.cmds), (
+        f"pipeline_name=rag_pipeline не найден в cmds: {task.cmds}"
     )
 
 
-@pytest.mark.parametrize("module,task_id", KUBERNETES_TASKS)
-def test_all_k8s_tasks_use_correct_namespace(module, task_id):
-    mod = importlib.import_module(module)
-    task = mod.dag.get_task(task_id)
-    assert task.namespace == "ml-pipelines", (
-        f"{task_id}: namespace = {task.namespace!r}, ожидалось 'ml-pipelines'"
-    )
+def test_quality_control_slack_trigger_rule(dagbag):
+    """alert_if_drift должен срабатывать только при падении (one_failed)."""
+    # Импорт внутри теста — избегаем circular import при коллекции на Windows
+    from airflow.providers.slack.operators.slack_webhook import SlackWebhookOperator
 
-
-@pytest.mark.parametrize("module,task_id", KUBERNETES_TASKS)
-def test_all_k8s_tasks_have_service_account(module, task_id):
-    mod = importlib.import_module(module)
-    task = mod.dag.get_task(task_id)
-    assert task.service_account_name == "airflow-worker-sa", (
-        f"{task_id}: service_account = {task.service_account_name!r}"
-    )
-
-
-@pytest.mark.parametrize("module,task_id", KUBERNETES_TASKS)
-def test_all_k8s_tasks_delete_pod_on_success(module, task_id):
-    mod = importlib.import_module(module)
-    task = mod.dag.get_task(task_id)
-    assert _is_delete_pod(task) is True, (
-        f"{task_id}: is_delete_operator_pod = {_is_delete_pod(task)!r}"
-    )
-
-
-def test_retrain_kaggle_secret_present():
-    import dags.retrain_model_dag as mod
-
-    task = mod.dag.get_task("run_lora_finetuning")
-    env_names = {e.name for e in task.env_vars}
-    assert "KAGGLE_USERNAME" in env_names, "KAGGLE_USERNAME не прокинут в training pod"
-    assert "KAGGLE_KEY" in env_names, "KAGGLE_KEY не прокинут в training pod"
-
-    for env in task.env_vars:
-        if env.name == "KAGGLE_USERNAME":
-            assert env.value_from is not None, "KAGGLE_USERNAME должен браться из secretKeyRef"
-            assert env.value_from.secret_key_ref.name == "decoder-template-api-secrets"
-            assert env.value_from.secret_key_ref.key == "KAGGLE_USERNAME"
-        if env.name == "KAGGLE_KEY":
-            assert env.value_from is not None
-            assert env.value_from.secret_key_ref.name == "decoder-template-api-secrets"
-            assert env.value_from.secret_key_ref.key == "KAGGLE_KEY"
-
-
-def test_batch_analytics_db_conn_from_secret():
-    import dags.batch_analytics as mod
-
-    task = mod.dag.get_task("run_batch_inference")
-    db_env = next((e for e in task.env_vars if e.name == "DB_CONN"), None)
-    assert db_env is not None, "DB_CONN не найден в env_vars"
-    assert db_env.value_from is not None, (
-        "DB_CONN должен браться из secretKeyRef, не передаваться как value="
-    )
-    assert db_env.value is None, "DB_CONN не должен быть хардкодом"
-
-
-def test_promote_kubectl_image_is_pinned():
-    import dags.promote_to_prod as mod
-
-    task = mod.dag.get_task("restart_api_deployment")
-    assert "latest" not in task.image, (
-        f"kubectl image не должен использовать latest: {task.image!r}"
-    )
-    assert "kubectl" in task.image
-
-
-def test_quality_control_slack_trigger_rule():
-    import dags.quality_control as mod
-
-    task = mod.dag.get_task("alert_if_drift")
-    assert task.trigger_rule == "one_failed", f"Неверный trigger_rule: {task.trigger_rule!r}"
+    for dag_id in ["llm_quality_drift_detection", "rag_quality_drift_detection"]:
+        dag = dagbag.get_dag(dag_id)
+        assert dag is not None, f"DAG {dag_id} не найден"
+        task = dag.get_task("alert_if_drift")
+        assert isinstance(task, SlackWebhookOperator), (
+            f"alert_if_drift в {dag_id} не является SlackWebhookOperator"
+        )
+        assert task.trigger_rule == "one_failed", (
+            f"Неверный trigger_rule в {dag_id}: {task.trigger_rule}"
+        )

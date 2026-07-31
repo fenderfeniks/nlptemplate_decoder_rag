@@ -19,6 +19,7 @@ from dags.common import (
 CONFIG: dict[str, Any] = Variable.get(
     "maintenance_config",
     default_var={
+        # Раз в неделю по воскресеньям в 3:00 UTC (было @daily — снижено для экономии ресурсов)
         "schedule": "0 3 * * 0",
         "retention_days": 30,
         "logs_pvc_name": "logs-pvc",
@@ -31,12 +32,11 @@ CONFIG: dict[str, Any] = Variable.get(
 
 with DAG(
     "system_maintenance",
-    default_args=make_default_args(**CONFIG["default_args"]),  # [cite: 32]
+    default_args=make_default_args(**CONFIG["default_args"]),
     schedule=CONFIG["schedule"],
     catchup=False,
     tags=["maintenance", "nlp"],
 ) as dag:
-    # Используем общую фабрику[cite: 32]
     logs_vol, logs_mount = make_pvc_volume(
         "logs-data", CONFIG["logs_pvc_name"], CONFIG["logs_mount_path"]
     )
@@ -44,8 +44,8 @@ with DAG(
     cleanup_logs = KubernetesPodOperator(
         task_id="cleanup_logs_and_mlruns",
         name="cleanup-logs-pod",
-        namespace=NAMESPACE,  # [cite: 32]
-        image=IMAGE,  # [cite: 32]
+        namespace=NAMESPACE,
+        image=IMAGE,
         service_account_name="airflow-worker-sa",
         cmds=[
             "python",
@@ -58,7 +58,7 @@ with DAG(
         ],
         container_resources=k8s.V1ResourceRequirements(**CONFIG["resources"]),
         env_vars=[
-            # Исправлен баг №2: Теперь передаем корректный MLRUNS_DIR
+            # MLRUNS_DIR — именно это имя читает src/tools/maintenance.py
             k8s.V1EnvVar(name="MLRUNS_DIR", value=CONFIG["logs_mount_path"]),
         ],
         volume_mounts=[logs_mount],
@@ -67,7 +67,5 @@ with DAG(
         is_delete_operator_pod=True,
     )
 
-    notify_failure = make_failure_slack_alert(
-        "notify_on_failure", "system_maintenance"
-    )  # [cite: 32]
+    notify_failure = make_failure_slack_alert("notify_on_failure", "system_maintenance")
     cleanup_logs >> notify_failure

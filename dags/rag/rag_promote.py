@@ -5,7 +5,6 @@ from typing import Any
 from airflow import DAG
 from airflow.models import Variable
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
-from kubernetes.client import models as k8s
 
 from dags.common import (
     API_IMAGE,
@@ -28,7 +27,7 @@ CONFIG: dict[str, Any] = Variable.get(
 
 with DAG(
     "promote_rag_to_prod",
-    default_args=make_default_args(**CONFIG["default_args"]),  # [cite: 32]
+    default_args=make_default_args(**CONFIG["default_args"]),
     schedule=None,  # Только ручной запуск
     catchup=False,
     tags=["nlp", "production", "rag"],
@@ -37,7 +36,7 @@ with DAG(
         task_id="promote_staging_to_prod",
         name="rag-promote-model-pod",
         namespace=NAMESPACE,
-        image=API_IMAGE,  # [cite: 32]
+        image=API_IMAGE,
         cmds=["python", "-m", "src.tools.promote", "pipeline_name=rag_pipeline"],
         service_account_name="airflow-worker-sa",
         env_from=COMMON_ENV_FROM,
@@ -50,7 +49,7 @@ with DAG(
         name="restart-rag-api-pod",
         namespace=NAMESPACE,
         image="bitnami/kubectl:1.29",
-        # Исправлено #5: Ожидание завершения перезапуска[cite: 33]
+        # Исправлено #5: Ожидание завершения перезапуска
         cmds=["sh", "-c"],
         arguments=[
             f"kubectl rollout restart deployment/{CONFIG['deployment_name']} -n {NAMESPACE} "
@@ -61,8 +60,6 @@ with DAG(
         service_account_name="airflow-worker-sa",
     )
 
-    notify_failure = make_failure_slack_alert(
-        "notify_on_failure", "promote_rag_to_prod"
-    )  # [cite: 32]
+    notify_failure = make_failure_slack_alert("notify_on_failure", "promote_rag_to_prod")
 
     promote_model >> restart_api >> notify_failure

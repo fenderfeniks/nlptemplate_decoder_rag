@@ -37,12 +37,12 @@ CONFIG: dict[str, Any] = Variable.get(
 
 with DAG(
     "rag_incremental_indexing",
-    default_args=make_default_args(**CONFIG["default_args"]),  # [cite: 32]
+    default_args=make_default_args(**CONFIG["default_args"]),
     schedule=CONFIG["schedule"],
     catchup=False,
     tags=["nlp", "rag", "indexing"],
 ) as dag:
-    # Вызовы фабрики томов[cite: 32]
+    # Вызовы фабрики томов
     data_vol, data_mount = make_pvc_volume(
         "raw-data", CONFIG["data_pvc_name"], CONFIG["data_mount_path"]
     )
@@ -70,9 +70,7 @@ with DAG(
         trigger_rule="all_success",
     )
 
-    notify_failure = make_failure_slack_alert(
-        "notify_on_failure", "rag_incremental_indexing"
-    )  # [cite: 32]
+    notify_failure = make_failure_slack_alert("notify_on_failure", "rag_incremental_indexing")
 
     reindex_vector_db >> notify_success
     reindex_vector_db >> notify_failure

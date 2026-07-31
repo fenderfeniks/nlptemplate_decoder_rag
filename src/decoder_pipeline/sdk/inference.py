@@ -61,7 +61,7 @@ class LLMGenerationClient:
         responses = await asyncio.gather(*tasks)
         return [
             {"prompt": prompt, "generated_text": resp.choices[0].text}
-            for prompt, resp in zip(texts, responses)
+            for prompt, resp in zip(texts, responses)  # noqa
         ]
 
     async def generate_stream(

@@ -3,11 +3,15 @@
 
 Выносим повторяющиеся конструкции (volumes, default_args, callbacks) сюда,
 чтобы не дублировать их в каждом DAG-файле.
+
+Note:
+    Variable.get() обёрнуто в try/except — при недоступности БД Airflow
+    во время парсинга DAGов используются дефолтные значения, чтобы все DAGи
+    оставались доступны в UI.
 """
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import pendulum
@@ -16,16 +20,22 @@ from airflow.providers.slack.operators.slack_webhook import SlackWebhookOperator
 from kubernetes.client import models as k8s
 
 
-logger = logging.getLogger(__name__)
-
-
 # ---------------------------------------------------------------------------
-# Переменные окружения — читаем один раз
+# Глобальные переменные — читаем один раз при парсинге DAG
 # ---------------------------------------------------------------------------
 
-IMAGE: str = Variable.get("PROJECT_IMAGE", default_var="my-company/nlp_template:training-latest")
-API_IMAGE: str = Variable.get("PROJECT_API_IMAGE", default_var="my-company/nlp_template:api-latest")
-NAMESPACE: str = Variable.get("K8S_NAMESPACE", default_var="ml-pipelines")
+
+def _get_variable(key: str, default: str) -> str:
+    """Безопасное чтение Airflow Variable с fallback при недоступной БД."""
+    try:
+        return Variable.get(key, default_var=default)
+    except Exception:
+        return default
+
+
+IMAGE: str = _get_variable("PROJECT_IMAGE", "my-company/nlp_template:training-latest")
+API_IMAGE: str = _get_variable("PROJECT_API_IMAGE", "my-company/nlp_template:api-latest")
+NAMESPACE: str = _get_variable("K8S_NAMESPACE", "ml-pipelines")
 
 # Общий ConfigMap для всех подов
 COMMON_ENV_FROM = [
@@ -65,7 +75,7 @@ def make_default_args(
 
 
 # ---------------------------------------------------------------------------
-# Фабрика Volume + VolumeMount (убирает дублирование в training DAGах)
+# Фабрика Volume + VolumeMount
 # ---------------------------------------------------------------------------
 
 
@@ -90,7 +100,7 @@ def make_pvc_volume(
 
 
 # ---------------------------------------------------------------------------
-# Общий Slack-нотификатор при падении
+# Slack-нотификатор при падении
 # ---------------------------------------------------------------------------
 
 
