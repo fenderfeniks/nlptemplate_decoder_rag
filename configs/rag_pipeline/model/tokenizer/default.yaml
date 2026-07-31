@@ -3,4 +3,5 @@ tokenizer_name: ${rag_pipeline.model.architecture.model_name_or_path}
 use_fast: true
 padding_side: "right"
 add_eos_token: false
+trust_remote_code: false
 chat_template: null

@@ -9,6 +9,13 @@ version = "1.0.0"
 description = "Production-ready NLP Classification framework with Hydra, FastAPI and uv"
 readme = "README.md"
 requires-python = ">=3.10, <3.12"
+dependencies = [
+    "openai>=2.51.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
 
 # ==========================================
 # БАЗОВЫЙ МИНИМУМ (Ядро)
@@ -29,6 +36,7 @@ dependencies = [
     "python-json-logger>=2.0.0",
     "tomli>=2.0.0; python_version < '3.11'",
     "sacrebleu>=2.6.0",
+    "faiss-cpu>=1.14.3",
 ]
 
 [project.optional-dependencies]
@@ -82,10 +90,11 @@ api = [
     "starlette>=0.36.0",
     "aiogram>=3.4.0",
     "aiohttp>=3.9.3",
-    "redis>=8.0.1",                                   # Кэш / rate limiting
+    "redis>=8.0.1",
     "prometheus-fastapi-instrumentator>=6.1.0",
     "prometheus-client>=0.20.0",
     "slowapi>=0.1.9",
+    "httpx>=0.27.0",
 ]
 
 # ==========================================

@@ -4,7 +4,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.api.schemas import GenerationRequest, GenerationResponse
+from src.decoder_pipeline.api.schemas import GenerationRequest, GenerationResponse
 
 
 class TestGenerationRequest:

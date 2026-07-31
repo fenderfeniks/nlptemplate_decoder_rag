@@ -1,7 +1,7 @@
 # configs/rag_pipeline/model/default.yaml
 
 defaults:
-  - architecture: bge-m3          # Тут будет лежать auto_model_class: "transformers.AutoModel"
+  - architecture: test          # Тут будет лежать auto_model_class: "transformers.AutoModel"
   - pooling: mean                 # Наш новый компонент для RAG
   - tokenizer: default
   - quantization: none

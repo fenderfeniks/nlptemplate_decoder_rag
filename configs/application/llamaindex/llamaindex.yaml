@@ -1,0 +1,11 @@
+# configs/application/llamaindex.yaml
+# Параметры для run_llamaindex.py — альтернативная оркестрация через LlamaIndex.
+# Использует те же модели что и основной RAGOrchestrator,
+# но ретривал и промпт-сборку делегирует LlamaIndex.
+
+# Число документов для поиска в query_engine
+similarity_top_k: 3
+
+# Тестовый запрос для run_llamaindex.py
+# Переопределяется через CLI: application.llamaindex.test_query="твой вопрос"
+test_query: "Какие существуют архитектурные паттерны для масштабирования RAG?"

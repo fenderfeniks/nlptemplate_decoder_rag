@@ -43,7 +43,7 @@ def _check_drift(
         sys.exit(1)
 
 
-@hydra.main(config_path="../configs", config_name="main", version_base="1.3")
+@hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
 def evaluate(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
 
@@ -74,7 +74,7 @@ def evaluate(cfg: DictConfig) -> None:
         else None,
     )
     datamodule = NLPDataModule(data_cfg=cfg.decoder_pipeline.data, tokenizer=tokenizer)
-    trainer = hydra.utils.instantiate(cfg.decoder_pipeline.trainer)
+    training = hydra.utils.instantiate(cfg.decoder_pipeline.training)
 
     ckpt_path = cfg.get("ckpt_path")
     if ckpt_path:
@@ -84,10 +84,10 @@ def evaluate(cfg: DictConfig) -> None:
         ckpt_path = None
 
     logger.info("Старт процесса оценки...")
-    results = trainer.test(model=model_module, datamodule=datamodule, ckpt_path=ckpt_path)
+    results = training.test(model=model_module, datamodule=datamodule, ckpt_path=ckpt_path)
 
     if not results:
-        logger.warning("trainer.test() вернул пустые результаты.")
+        logger.warning("training.test() вернул пустые результаты.")
         return
 
     metrics = results[0]

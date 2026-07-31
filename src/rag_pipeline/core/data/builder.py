@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _TOKENIZATION_MARKER = "TokenizationTransform"
 
 
-class NLPDataModule(pl.LightningDataModule):
+class RAGDataModule(pl.LightningDataModule):
     """Универсальный DataModule для NLP-задач (SFT, CPT, RAG indexing/contrastive).
 
     Делегирует:
@@ -91,6 +91,9 @@ class NLPDataModule(pl.LightningDataModule):
             TypeError: Если ``data_cfg.transforms`` — не список.
         """
         transforms_cfg = self.data_cfg.transforms
+
+        if OmegaConf.is_dict(transforms_cfg):
+            transforms_cfg = list(transforms_cfg.values())
 
         if not isinstance(transforms_cfg, (list, ListConfig)):
             raise TypeError(

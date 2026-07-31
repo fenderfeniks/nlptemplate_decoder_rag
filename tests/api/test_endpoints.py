@@ -106,7 +106,7 @@ class TestGenerateEndpointAuth:
 class TestGenerateEndpointMLUnavailable:
     @pytest.mark.asyncio
     async def test_returns_503_when_generator_is_none(self, test_app):
-        from src.api.rest.dependencies import get_generator
+        from src.decoder_pipeline.api.rest.dependencies import get_generator
 
         test_app.dependency_overrides[get_generator] = lambda: None
         transport = ASGITransport(app=test_app)
@@ -119,7 +119,7 @@ class TestGenerateEndpointMLUnavailable:
 
     @pytest.mark.asyncio
     async def test_returns_503_when_generator_raises(self, test_app):
-        from src.api.rest.dependencies import get_generator
+        from src.decoder_pipeline.api.rest.dependencies import get_generator
 
         broken = MagicMock(side_effect=RuntimeError("CUDA out of memory"))
         test_app.dependency_overrides[get_generator] = lambda: broken

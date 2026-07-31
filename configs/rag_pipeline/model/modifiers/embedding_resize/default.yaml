@@ -1,2 +1,2 @@
 _target_: src.rag_pipeline.core.models.modifiers.EmbeddingResizeModifier
-tokenizer: ${rag_pipeline.model.tokenizer}
+pad_to_multiple_of: 8

@@ -1,2 +1,1 @@
-# @package _self_
 _target_: src.rag_pipeline.retrieval.retriever.BaseRetriever

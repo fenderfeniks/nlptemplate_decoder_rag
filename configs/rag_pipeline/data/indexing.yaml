@@ -1,12 +1,12 @@
 defaults:
-  - source: local
+  - source: hf
   - splitter: default
   - collator: indexing
   - transforms/validation: validation_indexing
-  - transforms/cleaning: default
+  - transforms/cleaning: cleaning
   - transforms/deduplication: minhash
-  - transforms/chunking: default      # Специфично для RAG
-  - transforms/metadata: default      # Специфично для RAG
+  - transforms/chunking: chunking      # Специфично для RAG
+  - transforms/metadata: metadata_injector      # Специфично для RAG
   - transforms/tokenization: tokenization_indexing
   - transforms/filtering: default
   - _self_
@@ -27,7 +27,7 @@ test_size: 0.0
 # ==========================================
 # ГРУППА 2: ПАРАМЕТРЫ ТРАНСФОРМАЦИЙ
 # ==========================================
-text_column: "text"
+text_column: "sentence1"
 # Поля для contrastive здесь null
 query_column: null
 positive_column: null

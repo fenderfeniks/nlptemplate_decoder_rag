@@ -51,7 +51,7 @@ def fake_causal_model():
 
 @pytest.fixture
 def causal_module(fake_causal_model):
-    from decoder_pipeline.training.module import CausalLMLightningModule
+    from src.decoder_pipeline.training.module import CausalLMLightningModule
 
     optimizer_cfg = MagicMock()
     optimizer_cfg._target_ = "torch.optim.AdamW"
@@ -155,7 +155,7 @@ class TestConfigureOptimizers:
 
         import torch
 
-        from decoder_pipeline.training.module import CausalLMLightningModule
+        from src.decoder_pipeline.training.module import CausalLMLightningModule
 
         opt_cfg = NonCallableMagicMock()  # ← не callable → пойдёт в ветку instantiate
         with patch("src.decoder_pipeline.training.module.instantiate") as mock_inst:
@@ -165,7 +165,7 @@ class TestConfigureOptimizers:
                 optimizer_cfg=opt_cfg,
                 scheduler_cfg=None,
             )
-            module.trainer = MagicMock()
+            module.training = MagicMock()
             result = module.configure_optimizers()
 
         assert isinstance(result, torch.optim.Optimizer)
@@ -175,7 +175,7 @@ class TestConfigureOptimizers:
 
         import torch
 
-        from decoder_pipeline.training.module import CausalLMLightningModule
+        from src.decoder_pipeline.training.module import CausalLMLightningModule
 
         opt_cfg = MagicMock()
         sched_cfg = MagicMock()
@@ -189,7 +189,7 @@ class TestConfigureOptimizers:
                 scheduler_cfg=sched_cfg,
             )
 
-            module.trainer = MagicMock()
+            module.training = MagicMock()
             result = module.configure_optimizers()
 
         assert isinstance(result, dict)
@@ -201,7 +201,7 @@ class TestConfigureOptimizers:
 
         import torch
 
-        from decoder_pipeline.training.module import CausalLMLightningModule
+        from src.decoder_pipeline.training.module import CausalLMLightningModule
 
         for p in fake_causal_model.parameters():
             p.requires_grad = False
@@ -219,7 +219,7 @@ class TestConfigureOptimizers:
                 scheduler_cfg=None,
             )
 
-            module.trainer = MagicMock()
+            module.training = MagicMock()
             module.configure_optimizers()
 
         assert len(captured) == 0
@@ -228,7 +228,7 @@ class TestConfigureOptimizers:
         """Тестирует новую архитектуру с _partial_: true (callable config)."""
         import torch
 
-        from decoder_pipeline.training.module import CausalLMLightningModule
+        from src.decoder_pipeline.training.module import CausalLMLightningModule
 
         # Имитируем поведение Hydra с _partial_: true
         def fake_partial_optimizer(params):
@@ -240,7 +240,7 @@ class TestConfigureOptimizers:
             scheduler_cfg=None,
         )
 
-        module.trainer = MagicMock()
+        module.training = MagicMock()
         result = module.configure_optimizers()
 
         assert isinstance(result, torch.optim.Optimizer)

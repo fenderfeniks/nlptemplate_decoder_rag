@@ -4,7 +4,7 @@ from pathlib import Path
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
-from src.utils.config_schema import ConfigSchema
+from src.schemas.main import ConfigSchema
 
 
 logger = logging.getLogger(__name__)
@@ -26,14 +26,14 @@ def _force_utf8_console_encoding() -> None:
                     pass
 
 
-def _resolve_trainer_callbacks(trainer_cfg: DictConfig) -> DictConfig:
-    """Конвертирует словарь коллбэков в список для pytorch_lightning.Trainer.
+def _resolve_training_callbacks(training_cfg: DictConfig) -> DictConfig:
+    """Конвертирует словарь коллбэков в список для pytorch_lightning.trainer.
 
     В Hydra-конфигах коллбэки часто задаются как словарь для удобства
-    точечного переопределения параметров, но Trainer ожидает список.
+    точечного переопределения параметров, но training ожидает список.
     Функция выполняет эту трансформацию.
 
-    Поддерживает три варианта того, что может прийти в trainer_cfg.callbacks:
+    Поддерживает три варианта того, что может прийти в training_cfg.callbacks:
     - DictConfig (словарь name -> callback_cfg) — берём .values()
     - ListConfig (уже список) — просто конвертируем в list
     - None / отсутствует — ставим пустой список
@@ -44,13 +44,13 @@ def _resolve_trainer_callbacks(trainer_cfg: DictConfig) -> DictConfig:
     "AttributeError: 'str' object has no attribute 'log'".
 
     Args:
-        trainer_cfg: Конфигурация тренера (извлеченная секция ``trainer``).
+        training_cfg: Конфигурация тренера (извлеченная секция ``training``).
 
     Returns:
         Обновленная конфигурация тренера со списком коллбэков.
     """
-    OmegaConf.set_struct(trainer_cfg, False)
-    callbacks_node = trainer_cfg.get("callbacks")
+    OmegaConf.set_struct(training_cfg, False)
+    callbacks_node = training_cfg.get("callbacks")
 
     logger.debug(
         "callbacks_node type=%s, value=\n%s",
@@ -61,8 +61,8 @@ def _resolve_trainer_callbacks(trainer_cfg: DictConfig) -> DictConfig:
     )
 
     if not callbacks_node:
-        trainer_cfg.callbacks = []
-        return trainer_cfg
+        training_cfg.callbacks = []
+        return training_cfg
 
     if isinstance(callbacks_node, DictConfig):
         callbacks_list = list(callbacks_node.values())
@@ -70,9 +70,9 @@ def _resolve_trainer_callbacks(trainer_cfg: DictConfig) -> DictConfig:
         callbacks_list = list(callbacks_node)
     else:
         raise TypeError(
-            f"trainer.callbacks должен быть DictConfig или ListConfig, "
+            f"training.callbacks должен быть DictConfig или ListConfig, "
             f"получен {type(callbacks_node).__name__}: {callbacks_node!r}\n"
-            "Возможная причина: неверный синтаксис defaults в trainer/default.yaml "
+            "Возможная причина: неверный синтаксис defaults в training/default.yaml "
             "или отсутствие '# @package _group_' в yaml-файле коллбэка."
         )
 
@@ -81,9 +81,9 @@ def _resolve_trainer_callbacks(trainer_cfg: DictConfig) -> DictConfig:
     bad = [item for item in callbacks_list if isinstance(item, str)]
     if bad:
         raise ValueError(
-            f"В trainer.callbacks обнаружены строки вместо конфигов коллбэков: {bad}\n"
+            f"В training.callbacks обнаружены строки вместо конфигов коллбэков: {bad}\n"
             "Возможные причины:\n"
-            "  1. Неверный синтаксис defaults в trainer/default.yaml.\n"
+            "  1. Неверный синтаксис defaults в training/default.yaml.\n"
             "     Используйте:\n"
             "       defaults:\n"
             "         - callbacks/checkpoint\n"
@@ -96,8 +96,8 @@ def _resolve_trainer_callbacks(trainer_cfg: DictConfig) -> DictConfig:
             "  3. Неверный путь к файлу коллбэка в defaults."
         )
 
-    trainer_cfg.callbacks = callbacks_list
-    return trainer_cfg
+    training_cfg.callbacks = callbacks_list
+    return training_cfg
 
 
 def setup_config(cfg: DictConfig) -> DictConfig:
@@ -106,9 +106,9 @@ def setup_config(cfg: DictConfig) -> DictConfig:
     Выполняет следующие шаги:
     - принудительно включает UTF-8 для консоли;
     - выставляет корень проекта в ``cfg.paths.root_dir``;
-    - разрешает интерполяции OmegaConf по всему дереву (включая trainer);
-    - временно извлекает секцию ``decoder_pipeline.trainer`` для обхода
-      строгой валидации схемой (trainer слишком динамичный);
+    - разрешает интерполяции OmegaConf по всему дереву (включая training);
+    - временно извлекает секцию ``decoder_pipeline.training`` для обхода
+      строгой валидации схемой (training слишком динамичный);
     - валидирует структуру конфигурации через ``ConfigSchema``;
     - трансформирует словари коллбэков в списки;
     - возвращает структуру к строгой форме (set_struct=True).
@@ -120,29 +120,39 @@ def setup_config(cfg: DictConfig) -> DictConfig:
         Валидированный и подготовленный к инжекции в пайплайн DictConfig.
     """
     _force_utf8_console_encoding()
-
     OmegaConf.set_struct(cfg, False)
 
-    # 1. Выставляем корень проекта до резолва, чтобы ${paths.root_dir} работал
+    # 1. Выставляем корень проекта до резолва
     project_root = str(Path(__file__).resolve().parents[2])
     cfg.paths.root_dir = project_root
 
-    # 2. Резолвим всё дерево целиком, пока trainer ещё на месте —
-    #    иначе интерполяции вида ${decoder_pipeline.trainer...} не найдутся.
+    # 2. Резолвим всё дерево целиком
     OmegaConf.resolve(cfg)
 
-    # 3. Вынимаем trainer после резолва — схема ConfigSchema его не знает.
-    trainer_cfg = cfg.decoder_pipeline.pop("trainer")
+    # 3. Динамически вынимаем секции training из всех активных пайплайнов
+    # Это нужно для обхода строгой валидации схемой, так как training слишком динамичный.
+    active_trainings = {}
+    for pipeline_key in ["decoder_pipeline", "rag_pipeline"]:
+        if pipeline_key in cfg and cfg[pipeline_key] is not None:
+            if "training" in cfg[pipeline_key]:
+                active_trainings[pipeline_key] = cfg[pipeline_key].pop("training")
 
-    # 4. Валидируем всё остальное строгой схемой.
+    cfg.pop("_self_", None)
+    cfg.pop("defaults", None)
+
+    # 4. Валидируем структуру строгой схемой
     schema = OmegaConf.structured(ConfigSchema)
     validated_cfg = OmegaConf.merge(schema, cfg)
 
     OmegaConf.set_struct(validated_cfg, False)
 
-    # 5. Конвертируем callbacks dict -> list и возвращаем trainer на место.
-    trainer_cfg = _resolve_trainer_callbacks(trainer_cfg)
-    validated_cfg.decoder_pipeline.trainer = trainer_cfg
+    # 5. Возвращаем тренеры на место и конвертируем callbacks
+    for pipeline_key, training_cfg in active_trainings.items():
+        resolved_training = _resolve_training_callbacks(training_cfg)
+
+        # Получаем объект пайплайна динамически, но атрибут training назначаем напрямую
+        pipeline_node = getattr(validated_cfg, pipeline_key)
+        pipeline_node.training = resolved_training
 
     OmegaConf.set_struct(validated_cfg, True)
 

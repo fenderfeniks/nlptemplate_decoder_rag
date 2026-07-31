@@ -27,12 +27,12 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
-def _extract_mlflow_run_id(trainer: pl.Trainer) -> str | None:
-    if not trainer.logger:
+def _extract_mlflow_run_id(training: pl.Trainer) -> str | None:
+    if not training.logger:
         return None
 
     for attr in ("run_id", "_run_id", "runid"):
-        val = getattr(trainer.logger, attr, None)
+        val = getattr(training.logger, attr, None)
         if val:
             return val
 
@@ -49,15 +49,15 @@ def _extract_mlflow_run_id(trainer: pl.Trainer) -> str | None:
 
 
 def _run_post_training_evaluation(
-    trainer: pl.Trainer,
+    training: pl.Trainer,
     model_module: CausalLMLightningModule,
     datamodule: pl.LightningDataModule,
 ) -> float | None:
-    best_ckpt_path = trainer.checkpoint_callback.best_model_path
+    best_ckpt_path = training.checkpoint_callback.best_model_path
 
     if not best_ckpt_path:
         logger.warning("Лучший чекпоинт не найден. Запускаем тест на текущих весах (last state)...")
-        trainer.test(model=model_module, datamodule=datamodule)
+        training.test(model=model_module, datamodule=datamodule)
         return None
 
     register_safe_globals()
@@ -68,20 +68,20 @@ def _run_post_training_evaluation(
     model_module.load_state_dict(lora_state_dict, strict=False)
 
     logger.info("Тестирование на отложенной выборке (best model)...")
-    trainer.test(model=model_module, datamodule=datamodule)
+    training.test(model=model_module, datamodule=datamodule)
 
-    score = trainer.checkpoint_callback.best_model_score
+    score = training.checkpoint_callback.best_model_score
     return float(score) if score is not None else None
 
 
-@hydra.main(config_path="../configs", config_name="main", version_base="1.3")
+@hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
 def train(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
     logger.info("Старт обучения...")
 
-    if cfg.decoder_pipeline.trainer.accelerator == "gpu" and not torch.cuda.is_available():
+    if cfg.decoder_pipeline.training.accelerator == "gpu" and not torch.cuda.is_available():
         raise RuntimeError(
-            "cfg.decoder_pipeline.trainer.accelerator='gpu', но CUDA недоступна. "
+            "cfg.decoder_pipeline.training.accelerator='gpu', но CUDA недоступна. "
             "Используй environment=local для запуска на CPU."
         )
 
@@ -135,9 +135,9 @@ def train(cfg: DictConfig) -> None:
         logger.info("torch.compile включён — компиляция графа вычислений...")
         model_module.model = torch.compile(model_module.model)
 
-    # ── 5. Trainer ────────────────────────────────────────────────────────────
-    logger.info("Инициализация Trainer...")
-    trainer = hydra.utils.instantiate(cfg.decoder_pipeline.trainer)
+    # ── 5. training ────────────────────────────────────────────────────────────
+    logger.info("Инициализация training...")
+    training = hydra.utils.instantiate(cfg.decoder_pipeline.training)
 
     # ── 6. Auto-resume ────────────────────────────────────────────────────────
     resume_path = None
@@ -153,7 +153,7 @@ def train(cfg: DictConfig) -> None:
     register_safe_globals()
     best_score = None
     try:
-        trainer.fit(model=model_module, datamodule=datamodule, ckpt_path=resume_path)
+        training.fit(model=model_module, datamodule=datamodule, ckpt_path=resume_path)
         logger.info("Обучение завершено.")
     except KeyboardInterrupt:
         logger.warning("Прервано (Ctrl+C) — переход к сохранению артефактов...")
@@ -161,14 +161,14 @@ def train(cfg: DictConfig) -> None:
         logger.exception("Критическая ошибка во время обучения:")
         raise
     finally:
-        mlflow_run_id = _extract_mlflow_run_id(trainer)
+        mlflow_run_id = _extract_mlflow_run_id(training)
         logger.info("MLflow run_id: %s", mlflow_run_id)
 
-        if not getattr(trainer, "tested", False):
-            best_score = _run_post_training_evaluation(trainer, model_module, datamodule)
+        if not getattr(training, "tested", False):
+            best_score = _run_post_training_evaluation(training, model_module, datamodule)
 
         logger.info("Очистка памяти GPU...")
-        del trainer
+        del training
         del datamodule
         gc.collect()
         if torch.cuda.is_available():

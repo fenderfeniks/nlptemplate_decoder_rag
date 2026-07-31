@@ -83,15 +83,10 @@ class KnowledgeBaseIndexer:
         return hashlib.md5(composite.encode("utf-8")).hexdigest()
 
     @torch.inference_mode()
-    def index_dataloader(self, dataloader: torch.utils.data.DataLoader) -> None:
-        """Индексирует все документы из DataLoader.
-
-        Args:
-            dataloader: DataLoader с батчами от ``IndexingDataCollator``.
-                Ожидает ключи ``'input_ids'``, ``'attention_mask'``,
-                и опционально ``'texts'``, ``'metadata'``.
-        """
-        logger.info("Запуск индексации...")
+    def index_dataloader(
+        self, dataloader: torch.utils.data.DataLoader, text_column: str = "text"
+    ) -> None:
+        logger.info("Запуск индексации (колонка текста: '%s')...", text_column)
 
         buffer_embeddings: list[np.ndarray] = []
         buffer_metadata: list[dict] = []
@@ -103,8 +98,8 @@ class KnowledgeBaseIndexer:
             input_ids = batch["input_ids"].to(self.device)
             attention_mask = batch["attention_mask"].to(self.device)
 
-            # IndexingDataCollator передаёт 'texts' и 'metadata' как списки
-            texts: list[str] = batch.get("texts", [""] * len(input_ids))
+            # Динамически берем тексты по переданному имени колонки из конфига
+            texts: list[str] = batch.get(text_column, [""] * len(input_ids))
             metadata: list[dict] = batch.get("metadata", [{}] * len(input_ids))
 
             if use_autocast:

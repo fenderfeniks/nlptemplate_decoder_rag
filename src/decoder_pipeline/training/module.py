@@ -117,7 +117,7 @@ class CausalLMLightningModule(pl.LightningModule):
             return optimizer
 
         if callable(self.scheduler_cfg):
-            total_steps = self.trainer.estimated_stepping_batches
+            total_steps = self.training.estimated_stepping_batches
             if total_steps == float("inf"):
                 raise ValueError(
                     "estimated_stepping_batches=inf: задайте max_steps в конфиге тренера."

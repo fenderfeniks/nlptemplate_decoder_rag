@@ -9,3 +9,5 @@ log_dir:    "${paths.root_dir}/logs/${pipeline_name}"
 mlflow_bd_dir: "${paths.root_dir}/logs" #менять вместе с лог дир(хардкор)
 output_dir: "${paths.root_dir}/outputs/${pipeline_name}"
 model_dir:  "${paths.root_dir}/models/${pipeline_name}"
+
+db_dir: "${paths.root_dir}/vector_db"

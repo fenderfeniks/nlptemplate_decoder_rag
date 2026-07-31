@@ -17,8 +17,8 @@ os.environ.setdefault("ENVIRONMENT", "testing")
 os.environ.setdefault("HF_TOKEN", "test_token")
 os.environ.setdefault("TG_BOT_TOKEN", "test_bot_token")
 
-from src.api.rest.dependencies import get_generator, get_prompt_manager
-from src.api.rest.server import create_app
+from src.decoder_pipeline.api.rest.dependencies import get_generator, get_prompt_manager
+from src.decoder_pipeline.api.rest.server import create_app
 
 
 @pytest.fixture(scope="function")

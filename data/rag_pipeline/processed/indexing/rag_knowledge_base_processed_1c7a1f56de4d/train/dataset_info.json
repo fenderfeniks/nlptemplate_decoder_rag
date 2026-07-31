@@ -1,0 +1,76 @@
+{
+  "builder_name": "parquet",
+  "citation": "",
+  "config_name": "default",
+  "dataset_name": "stsb",
+  "dataset_size": 1142229,
+  "description": "",
+  "download_size": 720899,
+  "features": {
+    "sentence1": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "sentence2": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "score": {
+      "dtype": "float64",
+      "_type": "Value"
+    },
+    "metadata": {
+      "_type": "Json"
+    },
+    "input_ids": {
+      "feature": {
+        "dtype": "int32",
+        "_type": "Value"
+      },
+      "_type": "List"
+    },
+    "token_type_ids": {
+      "feature": {
+        "dtype": "int8",
+        "_type": "Value"
+      },
+      "_type": "List"
+    },
+    "attention_mask": {
+      "feature": {
+        "dtype": "int8",
+        "_type": "Value"
+      },
+      "_type": "List"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 1863128,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 755817,
+      "num_examples": 5749,
+      "dataset_name": "stsb"
+    },
+    "validation": {
+      "name": "validation",
+      "num_bytes": 216252,
+      "num_examples": 1500,
+      "dataset_name": "stsb"
+    },
+    "test": {
+      "name": "test",
+      "num_bytes": 170160,
+      "num_examples": 1379,
+      "dataset_name": "stsb"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}

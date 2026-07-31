@@ -48,7 +48,7 @@ clean:
 
 docker_train:
 	@echo "🐳 Запуск изолированного обучения (Docker)..."
-	docker compose run --rm trainer python -m scripts.train $(ARGS)
+	docker compose run --rm training python -m scripts.train $(ARGS)
 
 docker_api:
 	@echo "🐳 Запуск API в Docker..."

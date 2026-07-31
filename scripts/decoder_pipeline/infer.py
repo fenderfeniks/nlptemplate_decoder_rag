@@ -24,7 +24,7 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(config_path="../configs", config_name="main", version_base="1.3")
+@hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
 def infer(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
 

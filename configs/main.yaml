@@ -1,44 +1,55 @@
 # configs/main.yaml
 defaults:
-  # ── Инфраструктура (осталась на месте) ───────────────────────────────────
   - paths: default
   - system: default                 
   - logger/pylightning: pylightning_mlflow
   - logger/registry: registry_mlflow
 
-  # ── Данные (переехали физически, но остались на месте логически) ──────────
-  - decoder_pipeline/data: sft      # sft | cpt                
-  
-  # ── Модель ───────────────────────────────────────────────────────────────
+  # ── Decoder Pipeline ──────────────────────────────────────────────────────
+  - decoder_pipeline/data: sft
   - decoder_pipeline/model: default
-
-  # ── Обучение ─────────────────────────────────────────────────────────────
   - decoder_pipeline/optimizer: adamw
   - decoder_pipeline/scheduler: cosine_warmup
-  - decoder_pipeline/trainer: default
-
-  # ── Инференс ─────────────────────────────────────────────────────────────
+  - decoder_pipeline/training: default
   - decoder_pipeline/inference: default
+  - decoder_pipeline/api: fastapi
 
-  # ── Прочее ───────────────────────────────────────────────────────────────
+  # ── RAG Pipeline ──────────────────────────────────────────────────────────
+  - rag_pipeline/data: indexing
+  - rag_pipeline/model: default
+  - rag_pipeline/optimizer: adamw
+  - rag_pipeline/scheduler: cosine_warmup
+  - rag_pipeline/loss: mnrl
+  - rag_pipeline/training: default
+  - rag_pipeline/inference: embedder
+  - rag_pipeline/retrieval: retriever
+  - rag_pipeline/indexing: indexer
+  - rag_pipeline/api: fastapi
+
+  # ── Векторная БД ──────────────────────────────────────────────────────────
+  - vector_db: flat
+
+  # ── Telegram-бот ──────────────────────────────────────────────────────────
+  - tg_bot: default
+
+  # ── Application layer (оркестратор, LlamaIndex) ───────────────────────────
+  - application/orchestrator: orchestrator
+  - application/llamaindex: llamaindex
+
+  # ── Прочее ────────────────────────────────────────────────────────────────
   - prompts: default
   - strings: default
-  
-  # ── API ──────────────────────────────────────────────────────────────────
-  - api: fastapi
-  
-  # ── Окружение (последним!) ───────────────────────────────────────────────
-  - environment: local          # local | prod      
+
+  # ── Окружение (последним!) ────────────────────────────────────────────────
+  - environment: local
   - _self_
 
-# ── Глобальные параметры ───────────────────────────────────────────────────
 seed: 42
-max_length: 2048          
-pipeline_name: "decoder_pipeline"
-project_name: "industrial_nlp_template" 
+max_length: 2048
+pipeline_name: "rag_pipeline"
+project_name: "industrial_nlp_template"
 
-# ── Системные ресурсы ──────────────────────────────────────────────────────
 system:
-  num_proc: 4             
-  num_workers: 4          
+  num_proc: 4
+  num_workers: 4
   pin_memory: true

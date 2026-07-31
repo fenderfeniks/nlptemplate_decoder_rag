@@ -7,3 +7,4 @@ num_perm: 128          # Стандартный баланс скорости и
 threshold: 0.85        # Тексты, совпадающие на 85% по Jaccard, считаются дубликатами
 ngram_size: 5          # Окно по 5 словам (шинглы)
 num_proc: ${system.num_proc}
+column_separator: "\n\n"

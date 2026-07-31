@@ -1,0 +1,11 @@
+# configs/application/orchestrator.yaml
+_target_: src.application.orchestrator.RAGOrchestrator
+
+# Шаблон промпта из PromptManager
+default_template: ${tg_bot.rag_template}
+
+# Число документов для ретривала
+default_top_k: ${tg_bot.top_k}
+
+# retriever и generator пробрасываются как runtime-аргументы из кода
+# (они требуют загруженных моделей и не могут быть instantiate напрямую)

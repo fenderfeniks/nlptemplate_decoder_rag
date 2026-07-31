@@ -155,17 +155,20 @@ class RAGLightningModule(pl.LightningModule):
                 "Нет обучаемых параметров. Проверьте модификаторы: все параметры заморожены."
             )
 
-        optimizer = (
-            self.optimizer_cfg(trainable_params)
-            if callable(self.optimizer_cfg)
-            else instantiate(self.optimizer_cfg, params=trainable_params)
-        )
+        if callable(self.optimizer_cfg):
+            optimizer = self.optimizer_cfg(trainable_params)
+        else:
+            optimizer = instantiate(self.optimizer_cfg, params=trainable_params)
 
         if self.scheduler_cfg is None:
             return optimizer
 
         if callable(self.scheduler_cfg):
             total_steps = self.trainer.estimated_stepping_batches
+            if total_steps == float("inf"):
+                raise ValueError(
+                    "estimated_stepping_batches=inf: задайте max_steps в конфиге тренера."
+                )
             scheduler = self.scheduler_cfg(optimizer=optimizer, num_training_steps=total_steps)
         else:
             scheduler = instantiate(self.scheduler_cfg, optimizer=optimizer)

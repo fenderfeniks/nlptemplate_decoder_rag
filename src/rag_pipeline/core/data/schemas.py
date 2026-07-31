@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 class RAGIndexingRecord(BaseModel):
     """Схема для сырых данных при подготовке векторной базы (Индексация)."""
     
-    text: str = Field(description="Сырой текст документа/статьи")
+    text: str = Field(min_length=10, description="Сырой текст документа/статьи")
     metadata: Optional[dict] = Field(default_factory=dict, description="Метаданные (URL, title, date)")
 
     @field_validator("text")

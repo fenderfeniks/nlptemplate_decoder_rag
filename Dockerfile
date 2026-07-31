@@ -45,5 +45,3 @@ COPY configs/ ./configs/
 
 RUN chown -R mluser:mlgroup /app
 USER mluser
-
-CMD ["python", "-m", "src.run_api"]

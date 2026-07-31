@@ -6,3 +6,4 @@ negative_column: ${rag_pipeline.data.negative_column}
 max_length: ${rag_pipeline.data.max_length}
 num_proc: ${rag_pipeline.data.num_proc}
 batch_size: ${rag_pipeline.data.batch_size}
+empty_doc_placeholder: ""

@@ -15,7 +15,7 @@ from transformers import PreTrainedTokenizerBase
 logger = logging.getLogger(__name__)
 
 
-class RAGDataModule(pl.LightningDataModule):
+class NLPDataModule(pl.LightningDataModule):
     """Универсальный DataModule для работы с RAG-датасетами.
 
     Поддерживает режимы 'indexing' и 'contrastive' за счет делегирования 

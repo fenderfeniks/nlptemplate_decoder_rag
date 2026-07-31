@@ -36,6 +36,7 @@ class RAGTokenizationTransform(BaseDatasetTransform):
         max_length: int = 512,
         num_proc: int = 4,
         batch_size: int = 1000,
+        empty_doc_placeholder: str = ""
     ) -> None:
         """
         Args:
@@ -63,6 +64,7 @@ class RAGTokenizationTransform(BaseDatasetTransform):
         self.max_length = max_length
         self.num_proc = num_proc
         self.batch_size = batch_size
+        self.empty_doc_placeholder = empty_doc_placeholder
 
     # ------------------------------------------------------------------
     # Внутренние функции токенизации
@@ -107,7 +109,7 @@ class RAGTokenizationTransform(BaseDatasetTransform):
         if has_any_negative:
             # Подменяем None на пустую строку перед токенизацией, затем обнуляем маски.
             # Токенизатор не принимает None в списке.
-            filled = [v if v is not None else "" for v in neg_values]
+            filled = [v if v is not None else self.empty_doc_placeholder for v in neg_values]
             n_enc = self.tokenizer(
                 filled,
                 truncation=True,

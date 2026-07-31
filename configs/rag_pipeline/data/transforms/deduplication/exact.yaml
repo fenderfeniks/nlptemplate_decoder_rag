@@ -6,3 +6,4 @@ target_columns:
   - ${rag_pipeline.data.query_column}
   - ${rag_pipeline.data.positive_column}
 num_proc: ${system.num_proc}
+column_separator: "\n\n"

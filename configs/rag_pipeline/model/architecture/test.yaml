@@ -1,6 +1,6 @@
-model_name_or_path: "HuggingFaceM4/tiny-random-LlamaForCausalLM"
-mlflow_model_name: "BAAI/bge-m3"
-auto_model_class: "bge-m3"
+model_name_or_path: "hf-internal-testing/tiny-random-BertModel"
+mlflow_model_name: "tiny-random-BertModel"
+auto_model_class: "transformers.AutoModel"
 torch_dtype: "bfloat16"
 attn_implementation: "sdpa"
 trust_remote_code: false

@@ -2,5 +2,5 @@
 _target_: src.rag_pipeline.core.data.fetcher.RawDataFetcher
 source_type: "hf"
 raw_dir: "${paths.data_dir}/raw"
-dataset_name: "sentence-transformers/embedding-training-data"
+dataset_name: "sentence-transformers/stsb"
 token: ${oc.env:HF_TOKEN,null}

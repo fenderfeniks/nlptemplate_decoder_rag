@@ -28,6 +28,7 @@ class InterleavedDataFetcher:
         probabilities: list[float],
         seed: int = 42,
         stopping_strategy: str = "first_exhausted",
+        imbalance_warning_ratio: float = 10.0,
     ) -> None:
         """
         Args:
@@ -71,6 +72,7 @@ class InterleavedDataFetcher:
         self.probabilities = probabilities
         self.seed = seed
         self.stopping_strategy = stopping_strategy
+        self.imbalance_warning_ratio = imbalance_warning_ratio
 
     def load(self) -> DatasetDict:
         """Загружает все источники и смешивает их train-сплиты.
@@ -110,7 +112,7 @@ class InterleavedDataFetcher:
         if self.stopping_strategy == "first_exhausted":
             sizes = [len(s) for s in train_splits]
             min_size, max_size = min(sizes), max(sizes)
-            if max_size > min_size * 10:
+            if max_size > min_size * self.imbalance_warning_ratio:
                 logger.warning(
                     "Сильный дисбаланс размеров источников: min=%d, max=%d (разница >10x). "
                     "При stopping_strategy='first_exhausted' итоговый датасет будет "

@@ -6,7 +6,7 @@ import sys
 import pandas as pd
 from dotenv import load_dotenv
 
-from src.sdk.inference import LLMGenerationPipeline
+from src.decoder_pipeline.sdk.inference import LLMGenerationPipeline
 
 
 load_dotenv()

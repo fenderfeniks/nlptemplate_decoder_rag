@@ -1,7 +1,11 @@
 # tests/training/test_callbacks.py
 """Тесты пользовательских коллбэков PyTorch Lightning."""
 
-from decoder_pipeline.training.callbacks import _MODE_CPT, _MODE_SFT, GenerationEvaluationCallback
+from src.decoder_pipeline.training.callbacks import (
+    _MODE_CPT,
+    _MODE_SFT,
+    GenerationEvaluationCallback,
+)
 
 
 class TestGenerationEvaluationCallback:

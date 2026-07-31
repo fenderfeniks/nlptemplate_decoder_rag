@@ -66,7 +66,7 @@ class GenerationEvaluationCallback(pl.Callback):
         return resolved
 
     def _setup_eval_env(
-        self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str
+        self, training: pl.Trainer, pl_module: pl.LightningModule, stage: str
     ) -> None:
         """Инициализирует генератор и подготавливает нужный датасет (val или test)."""
         if self._env_ready[stage]:
@@ -77,18 +77,18 @@ class GenerationEvaluationCallback(pl.Callback):
         if self.generator is None:
             self.generator = HFTextGenerator(
                 model=pl_module.model,
-                tokenizer=trainer.datamodule.tokenizer,
+                tokenizer=training.datamodule.tokenizer,
                 generation_kwargs=self.generation_kwargs,
             )
 
-        data_cfg = trainer.datamodule.data_cfg
+        data_cfg = training.datamodule.data_cfg
         if self._resolved_mode is None:
             self._resolved_mode = self._resolve_mode(data_cfg)
 
         dataset_key = "validation" if stage == "val" else "test"
 
-        if hasattr(trainer.datamodule, "datasets") and dataset_key in trainer.datamodule.datasets:
-            raw_data = trainer.datamodule.datasets[dataset_key]
+        if hasattr(training.datamodule, "datasets") and dataset_key in training.datamodule.datasets:
+            raw_data = training.datamodule.datasets[dataset_key]
         else:
             from hydra.utils import instantiate
 
@@ -139,19 +139,19 @@ class GenerationEvaluationCallback(pl.Callback):
             if self.bleu_metric is None:
                 self.bleu_metric = evaluate.load("sacrebleu")
 
-        if trainer.logger and hasattr(trainer.logger, "experiment"):
-            mlflow_client = trainer.logger.experiment
-            run_id = trainer.logger.run_id
+        if training.logger and hasattr(training.logger, "experiment"):
+            mlflow_client = training.logger.experiment
+            run_id = training.logger.run_id
             mlflow_client.set_tag(run_id, "model_architecture", self.model_name)
             mlflow_client.set_tag(run_id, "task_type", f"causal_lm_{self._resolved_mode}")
 
         self._env_ready[stage] = True
 
-    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        self._setup_eval_env(trainer, pl_module, stage="val")
+    def on_fit_start(self, training: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        self._setup_eval_env(training, pl_module, stage="val")
 
-    def on_test_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        self._setup_eval_env(trainer, pl_module, stage="test")
+    def on_test_start(self, training: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        self._setup_eval_env(training, pl_module, stage="test")
 
     def _extract_rouge_score(self, score: Any) -> float:
         if hasattr(score, "mid"):
@@ -171,20 +171,22 @@ class GenerationEvaluationCallback(pl.Callback):
             generated_texts.extend(chunk_generated)
         return generated_texts
 
-    def _log_mlflow_table(self, trainer: pl.Trainer, df: pd.DataFrame, stage: str) -> None:
-        if not (trainer.logger and hasattr(trainer.logger, "experiment")):
+    def _log_mlflow_table(self, training: pl.Trainer, df: pd.DataFrame, stage: str) -> None:
+        if not (training.logger and hasattr(training.logger, "experiment")):
             return
 
-        mlflow_client = trainer.logger.experiment
-        run_id = trainer.logger.run_id
-        step = trainer.global_step
+        mlflow_client = training.logger.experiment
+        run_id = training.logger.run_id
+        step = training.global_step
         mlflow_client.log_table(
             run_id=run_id,
             data=df,
             artifact_file=f"generations/{stage}_step_{step}_results.json",
         )
 
-    def _run_sft_eval(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
+    def _run_sft_eval(
+        self, training: pl.Trainer, pl_module: pl.LightningModule, stage: str
+    ) -> None:
         dataset = self.eval_datasets[stage]
         actual_num_random = min(self.num_random, len(dataset))
         random_raw = random.sample(dataset, actual_num_random)
@@ -243,9 +245,11 @@ class GenerationEvaluationCallback(pl.Callback):
                 "Generated": generated_texts,
             }
         )
-        self._log_mlflow_table(trainer, df, stage)
+        self._log_mlflow_table(training, df, stage)
 
-    def _run_cpt_eval(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
+    def _run_cpt_eval(
+        self, training: pl.Trainer, pl_module: pl.LightningModule, stage: str
+    ) -> None:
         dataset = self.eval_datasets[stage]
         actual_num_random = min(self.num_random, len(dataset))
         random_raw = random.sample(dataset, actual_num_random)
@@ -265,10 +269,10 @@ class GenerationEvaluationCallback(pl.Callback):
                 "Generated continuation": generated_texts,
             }
         )
-        self._log_mlflow_table(trainer, df, stage)
+        self._log_mlflow_table(training, df, stage)
 
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        if self._resolved_mode is None or trainer.sanity_checking:
+    def on_validation_epoch_end(self, training: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        if self._resolved_mode is None or training.sanity_checking:
             return
 
         logger.info(
@@ -276,23 +280,23 @@ class GenerationEvaluationCallback(pl.Callback):
         )
 
         if self._resolved_mode == _MODE_SFT:
-            self._run_sft_eval(trainer, pl_module, stage="val")
+            self._run_sft_eval(training, pl_module, stage="val")
         else:
-            self._run_cpt_eval(trainer, pl_module, stage="val")
+            self._run_cpt_eval(training, pl_module, stage="val")
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def on_test_epoch_end(self, training: pl.Trainer, pl_module: pl.LightningModule) -> None:
         if self._resolved_mode is None:
             return
 
         logger.info(f"GenerationEvaluationCallback: запуск теста в режиме {self._resolved_mode}...")
 
         if self._resolved_mode == _MODE_SFT:
-            self._run_sft_eval(trainer, pl_module, stage="test")
+            self._run_sft_eval(training, pl_module, stage="test")
         else:
-            self._run_cpt_eval(trainer, pl_module, stage="test")
+            self._run_cpt_eval(training, pl_module, stage="test")
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

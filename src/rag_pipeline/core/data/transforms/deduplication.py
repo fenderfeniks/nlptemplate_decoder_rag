@@ -37,6 +37,7 @@ class ExactDeduplicationTransform(BaseDatasetTransform):
         self,
         target_columns: list[str],
         num_proc: int = 4,
+        column_separator: str = "\n\n",
     ) -> None:
         """
         Args:
@@ -49,6 +50,7 @@ class ExactDeduplicationTransform(BaseDatasetTransform):
             raise ValueError("target_columns не может быть пустым списком.")
         self.target_columns = target_columns
         self.num_proc = num_proc
+        self.column_separator = column_separator
 
     def __call__(self, dataset: HFDataset) -> HFDataset:
         active_cols = [c for c in self.target_columns if c in dataset.column_names]
@@ -66,10 +68,9 @@ class ExactDeduplicationTransform(BaseDatasetTransform):
         )
         initial_count = len(dataset)
 
-        sep = "\n\n"
 
         def _compute_hash(example: dict[str, Any]) -> dict[str, str]:
-            combined = sep.join(str(example[c]) for c in active_cols)
+            combined = self.column_separator.join(str(example[c]) for c in active_cols)
             return {"_md5_hash": hashlib.md5(combined.encode("utf-8")).hexdigest()}
 
         hashed_dataset = dataset.map(
@@ -109,6 +110,7 @@ class MinHashDeduplicationTransform(BaseDatasetTransform):
         threshold: float = 0.85,
         ngram_size: int = 5,
         num_proc: int = 4,
+        column_separator: str = "\n\n",
     ) -> None:
         """
         Args:
@@ -133,6 +135,7 @@ class MinHashDeduplicationTransform(BaseDatasetTransform):
         self.ngram_size = ngram_size
         self.num_proc = num_proc
         self.word_pattern = re.compile(r"(?u)\b\w+\b")
+        self.column_separator = column_separator
 
     def __call__(self, dataset: HFDataset) -> HFDataset:
         active_cols = [c for c in self.target_columns if c in dataset.column_names]
@@ -151,10 +154,10 @@ class MinHashDeduplicationTransform(BaseDatasetTransform):
             active_cols, self.threshold, self.ngram_size, self.num_perm,
         )
         initial_count = len(dataset)
-        sep = "\n\n"
+
 
         def _compute_minhash(example: dict[str, Any]) -> dict[str, list[int]]:
-            combined = sep.join(str(example[c]) for c in active_cols).lower()
+            combined = self.column_separator.join(str(example[c]) for c in active_cols).lower()
             tokens = self.word_pattern.findall(combined)
 
             # Явно задаём scheme при создании — независимость от дефолта библиотеки

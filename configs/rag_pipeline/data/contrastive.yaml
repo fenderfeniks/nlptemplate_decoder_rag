@@ -3,12 +3,13 @@ defaults:
   - splitter: default
   - collator: contrastive
   - transforms/validation: validation_contrastive
-  - transforms/cleaning: default
+  - transforms/cleaning: cleaning
   - transforms/deduplication: exact   # Для пар Q&A лучше точная дедупликация
   - transforms/tokenization: tokenization_contrastive
   - transforms/filtering: default
   # chunking и metadata здесь НЕ подключаются
   - _self_
+
 
 task: "contrastive"
 
@@ -27,9 +28,9 @@ test_size: 0.05
 # ГРУППА 2: ПАРАМЕТРЫ ТРАНСФОРМАЦИЙ
 # ==========================================
 text_column: null
-query_column: "query"
-positive_column: "positive_doc"
-negative_column: "negative_doc" # Может быть null, если датасет без хард-негативов
+query_column: "sentence1"
+positive_column: "sentence2"
+negative_column: null # Может быть null, если датасет без хард-негативов
 
 max_length: ${max_length}
 num_proc: ${system.num_proc}

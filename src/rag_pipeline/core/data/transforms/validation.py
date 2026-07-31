@@ -116,10 +116,16 @@ class ValidationTransform(BaseDatasetTransform):
 
         queries = batch.get(self.query_column, [])
         positives = batch.get(self.positive_column, [])
-        negatives = batch.get(self.negative_column, [None] * len(queries))
+        
+        # Безопасно извлекаем негативы: если колонка задана и присутствует в батче, берем её, иначе заполняем None
+        if self.negative_column and self.negative_column in batch:
+            negatives = batch.get(self.negative_column)
+        else:
+            negatives = [None] * len(queries)
 
         for q, p, n in zip(queries, positives, negatives):
             try:
+                # Pydantic корректно пропустит n, если он None (при условии что в RAGTrainingRecord negative_doc: Optional[str] = None)
                 record = RAGTrainingRecord(query=q, positive_doc=p, negative_doc=n)
                 valid_queries.append(record.query)
                 valid_pos.append(record.positive_doc)
@@ -130,11 +136,18 @@ class ValidationTransform(BaseDatasetTransform):
                 valid_pos.append("")
                 valid_neg.append(None)
 
-        return {
+        # Возвращаем словарь только с теми ключами, которые реально задействованы,
+        # либо гарантируем возврат существующей колонки негативов
+        result = {
             self.query_column: valid_queries,
             self.positive_column: valid_pos,
-            self.negative_column: valid_neg,
         }
+        
+        # Если колонка негативов ожидалась/существовала, возвращаем её тоже, чтобы Arrow не терял схему
+        if self.negative_column:
+            result[self.negative_column] = valid_neg
+
+        return result
 
 
 class CleaningTransform(BaseDatasetTransform):

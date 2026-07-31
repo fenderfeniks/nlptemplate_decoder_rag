@@ -73,13 +73,13 @@ class RetrievalEvaluationCallback(pl.Callback):
             np.concatenate(doc_embs, axis=0),
         )
 
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        if trainer.sanity_checking:
+    def on_validation_epoch_end(self, training: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        if training.sanity_checking:
             return
 
         logger.info("RetrievalEval: запуск оценки (top_k=%d)...", self.top_k)
 
-        val_dataloader = trainer.datamodule.val_dataloader()
+        val_dataloader = training.datamodule.val_dataloader()
         if val_dataloader is None:
             logger.warning("val_dataloader не задан — RetrievalEval пропущен.")
             return
@@ -122,11 +122,11 @@ class RetrievalEvaluationCallback(pl.Callback):
         ndcg /= n_queries
 
         pl_module.log("val_mrr", mrr, sync_dist=True, prog_bar=True)
-        pl_module.log(f"val_recall@{self.top_k}", recall, sync_dist=True, prog_bar=True)
-        pl_module.log(f"val_ndcg@{self.top_k}", ndcg, sync_dist=True, prog_bar=True)
+        pl_module.log("val_recall_10", recall, prog_bar=True, logger=True)
+        pl_module.log("val_ndcg_10", ndcg, prog_bar=True, logger=True)
 
         logger.info(
-            "RetrievalEval → MRR: %.4f | Recall@%d: %.4f | NDCG@%d: %.4f",
+            "RetrievalEval -> MRR: %.4f | Recall@%d: %.4f | NDCG@%d: %.4f (Top: %d)",
             mrr,
             self.top_k,
             recall,
