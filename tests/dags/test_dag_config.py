@@ -2,7 +2,6 @@
 """Тесты конфигурации DAGов: расписания, пороги метрик."""
 
 
-
 def test_maintenance_schedule(dagbag):
     dag = dagbag.get_dag("system_maintenance")
     assert dag is not None, "DAG system_maintenance не найден"
