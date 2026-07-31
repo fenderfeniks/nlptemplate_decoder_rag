@@ -1,35 +1,5 @@
 {
-  "analytics_config": {
-    "schedule": "0 8 * * *",
-    "db_secret_name": "analytics-db-secrets",
-    "resources": {
-      "requests": {"cpu": "1", "memory": "4Gi"},
-      "limits": {"cpu": "2", "memory": "7Gi", "nvidia.com/gpu": "1"}
-    },
-    "default_args": {
-      "owner": "ml_team",
-      "retries": 3,
-      "retry_delay_minutes": 5
-    }
-  },
-
-  "evaluation_config": {
-    "schedule": "@weekly",
-    "rouge1_threshold": 0.45,
-    "pvc_name": "pvc-models",
-    "mount_path": "/app/models",
-    "resources": {
-      "requests": {"cpu": "1", "memory": "4Gi"},
-      "limits": {"cpu": "2", "memory": "7Gi", "nvidia.com/gpu": "1"}
-    },
-    "default_args": {
-      "owner": "ml_team",
-      "retries": 1,
-      "retry_delay_minutes": 5
-    }
-  },
-
-  "training_config": {
+  "llm_training_config": {
     "schedule": "@weekly",
     "pvc_name": "pvc-models",
     "mount_path": "/app/models",
@@ -41,11 +11,65 @@
       "requests": {"cpu": "2", "memory": "4Gi"},
       "limits": {"cpu": "4", "memory": "7Gi"}
     },
-    "default_args": {
-      "owner": "ml_team",
-      "retries": 1,
-      "retry_delay_minutes": 5
-    }
+    "default_args": {"owner": "ml_team", "retries": 1, "retry_delay_minutes": 5}
+  },
+
+  "llm_evaluation_config": {
+    "schedule": "@weekly",
+    "rouge1_threshold": 0.45,
+    "pvc_name": "pvc-models",
+    "mount_path": "/app/models",
+    "resources": {
+      "requests": {"cpu": "1", "memory": "4Gi"},
+      "limits": {"cpu": "2", "memory": "7Gi", "nvidia.com/gpu": "1"}
+    },
+    "default_args": {"owner": "ml_team", "retries": 1, "retry_delay_minutes": 5}
+  },
+
+  "llm_promotion_config": {
+    "deployment_name": "nlp-template-api-gateway",
+    "configmap_name": "nlp-template-api-config",
+    "default_args": {"owner": "ml_team"}
+  },
+
+  "rag_fetch_config": {
+    "schedule": "@hourly",
+    "data_pvc_name": "pvc-data",
+    "data_mount_path": "/app/data",
+    "resources": {
+      "requests": {"cpu": "1", "memory": "4Gi"},
+      "limits": {"cpu": "2", "memory": "8Gi"}
+    },
+    "default_args": {"owner": "ml_team", "retries": 1, "retry_delay_minutes": 5}
+  },
+
+  "rag_index_config": {
+    "schedule": "0 2 * * *",
+    "db_pvc_name": "vector-db-pvc",
+    "db_mount_path": "/app/vector_db",
+    "data_pvc_name": "pvc-data",
+    "data_mount_path": "/app/data",
+    "resources_gpu": {
+      "requests": {"cpu": "2", "memory": "4Gi"},
+      "limits": {"cpu": "4", "memory": "8Gi", "nvidia.com/gpu": "1"}
+    },
+    "default_args": {"owner": "ml_team", "retries": 1, "retry_delay_minutes": 5}
+  },
+
+  "rag_evaluation_config": {
+    "schedule": "@weekly",
+    "mrr_threshold": 0.75,
+    "resources": {
+      "requests": {"cpu": "1", "memory": "4Gi"},
+      "limits": {"cpu": "2", "memory": "7Gi", "nvidia.com/gpu": "1"}
+    },
+    "default_args": {"owner": "ml_team", "retries": 1, "retry_delay_minutes": 5}
+  },
+
+  "rag_promotion_config": {
+    "deployment_name": "nlp-template-rag-api",
+    "configmap_name": "nlp-template-api-config",
+    "default_args": {"owner": "ml_team"}
   },
 
   "maintenance_config": {
@@ -57,20 +81,6 @@
       "requests": {"cpu": "0.5", "memory": "1Gi"},
       "limits": {"cpu": "1", "memory": "2Gi"}
     },
-    "default_args": {
-      "owner": "ml_team",
-      "retries": 1,
-      "retry_delay_minutes": 5
-    }
-  },
-
-  "promotion_config": {
-    "mount_path": "/app/models",
-    "pvc_name": "pvc-models",
-    "deployment_name": "decoder-template-api",
-    "configmap_name": "decoder-template-api-config",
-    "default_args": {
-      "owner": "ml_team"
-    }
+    "default_args": {"owner": "ml_team", "retries": 1, "retry_delay_minutes": 5}
   }
 }

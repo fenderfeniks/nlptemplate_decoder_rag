@@ -53,8 +53,8 @@ def test_retrain_kaggle_secret_present():
 
     task = mod.dag.get_task("run_lora_finetuning")
     env_names = {e.name for e in task.env_vars}
-    assert "KAGGLE_USERNAME" in env_names, "KAGGLE_USERNAME не прокинут в trainer pod"
-    assert "KAGGLE_KEY" in env_names, "KAGGLE_KEY не прокинут в trainer pod"
+    assert "KAGGLE_USERNAME" in env_names, "KAGGLE_USERNAME не прокинут в training pod"
+    assert "KAGGLE_KEY" in env_names, "KAGGLE_KEY не прокинут в training pod"
 
     for env in task.env_vars:
         if env.name == "KAGGLE_USERNAME":

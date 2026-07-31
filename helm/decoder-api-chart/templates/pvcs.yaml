@@ -1,4 +1,4 @@
-# helm/decoder-api-chart/templates/pvcs.yaml
+# helm/nlp-api-chart/templates/pvcs.yaml
 
 # 1. Данные
 apiVersion: v1
@@ -41,3 +41,17 @@ spec:
   resources:
     requests:
       storage: {{ .Values.storage.modelsSize }}
+---
+# 4. Векторная база данных (FAISS)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.storage.vectorDbPvcName }}
+  namespace: {{ .Values.app.namespace }}
+spec:
+  storageClassName: hostpath
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.vectorDbSize }}

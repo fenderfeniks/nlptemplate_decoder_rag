@@ -12,7 +12,6 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 WORKDIR /build
 
 COPY pyproject.toml README.md ./
-# Убрали "rag" из списка extras
 ARG INSTALL_EXTRAS="api"
 
 RUN uv venv /opt/venv
@@ -41,7 +40,10 @@ COPY --from=builder /opt/venv /opt/venv
 RUN addgroup --system mlgroup && adduser --system --group mluser
 
 COPY src/ ./src/
-COPY configs/ ./configs/
+COPY scripts/ ./scripts/
+# Конфиги монтируются через volume в docker-compose, 
+# поэтому копирование на уровне сборки образа можно опустить.
+# COPY configs/ ./configs/
 
 RUN chown -R mluser:mlgroup /app
 USER mluser

@@ -1,3 +1,4 @@
+# src/api/rest/dependencies.py
 from fastapi import HTTPException, Request
 
 from src.decoder_pipeline.core.prompts.manager import PromptManager
@@ -5,11 +6,14 @@ from src.decoder_pipeline.sdk.inference import LLMGenerationClient
 
 
 def get_prompt_manager(request: Request) -> PromptManager:
-    return request.app.state.prompt_manager
+    manager: PromptManager | None = getattr(request.app.state, "prompt_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="PromptManager не инициализирован.")
+    return manager
 
 
 def get_generator(request: Request) -> LLMGenerationClient:
-    generator = request.app.state.ml_models.get("generator")
-    if not generator:
+    generator: LLMGenerationClient | None = request.app.state.ml_models.get("generator")
+    if generator is None:
         raise HTTPException(status_code=503, detail="LLM клиент не инициализирован.")
     return generator

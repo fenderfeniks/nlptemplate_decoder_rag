@@ -1,17 +1,17 @@
-# helm/decoder-api-chart/values_example.yaml
+# helm/nlp-api-chart/values.yaml
 
 app:
-  name: decoder-template-api
+  name: nlp-template-api
   namespace: ml-pipelines
 
 image:
-  repository: my-company/decoder_template
+  repository: my-company/nlp_template
   tag: api-latest
 
 config:
   port: 8000
   mlflowTrackingUri: "http://mlflow-service:5000"
-  modelName: "DecoderTemplateModel"
+  modelName: "NlpTemplateModel"
 
 resources:
   requests:
@@ -29,13 +29,13 @@ storage:
   logsSize: 10Gi
   modelsPvcName: pvc-models
   modelsSize: 30Gi
+  # Добавлено хранилище для FAISS
+  vectorDbPvcName: vector-db-pvc
+  vectorDbSize: 20Gi
 
-# ВНИМАНИЕ: Для локального запуска скопируйте этот файл в values.yaml 
-# и заполните реальными токенами. Никогда не коммитьте values.yaml!
 secrets:
   tgBotToken: "YOUR_TG_BOT_TOKEN"
   hfToken: "YOUR_HF_TOKEN"
-  wandbApiKey: "YOUR_WANDB_API_KEY"
   apiKey: "YOUR_API_KEY"
   kaggleUsername: "YOUR_KAGGLE_USERNAME"
   kaggleKey: "YOUR_KAGGLE_KEY"

@@ -11,7 +11,7 @@ services:
       dockerfile: Dockerfile
       args:
         INSTALL_EXTRAS: "api"
-    container_name: nlp_api_gateway
+    container_name: nlp_template_api_gateway
     ports:
       - "${GATEWAY_PORT:-8000}:8000"
     command: ["python", "-m", "src.api_gateway.run_api"]
@@ -31,7 +31,7 @@ services:
   # ----------------------------------------------------
   rag_api:
     image: my-company/nlp_template:latest
-    container_name: nlp_rag_api
+    container_name: nlp_template_rag_api
     ports:
       - "8001:8001"
     command: ["python", "-m", "src.rag_pipeline.api.run_api"]
@@ -43,7 +43,7 @@ services:
     volumes:
       - ./configs:/app/configs
       - ./models:/app/models
-      - ./vector_db:/app/vector_db  # Монтируем готовую векторную базу с индексом
+      - ./vector_db:/app/vector_db
     restart: always
     deploy:
       resources:
@@ -58,11 +58,11 @@ services:
   # ----------------------------------------------------
   llm_api:
     image: vllm/vllm-openai:latest
-    container_name: nlp_llm_api
+    container_name: nlp_template_llm_api
     ports:
       - "8002:8000"
     command: >
-      --model facebook/opt-125m
+      --model ${LLM_MODEL:-facebook/opt-125m}
       --host 0.0.0.0
       --port 8000
       --max-model-len 2048
@@ -88,7 +88,7 @@ services:
       dockerfile: Dockerfile
       args:
         INSTALL_EXTRAS: "training"
-    container_name: nlp_train_decoder
+    container_name: nlp_template_train_decoder
     profiles:
       - training
     command: ["python", "-m", "scripts.decoder_pipeline.train"]
@@ -97,8 +97,8 @@ services:
     env_file:
       - .env
     volumes:
-      - ./configs:/app/configs    # Обязательно для Hydra!
-      - ~/.cache/huggingface:/root/.cache/huggingface # Кеш HF, чтобы не качать заново
+      - ./configs:/app/configs
+      - ~/.cache/huggingface:/root/.cache/huggingface
     restart: "no"
     deploy:
       resources:
@@ -118,7 +118,7 @@ services:
       dockerfile: Dockerfile
       args:
         INSTALL_EXTRAS: "training"
-    container_name: nlp_train_rag
+    container_name: nlp_template_train_rag
     profiles:
       - training
     command: ["python", "-m", "scripts.rag_pipeline.train"]
@@ -127,8 +127,8 @@ services:
     env_file:
       - .env
     volumes:
-      - ./configs:/app/configs    # Обязательно для Hydra!
-      - ~/.cache/huggingface:/root/.cache/huggingface # Кеш HF
+      - ./configs:/app/configs
+      - ~/.cache/huggingface:/root/.cache/huggingface
     restart: "no"
     deploy:
       resources:
@@ -139,16 +139,16 @@ services:
               capabilities: [gpu]
 
   # ----------------------------------------------------
-  # 5. Airflow (Оркестратор для локального тестирования DAG-ов)
+  # 6. Airflow (Оркестратор для локального тестирования DAG-ов)
   # ----------------------------------------------------
   airflow:
     image: apache/airflow:${AIRFLOW_IMAGE_TAG:-2.8.1}
-    container_name: decoder_template_airflow
+    container_name: nlp_template_airflow
     ports:
       - "8080:8080"
     environment:
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW_VAR_PROJECT_IMAGE=my-company/decoder_template:api-latest
+      - AIRFLOW_VAR_PROJECT_IMAGE=my-company/nlp_template:api-latest
       - AIRFLOW_VAR_K8S_NAMESPACE=ml-pipelines
     env_file:
       - .env
@@ -157,18 +157,18 @@ services:
       - ./deploy/airflow:/opt/airflow/deploy
       - ./logs/airflow:/opt/airflow/logs
     command: >
-      bash -c "airflow db init &&
+      bash -c "airflow db migrate &&
                (airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true) &&
                airflow variables import /opt/airflow/deploy/variables.json &&
                airflow standalone"
     restart: unless-stopped
 
   # ----------------------------------------------------
-  # 6. Prometheus (Сбор метрик)
+  # 7. Prometheus (Сбор метрик)
   # ----------------------------------------------------
   prometheus:
     image: prom/prometheus:latest
-    container_name: decoder_template_prometheus
+    container_name: nlp_template_prometheus
     ports:
       - "9090:9090"
     volumes:
@@ -177,14 +177,14 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
     restart: unless-stopped
     depends_on:
-      - api
+      - api_gateway
 
   # ----------------------------------------------------
-  # 7. Grafana (Дашборды)
+  # 8. Grafana (Дашборды)
   # ----------------------------------------------------
   grafana:
     image: grafana/grafana:latest
-    container_name: decoder_template_grafana
+    container_name: nlp_template_grafana
     ports:
       - "3000:3000"
     environment:
@@ -197,20 +197,19 @@ services:
       - prometheus
 
   # ----------------------------------------------------
-  # 8. Тонкий клиент (Streamlit Demo)
+  # 9. Тонкий клиент (Streamlit Demo)
   # ----------------------------------------------------
   demo:
     build:
       context: .
       dockerfile: demo/Dockerfile
-    container_name: decoder_template_demo
+    container_name: nlp_template_demo
     ports:
       - "8501:8501"
     environment:
-      # Обновлен URL до актуального эндпоинта классификации
-      - API_URL=http://api:8000/api/v1/generate
+      - API_URL=http://api_gateway:8000/api/v1/generate
     depends_on:
-      - api
+      - api_gateway
     restart: unless-stopped
 
 volumes:

@@ -1,5 +1,5 @@
+# src/api_gateway/server.py
 import logging
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from omegaconf import OmegaConf
 
 from src.api_gateway.endpoints import chat
+from src.api_gateway.middlewares import setup_gateway_middlewares
 from src.application.orchestrator import RAGOrchestrator
 from src.decoder_pipeline.core.prompts.manager import PromptManager
 from src.decoder_pipeline.sdk.inference import LLMGenerationClient
@@ -27,21 +28,20 @@ def create_gateway_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         logger.info("Инициализация API Gateway...")
 
-        # 1. Менеджер промптов (работает в памяти, шаблоны из конфига)
+        # 1. Менеджер промптов
         prompt_manager = PromptManager(templates=cfg.get("prompts", {}))
 
-        # 2. Клиент к vLLM (генерация)
-        llm_url = os.getenv("LLM_API_URL", "http://llm-service:8000/v1")
-        llm_client = LLMGenerationClient(api_base=llm_url)
+        # 2. Клиент к vLLM — URL берётся из Hydra-конфига
+        llm_client = LLMGenerationClient(api_base=cfg.services.llm_api_url)
 
-        # 3. Оркестратор (связывает RAG API и LLM API)
-        rag_url = os.getenv("RAG_API_URL", "http://rag-api:8001")
+        # 3. Оркестратор — все параметры из конфига
         orchestrator = RAGOrchestrator(
-            rag_api_url=rag_url,
+            rag_api_url=cfg.services.rag_api_url,
             llm_client=llm_client,
             prompt_manager=prompt_manager,
-            default_template="rag_qa",
+            default_template=cfg.get("default_template", "rag_qa"),
             default_top_k=cfg.get("top_k", 5),
+            http_timeout=cfg.get("http_timeout", 10.0),
         )
 
         app.state.orchestrator = orchestrator
@@ -49,13 +49,18 @@ def create_gateway_app() -> FastAPI:
 
         yield
 
-        # Корректное закрытие асинхронных HTTP-сессий при выключении
         logger.info("Остановка API Gateway...")
         await orchestrator.close()
 
     app = FastAPI(
-        title="NLP API Gateway", description="Единая точка входа для RAG и LLM", lifespan=lifespan
+        title="NLP API Gateway",
+        description="Единая точка входа для RAG и LLM",
+        lifespan=lifespan,
     )
+
+    # Middleware (CORS + логирование + метрики)
+    cors_origins: list[str] = list(cfg.get("cors_origins", ["*"]))
+    setup_gateway_middlewares(app, cors_origins)
 
     app.include_router(chat.router)
 

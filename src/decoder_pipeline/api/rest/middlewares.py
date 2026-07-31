@@ -12,34 +12,33 @@ logger = logging.getLogger(__name__)
 
 
 class RequestTimeLoggingMiddleware(BaseHTTPMiddleware):
-    """Middleware для логирования времени выполнения запросов инференса."""
+    """Middleware для логирования времени выполнения всех запросов."""
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        """Перехватывает запрос, замеряет время и пишет в лог.
+        """Замеряет время запроса и добавляет заголовок X-Model-Process-Time.
 
         Args:
             request: Входящий HTTP-запрос.
-            call_next: Функция вызова следующего обработчика в цепочке.
+            call_next: Следующий обработчик в цепочке.
 
         Returns:
-            Ответ сервера с добавленным заголовком X-Model-Process-Time.
+            Ответ с заголовком X-Model-Process-Time.
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
         response = await call_next(request)
-        process_time = time.time() - start_time
+        process_time = time.perf_counter() - start_time
 
-        if "generate" in request.url.path:
-            logger.info(
-                "[%s] %s | Статус: %d | Время инференса: %.2f сек.",
-                request.method,
-                request.url.path,
-                response.status_code,
-                process_time,
-            )
+        logger.info(
+            "[%s] %s | Статус: %d | Время: %.3f сек.",
+            request.method,
+            request.url.path,
+            response.status_code,
+            process_time,
+        )
 
-        response.headers["X-Model-Process-Time"] = str(process_time)
+        response.headers["X-Model-Process-Time"] = f"{process_time:.4f}"
         return response
 
 
@@ -48,7 +47,7 @@ def setup_middlewares(app: FastAPI, cors_origins: list[str]) -> None:
 
     Args:
         app: Экземпляр приложения FastAPI.
-        cors_origins: Список разрешенных источников для CORS.
+        cors_origins: Список разрешённых источников для CORS.
     """
     app.add_middleware(
         CORSMiddleware,

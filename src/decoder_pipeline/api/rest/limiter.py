@@ -7,7 +7,7 @@ from slowapi.util import get_remote_address
 
 
 def get_real_ip(request: Request) -> str:
-    """Надежное извлечение реального IP-адреса клиента за Ingress/Proxy.
+    """Надёжное извлечение реального IP-адреса клиента за Ingress/Proxy.
 
     Args:
         request: Входящий HTTP-запрос.
@@ -17,16 +17,20 @@ def get_real_ip(request: Request) -> str:
     """
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
-        # Берем первый IP из списка (истинный клиент)
+        # Берём первый IP из списка (истинный клиент)
         return forwarded.split(",")[0].strip()
-    # Fallback на стандартную функцию (если запрос пришел напрямую)
     return get_remote_address(request)
 
 
-# Создаем глобальный инстанс лимитера
+# Лимитер отключается при ENVIRONMENT=testing|test|ci (регистронезависимо)
+# или при явном DISABLE_RATE_LIMIT=true
+_env = os.getenv("ENVIRONMENT", "").lower()
+_disabled = (
+    _env in {"testing", "test", "ci"} or os.getenv("DISABLE_RATE_LIMIT", "").lower() == "true"
+)
+
 limiter = Limiter(
-    key_func=get_real_ip,  # <-- Используем нашу функцию
+    key_func=get_real_ip,
     default_limits=["10/minute"],
-    # Отключаем лимитер для тестов, чтобы CI не падал на 429 ошибке
-    enabled=os.getenv("ENVIRONMENT") != "testing",
+    enabled=not _disabled,
 )

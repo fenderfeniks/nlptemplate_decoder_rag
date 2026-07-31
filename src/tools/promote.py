@@ -16,16 +16,19 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
-def _promote(tracking_uri: str, reg_model_name: str) -> None:
-    """Оценивает Staging-модель и выполняет Promotion в Production.
+class PromoteError(RuntimeError):
+    """Ошибка при попытке продвижения модели в Production."""
 
-    Сравнивает метрику val_loss версии Staging с текущей версией
-    Production. Если Staging превосходит Production, обновляет
-    алиасы в MLflow Model Registry.
+
+def _promote(tracking_uri: str, reg_model_name: str) -> None:
+    """Продвигает модель из Staging в Production, если она лучше текущей.
 
     Args:
-        tracking_uri: MLflow tracking URI из конфига.
-        reg_model_name: Имя модели в Registry вида '{mlflow_model_name}_LoRA'.
+        tracking_uri: URI MLflow Tracking Server.
+        reg_model_name: Имя зарегистрированной модели в Registry.
+
+    Raises:
+        PromoteError: Если алиас 'Staging' не найден или у модели нет тега val_loss.
     """
     mlflow.set_tracking_uri(tracking_uri)
     client = MlflowClient()
@@ -33,23 +36,19 @@ def _promote(tracking_uri: str, reg_model_name: str) -> None:
     logger.info("MLFLOW_TRACKING_URI: %s", tracking_uri)
     logger.info("Модель в Registry: %s", reg_model_name)
 
-    # 1. Берём текущий Staging
     try:
         staging_mv = client.get_model_version_by_alias(reg_model_name, "Staging")
-    except MlflowException:
-        logger.error("Алиас 'Staging' не найден для модели '%s'.", reg_model_name)
-        sys.exit(1)
+    except MlflowException as e:
+        raise PromoteError(f"Алиас 'Staging' не найден для модели '{reg_model_name}'.") from e
 
     staging_version = staging_mv.version
     staging_score_str = staging_mv.tags.get("val_loss")
 
     if staging_score_str is None:
-        logger.error("У Staging модели нет тега 'val_loss'. Невозможно оценить качество.")
-        sys.exit(1)
+        raise PromoteError("У Staging модели нет тега 'val_loss'. Невозможно оценить качество.")
 
     staging_score = float(staging_score_str)
 
-    # 2. Проверяем текущий Production
     try:
         current_prod = client.get_model_version_by_alias(reg_model_name, "Production")
         if current_prod.version == staging_version:
@@ -58,7 +57,6 @@ def _promote(tracking_uri: str, reg_model_name: str) -> None:
 
         prod_score_str = current_prod.tags.get("val_loss")
         prod_score = float(prod_score_str) if prod_score_str else float("inf")
-
         logger.info(
             "Текущий Production: версия %s (val_loss=%.4f)", current_prod.version, prod_score
         )
@@ -78,7 +76,7 @@ def _promote(tracking_uri: str, reg_model_name: str) -> None:
     else:
         logger.warning(
             "ОТКАЗ: Модель в Staging (%.4f) хуже или равна текущей Production (%.4f). "
-            "Промоут отменен.",
+            "Промоут отменён.",
             staging_score,
             prod_score,
         )
@@ -89,10 +87,15 @@ def main(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
 
     tracking_uri = cfg.logger.pylightning.tracking_uri
-    mlflow_model_name = cfg.decoder_pipeline.model.architecture.mlflow_model_name
+    pipeline_cfg = getattr(cfg, cfg.pipeline_name)
+    mlflow_model_name = pipeline_cfg.model.architecture.mlflow_model_name
     reg_model_name = f"{mlflow_model_name}_LoRA"
 
-    _promote(tracking_uri=tracking_uri, reg_model_name=reg_model_name)
+    try:
+        _promote(tracking_uri=tracking_uri, reg_model_name=reg_model_name)
+    except PromoteError as e:
+        logger.error("%s", e)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

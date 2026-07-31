@@ -9,7 +9,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-# Загружаем локальный .env (если запуск вне K8s)
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
@@ -17,51 +16,64 @@ logger = logging.getLogger(__name__)
 
 
 def cleanup_mlruns(days: int) -> None:
-    """Удаляет папки и файлы артефактов, старше указанного количества дней.
+    """Рекурсивно удаляет файлы и пустые папки старше указанного количества дней.
 
-    Очищает директорию, переданную в переменной окружения MLRUNS_DIR
-    (по умолчанию /app/logs), от старых чекпоинтов и артефактов MLflow.
+    Очищает директорию из переменной MLRUNS_DIR (по умолчанию /app/logs).
+    Обход рекурсивный: вложенные чекпоинты MLflow тоже удаляются.
 
     Args:
         days: Возраст файлов в днях для удаления.
     """
-    # Путь по умолчанию соответствует нашему mount_path в Airflow и Docker
     target_dir = Path(os.getenv("MLRUNS_DIR", "/app/logs"))
-    logger.info("Запуск очистки логов в %s старше %d дней...", target_dir, days)
+    logger.info("Запуск очистки в %s (старше %d дней)...", target_dir, days)
 
     if not target_dir.exists():
         logger.warning("Директория %s не существует. Очистка пропущена.", target_dir)
         return
 
-    # Вычисляем timestamp отсечения (текущее время минус days в секундах)
-    cutoff_time = time.time() - (days * 24 * 60 * 60)
-    deleted_count = 0
+    cutoff_time = time.time() - days * 24 * 60 * 60
+    deleted_files = 0
+    deleted_dirs = 0
 
-    for item_path in target_dir.iterdir():
+    # Сначала удаляем файлы рекурсивно (снизу вверх через sorted reverse)
+    for item_path in sorted(target_dir.rglob("*"), reverse=True):
         try:
-            # Получаем время последней модификации файла/папки
+            if not item_path.exists():
+                # Уже удалено (например, вместе с родительской папкой)
+                continue
+
             mtime = item_path.stat().st_mtime
+            if mtime >= cutoff_time:
+                continue
 
-            # Если объект старше точки отсечения — удаляем
-            if mtime < cutoff_time:
-                if item_path.is_dir():
-                    shutil.rmtree(item_path)  # Рекурсивное удаление папки
-                else:
-                    item_path.unlink()  # Удаление файла
-                deleted_count += 1
-                logger.debug("Удалено: %s", item_path)
+            if item_path.is_file():
+                item_path.unlink()
+                deleted_files += 1
+                logger.debug("Удалён файл: %s", item_path)
+            elif item_path.is_dir():
+                # Удаляем директорию только если она пуста после чистки файлов
+                try:
+                    item_path.rmdir()  # Упадёт, если внутри ещё есть свежие файлы
+                    deleted_dirs += 1
+                    logger.debug("Удалена папка: %s", item_path)
+                except OSError:
+                    pass  # Папка не пуста — пропускаем
+
         except Exception as e:
-            logger.error("Ошибка при удалении %s: %s", item_path, e)
+            logger.error("Ошибка при обработке %s: %s", item_path, e)
 
-    logger.info("Очистка завершена. Удалено старых объектов: %d.", deleted_count)
+    logger.info("Очистка завершена. Удалено файлов: %d, папок: %d.", deleted_files, deleted_dirs)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Скрипт обслуживания инфраструктуры (Очистка старых логов)"
+        description="Скрипт обслуживания инфраструктуры (очистка старых логов)"
     )
     parser.add_argument(
-        "--action", choices=["cleanup"], required=True, help="Какое действие выполнить"
+        "--action",
+        choices=["cleanup"],
+        required=True,
+        help="Действие для выполнения",
     )
     parser.add_argument(
         "--days",

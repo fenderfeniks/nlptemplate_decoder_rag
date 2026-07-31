@@ -1,5 +1,7 @@
+# src/utils/vector_db.py
 import logging
 import pickle
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +9,14 @@ import faiss
 import numpy as np
 from tqdm import tqdm
 
+
+try:
+    from datasketch import MinHashLSH
+except ImportError:
+    MinHashLSH = None
+    logging.getLogger(__name__).warning(
+        "Библиотека datasketch не установлена. Fuzzy-дедупликация (MinHashLSH) отключена."
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +29,12 @@ class FAISSVectorDB:
     - Автоматическую нормализацию векторов для корректного косинусного сходства.
     - Батчевую индексацию с прогресс-баром.
     - Итеративную пост-фильтрацию по метаданным с гарантированным top_k.
-    - Персистентность индекса и метаданных на диске.
+    - Персистентность индекса, метаданных и состояния LSH на диске.
+
+    Предупреждение по безопасности:
+        Метод `load()` использует `pickle` для десериализации метаданных и LSH.
+        Загружайте только файлы из доверенных источников — pickle может
+        выполнить произвольный код при десериализации.
     """
 
     def __init__(
@@ -33,6 +48,8 @@ class FAISSVectorDB:
         insert_batch_size: int = 10_000,
         filter_fetch_multiplier: int = 5,
         filter_max_fetch_multiplier: int = 50,
+        lsh_threshold: float = 0.85,
+        lsh_num_perm: int = 128,
     ) -> None:
         """
         Args:
@@ -42,11 +59,11 @@ class FAISSVectorDB:
             ef_construction: (HNSW) Ширина поиска при построении.
             ef_search: (HNSW) Ширина поиска при запросе.
             normalize_embeddings: Нормализовать ли векторы перед вставкой/поиском.
-                Обязательно True при index_type='hnsw', т.к. METRIC_INNER_PRODUCT
-                эквивалентен косинусному сходству только для единичных векторов.
             insert_batch_size: Размер батча при батчевой индексации.
             filter_fetch_multiplier: Начальный множитель over-fetch при фильтрации.
             filter_max_fetch_multiplier: Максимальный множитель при итеративном расширении.
+            lsh_threshold: (LSH) Порог сходства Jaccard для нечеткой дедупликации.
+            lsh_num_perm: (LSH) Количество перестановок хэш-функции.
         """
         self.embedding_dim = embedding_dim
         self.index_type = index_type.lower()
@@ -54,6 +71,8 @@ class FAISSVectorDB:
         self.insert_batch_size = insert_batch_size
         self.filter_fetch_multiplier = filter_fetch_multiplier
         self.filter_max_fetch_multiplier = filter_max_fetch_multiplier
+        self.lsh_threshold = lsh_threshold
+        self.lsh_num_perm = lsh_num_perm
 
         if self.index_type == "hnsw":
             if not self.normalize_embeddings:
@@ -83,9 +102,31 @@ class FAISSVectorDB:
 
         self.metadata: list[dict[str, Any]] = []
 
+        # Кэш doc_id для O(1) проверки дублей (инвалидируется при insert/reset)
+        self._doc_id_cache: set[str] | None = None
+
+        if MinHashLSH is not None:
+            self.lsh = MinHashLSH(threshold=self.lsh_threshold, num_perm=self.lsh_num_perm)
+            logger.info("MinHashLSH инициализирован (threshold=%.2f)", self.lsh_threshold)
+        else:
+            self.lsh = None
+
     # ------------------------------------------------------------------
     # Вспомогательные методы
     # ------------------------------------------------------------------
+
+    @property
+    def existing_doc_ids(self) -> set[str]:
+        """Множество всех doc_id, уже присутствующих в БД.
+
+        Результат кэшируется и инвалидируется при каждом insert/reset.
+        """
+        if self._doc_id_cache is None:
+            self._doc_id_cache = {meta["doc_id"] for meta in self.metadata if "doc_id" in meta}
+        return self._doc_id_cache
+
+    def _invalidate_cache(self) -> None:
+        self._doc_id_cache = None
 
     def _normalize(self, embeddings: np.ndarray) -> np.ndarray:
         """L2-нормализует векторы по строкам. Клипует нормы во избежание деления на 0."""
@@ -110,10 +151,7 @@ class FAISSVectorDB:
 
     def _match_filters(self, doc_meta: dict[str, Any], filters: dict[str, Any]) -> bool:
         """Проверяет, соответствует ли документ заданным фильтрам."""
-        for key, value in filters.items():
-            if doc_meta.get(key) != value:
-                return False
-        return True
+        return all(doc_meta.get(key) == value for key, value in filters.items())
 
     # ------------------------------------------------------------------
     # Основные публичные методы
@@ -129,6 +167,11 @@ class FAISSVectorDB:
         Raises:
             ValueError: При несовпадении размерностей или длин.
             RuntimeError: Если состояние индекса уже нарушено до вставки.
+
+        Note:
+            Атомарность гарантируется для пары (index, metadata): при ошибке
+            index.add — metadata откатываются. LSH-состояние обновляется
+            снаружи (в KnowledgeBaseIndexer) и не откатывается автоматически.
         """
         if embeddings.ndim != 2 or embeddings.shape[1] != self.embedding_dim:
             raise ValueError(
@@ -144,17 +187,17 @@ class FAISSVectorDB:
 
         prepared = self._prepare(embeddings)
 
-        # Атомарный insert: сначала расширяем metadata, потом добавляем в индекс.
-        # При исключении из index.add — откатываем metadata до исходного состояния.
         snapshot_len = len(self.metadata)
         self.metadata.extend(metadata)
         try:
             self.index.add(prepared)
         except Exception:
-            # Откат metadata до состояния до вставки
             del self.metadata[snapshot_len:]
             logger.exception("index.add упал — metadata откачены, индекс не изменён.")
             raise
+
+        # Инвалидируем кэш после успешной вставки
+        self._invalidate_cache()
 
     def insert_batched(
         self,
@@ -162,7 +205,7 @@ class FAISSVectorDB:
         metadata: list[dict[str, Any]],
         desc: str = "Indexing",
     ) -> None:
-        """Батчевая вставка с прогресс-баром. Удобна при индексации больших корпусов.
+        """Батчевая вставка с прогресс-баром.
 
         Args:
             embeddings: np.ndarray формы (N, embedding_dim).
@@ -180,20 +223,7 @@ class FAISSVectorDB:
         top_k: int = 5,
         filter_metadata: dict[str, Any] | None = None,
     ) -> list[list[dict[str, Any]]]:
-        """Поиск ближайших векторов с опциональной пост-фильтрацией.
-
-        При наличии фильтра использует итеративный over-fetch: начинает с
-        fetch_multiplier * top_k кандидатов и удваивает множитель до тех пор,
-        пока не наберёт top_k подходящих или не исчерпает индекс.
-
-        Args:
-            query_embeddings: np.ndarray формы (Q, embedding_dim).
-            top_k: Желаемое количество результатов на запрос.
-            filter_metadata: Словарь фильтров по метаданным (точное совпадение).
-
-        Returns:
-            Список длиной Q, каждый элемент — список dict с ключами 'score' и 'metadata'.
-        """
+        """Поиск ближайших векторов с опциональной пост-фильтрацией."""
         self._check_consistency()
 
         if self.index.ntotal == 0:
@@ -221,10 +251,10 @@ class FAISSVectorDB:
         return [
             [
                 {"score": float(d), "metadata": self.metadata[i]}
-                for d, i in zip(dist_row, idx_row)  # noqa
+                for d, i in zip(dist_row, idx_row)
                 if i != -1
             ]
-            for dist_row, idx_row in zip(distances, indices)  # noqa
+            for dist_row, idx_row in zip(distances, indices)
         ]
 
     def _search_with_filter(
@@ -233,27 +263,33 @@ class FAISSVectorDB:
         top_k: int,
         filter_metadata: dict[str, Any],
     ) -> list[list[dict[str, Any]]]:
-        """Итеративный over-fetch: удваивает fetch_k пока не наберём top_k или не упрёмся в ntotal."""
+        """Итеративный over-fetch: удваивает fetch_k пока не наберём top_k или не упрёмся в ntotal.
+
+        Оптимизация: при каждой итерации ищем только незавершённые запросы,
+        чтобы не тратить время на уже набравшие top_k.
+        """
         multiplier = self.filter_fetch_multiplier
         max_multiplier = self.filter_max_fetch_multiplier
 
-        # Для каждого запроса собираем результаты отдельно, т.к. у разных запросов
-        # может быть разный прогресс набора top_k кандидатов.
         n_queries = len(prepared_queries)
         batch_results: list[list[dict[str, Any]]] = [[] for _ in range(n_queries)]
-        done = [False] * n_queries  # маркер «уже набрали top_k»
 
-        while multiplier <= max_multiplier:
+        # Маска незавершённых запросов: индекс в оригинальном массиве → индекс в активном батче
+        pending_original_indices = list(range(n_queries))
+
+        while pending_original_indices and multiplier <= max_multiplier:
             fetch_k = min(top_k * multiplier, self.index.ntotal)
-            distances, indices = self.index.search(prepared_queries, fetch_k)
 
-            all_done = True
-            for q_idx, (dist_row, idx_row) in enumerate(zip(distances, indices)):  # noqa
-                if done[q_idx]:
-                    continue
+            active_queries = prepared_queries[pending_original_indices]
+            distances, indices = self.index.search(active_queries, fetch_k)
+
+            still_pending = []
+            for local_idx, orig_idx in enumerate(pending_original_indices):
+                dist_row = distances[local_idx]
+                idx_row = indices[local_idx]
 
                 row_res: list[dict[str, Any]] = []
-                for d, i in zip(dist_row, idx_row):  # noqa
+                for d, i in zip(dist_row, idx_row):
                     if i == -1:
                         continue
                     if self._match_filters(self.metadata[i], filter_metadata):
@@ -261,23 +297,21 @@ class FAISSVectorDB:
                     if len(row_res) == top_k:
                         break
 
-                batch_results[q_idx] = row_res
+                batch_results[orig_idx] = row_res
 
-                if len(row_res) >= top_k or fetch_k >= self.index.ntotal:
-                    done[q_idx] = True
-                else:
-                    all_done = False
+                if len(row_res) < top_k and fetch_k < self.index.ntotal:
+                    still_pending.append(orig_idx)
 
-            if all_done:
-                break
+            pending_original_indices = still_pending
 
-            multiplier *= 2
-            logger.debug(
-                "Фильтрация: не набрали top_k=%d для всех запросов, "
-                "расширяем fetch до multiplier=%d",
-                top_k,
-                multiplier,
-            )
+            if pending_original_indices:
+                multiplier *= 2
+                logger.debug(
+                    "Фильтрация: %d запросов не набрали top_k=%d, расширяем до multiplier=%d",
+                    len(pending_original_indices),
+                    top_k,
+                    multiplier,
+                )
 
         return batch_results
 
@@ -286,73 +320,65 @@ class FAISSVectorDB:
     # ------------------------------------------------------------------
 
     def save(self, directory: str | Path) -> None:
-        """Сохраняет индекс и метаданные на диск.
-
-        Создаёт два файла:
-        - ``<directory>/index.faiss`` — FAISS-индекс.
-        - ``<directory>/metadata.pkl`` — список словарей метаданных.
-
-        Args:
-            directory: Директория для сохранения.
-        """
+        """Сохраняет индекс, метаданные и состояние LSH на диск."""
         self._check_consistency()
         dir_path = Path(directory)
         dir_path.mkdir(parents=True, exist_ok=True)
 
-        index_path = dir_path / "index.faiss"
-        meta_path = dir_path / "metadata.pkl"
+        faiss.write_index(self.index, str(dir_path / "index.faiss"))
 
-        faiss.write_index(self.index, str(index_path))
-
-        with open(meta_path, "wb") as f:
+        with open(dir_path / "metadata.pkl", "wb") as f:
             pickle.dump(self.metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-        logger.info(
-            "VectorDB сохранена в '%s' (%d векторов).",
-            directory,
-            self.index.ntotal,
-        )
+        if self.lsh is not None:
+            with open(dir_path / "lsh.pkl", "wb") as f:
+                pickle.dump(self.lsh, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+        logger.info("VectorDB сохранена в '%s' (%d векторов).", directory, self.index.ntotal)
 
     @classmethod
     def load(cls, directory: str | Path, **init_kwargs: Any) -> "FAISSVectorDB":
-        """Загружает индекс и метаданные с диска.
+        """Загружает индекс, метаданные и состояние LSH с диска.
 
-        Args:
-            directory: Директория, в которую ранее был вызван save().
-            **init_kwargs: Параметры для __init__ (embedding_dim, index_type и т.д.).
-                Должны совпадать с теми, что использовались при создании индекса.
-
-        Returns:
-            Новый инстанс FAISSVectorDB с восстановленным состоянием.
-
-        Raises:
-            FileNotFoundError: Если файлы индекса или метаданных не найдены.
+        Warning:
+            Использует pickle. Загружайте только файлы из доверенных источников.
         """
         dir_path = Path(directory)
         index_path = dir_path / "index.faiss"
         meta_path = dir_path / "metadata.pkl"
+        lsh_path = dir_path / "lsh.pkl"
 
         if not index_path.exists():
             raise FileNotFoundError(f"Файл индекса не найден: {index_path}")
         if not meta_path.exists():
             raise FileNotFoundError(f"Файл метаданных не найден: {meta_path}")
 
+        warnings.warn(
+            "FAISSVectorDB.load() использует pickle для десериализации. "
+            "Убедитесь, что файлы получены из доверенного источника.",
+            UserWarning,
+            stacklevel=2,
+        )
+
         instance = cls(**init_kwargs)
         instance.index = faiss.read_index(str(index_path))
 
         with open(meta_path, "rb") as f:
-            instance.metadata = pickle.load(f)
+            instance.metadata = pickle.load(f)  # noqa: S301
+
+        if instance.lsh is not None and lsh_path.exists():
+            with open(lsh_path, "rb") as f:
+                instance.lsh = pickle.load(f)  # noqa: S301
 
         instance._check_consistency()
-        logger.info(
-            "VectorDB загружена из '%s' (%d векторов).",
-            directory,
-            instance.index.ntotal,
-        )
+        logger.info("VectorDB загружена из '%s' (%d векторов).", directory, instance.index.ntotal)
         return instance
 
     def reset(self) -> None:
-        """Полностью очищает индекс и метаданные."""
+        """Полностью очищает индекс, метаданные и LSH."""
         self.index.reset()
         self.metadata = []
+        self._invalidate_cache()
+        if self.lsh is not None:
+            self.lsh = MinHashLSH(threshold=self.lsh_threshold, num_perm=self.lsh_num_perm)
         logger.info("VectorDB сброшена.")

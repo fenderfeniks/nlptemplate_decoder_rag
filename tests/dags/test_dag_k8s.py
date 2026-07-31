@@ -57,7 +57,7 @@ def test_retrain_hf_secret_present():
     task = mod.dag.get_task("run_lora_finetuning")
     env_names = {e.name for e in task.env_vars}
 
-    assert "HUGGINGFACE_TOKEN" in env_names, "HUGGINGFACE_TOKEN не прокинут в trainer pod"
+    assert "HUGGINGFACE_TOKEN" in env_names, "HUGGINGFACE_TOKEN не прокинут в training pod"
 
     for env in task.env_vars:
         if env.name == "HUGGINGFACE_TOKEN":

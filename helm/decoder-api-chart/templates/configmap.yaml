@@ -1,12 +1,10 @@
-# helm/decoder-api-chart/templates/configmap.yaml
+# helm/nlp-api-chart/templates/configmap.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  # Название конфигмапа динамически собирается из имени приложения
   name: {{ .Values.app.name }}-config
   namespace: {{ .Values.app.namespace }}
 data:
-  # Значения подтягиваются из блока config в values.yaml
   API_PORT: {{ .Values.config.port | quote }}
   ENVIRONMENT: "production"
   LOG_LEVEL: "INFO"
@@ -14,6 +12,8 @@ data:
   MODEL_WEIGHTS_DIR: "/app/models"
   MLRUNS_DIR: "/app/logs"
   DATA_DIR: "/app/data"
+  # Добавлен путь к векторной БД для RAG
+  VECTOR_DB_DIR: "/app/vector_db"
 
   MLFLOW_TRACKING_URI: {{ .Values.config.mlflowTrackingUri | quote }}
   MLFLOW_MODEL_NAME: {{ .Values.config.modelName | quote }}
