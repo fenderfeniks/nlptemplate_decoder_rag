@@ -1,6 +1,6 @@
 # src/schemas/rag.py
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 # ==============================================================================
@@ -29,7 +29,7 @@ class ExactDeduplicationTransformConfig(BaseTransformConfig):
     _target_: str = (
         "src.rag_pipeline.core.data.transforms.deduplication.ExactDeduplicationTransform"
     )
-    target_columns: List[str] = field(default_factory=lambda: ["text"])
+    target_columns: list[str] = field(default_factory=lambda: ["text"])
     num_proc: int = 4
     column_separator: str = " "
 
@@ -39,7 +39,7 @@ class MinHashDeduplicationTransformConfig(BaseTransformConfig):
     _target_: str = (
         "src.rag_pipeline.core.data.transforms.deduplication.MinHashDeduplicationTransform"
     )
-    target_columns: List[str] = field(default_factory=lambda: ["text"])
+    target_columns: list[str] = field(default_factory=lambda: ["text"])
     num_perm: int = 128
     threshold: float = 0.85
     ngram_size: int = 5
@@ -68,10 +68,10 @@ class MetadataInjectorTransformConfig(BaseTransformConfig):
 @dataclass
 class CleaningTransformConfig(BaseTransformConfig):
     _target_: str = "src.rag_pipeline.core.data.transforms.validation.CleaningTransform"
-    columns_to_clean: List[str] = field(default_factory=list)
+    columns_to_clean: list[str] = field(default_factory=list)
     num_proc: int = 4
     batch_size: int = 1000
-    pipeline: Optional[List[Any]] = None
+    pipeline: list[Any] | None = None
 
 
 @dataclass
@@ -140,10 +140,10 @@ class RawDataFetcherConfig(BaseSourceConfig):
     _target_: str = "src.rag_pipeline.core.data.fetcher.RawDataFetcher"
     source_type: str = "local"
     raw_dir: str = "${paths.data_dir}/raw"
-    dataset_name: Optional[str] = None
-    file_name: Optional[str] = None
-    token: Optional[str] = None
-    kwargs: Dict[str, Any] = field(default_factory=dict)
+    dataset_name: str | None = None
+    file_name: str | None = None
+    token: str | None = None
+    kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -151,8 +151,8 @@ class InterleavedDataFetcherConfig(BaseSourceConfig):
     _target_: str = "src.rag_pipeline.core.data.mixers.InterleavedDataFetcher"
     seed: int = 42
     stopping_strategy: str = "first_exhausted"
-    probabilities: List[float] = field(default_factory=list)
-    fetchers: List[Any] = field(default_factory=list)
+    probabilities: list[float] = field(default_factory=list)
+    fetchers: list[Any] = field(default_factory=list)
     imbalance_warning_ratio: float = 10.0
 
 
@@ -190,7 +190,7 @@ class RegexCleanerConfig(BaseCleanerConfig):
 @dataclass
 class TextCleaningPipelineConfig:
     _target_: str = "src.rag_pipeline.core.data.cleaners.TextCleaningPipeline"
-    cleaners: List[Any] = field(default_factory=list)
+    cleaners: list[Any] = field(default_factory=list)
 
 
 # ==============================================================================
@@ -206,7 +206,7 @@ class HFTokenizerBuilderConfig:
     padding_side: str = "right"
     add_eos_token: bool = False
     trust_remote_code: bool = True
-    chat_template: Optional[str] = None
+    chat_template: str | None = None
 
 
 @dataclass
@@ -227,8 +227,8 @@ class PEFTModifierConfig:
     _target_: str = "src.rag_pipeline.core.models.modifiers.PEFTModifier"
     gradient_checkpointing: bool = True
     is_quantized: bool = True
-    lora_resume_path: Optional[str] = None
-    peft_config: Dict[str, Any] = field(
+    lora_resume_path: str | None = None
+    peft_config: dict[str, Any] = field(
         default_factory=lambda: {
             "r": 16,
             "lora_alpha": 32,
@@ -245,13 +245,13 @@ class HFModelBuilderConfig:
     _target_: str = "src.rag_pipeline.core.models.builder.HFModelBuilder"
     model_name_or_path: str = "BAAI/bge-m3"
     auto_model_class: str = "transformers.AutoModel"
-    cache_dir: Optional[str] = "${paths.data_dir}/weights"
-    quantization_config: Optional[Dict[str, Any]] = None
+    cache_dir: str | None = "${paths.data_dir}/weights"
+    quantization_config: dict[str, Any] | None = None
     trust_remote_code: bool = False
     torch_dtype: str = "bfloat16"
     attn_implementation: str = "sdpa"
-    rope_scaling: Optional[Dict[str, Any]] = None
-    modifiers: Optional[Dict[str, Any]] = None
+    rope_scaling: dict[str, Any] | None = None
+    modifiers: dict[str, Any] | None = None
 
 
 # ==============================================================================
@@ -261,9 +261,9 @@ class HFModelBuilderConfig:
 
 @dataclass
 class VectorDBFiltersConfig:
-    active_only: Dict[str, str] = field(default_factory=lambda: {"status": "active"})
-    current_year: Dict[str, int] = field(default_factory=lambda: {"year": 2024})
-    trusted_sources: Dict[str, Any] = field(
+    active_only: dict[str, str] = field(default_factory=lambda: {"status": "active"})
+    current_year: dict[str, int] = field(default_factory=lambda: {"year": 2024})
+    trusted_sources: dict[str, Any] = field(
         default_factory=lambda: {"is_verified": True, "source_type": "official"}
     )
 
@@ -313,7 +313,7 @@ class AdamWConfig:
     _partial_: bool = True
     lr: float = 2e-4
     weight_decay: float = 0.01
-    betas: List[float] = field(default_factory=lambda: [0.9, 0.999])
+    betas: list[float] = field(default_factory=lambda: [0.9, 0.999])
     eps: float = 1e-8
 
 
@@ -328,7 +328,7 @@ class CosineScheduleWithWarmupConfig:
 class RAGLightningModuleConfig:
     _target_: str = "src.rag_pipeline.training.module.RAGLightningModule"
     optimizer_cfg: Any = field(default_factory=AdamWConfig)
-    scheduler_cfg: Optional[Any] = field(default_factory=CosineScheduleWithWarmupConfig)
+    scheduler_cfg: Any | None = field(default_factory=CosineScheduleWithWarmupConfig)
 
 
 # ==============================================================================
@@ -401,7 +401,7 @@ class TrainingConfig:
     max_steps: int = 2000
     max_epochs: int = -1
     val_check_interval: int = 200
-    check_val_every_n_epoch: Optional[int] = None
+    check_val_every_n_epoch: int | None = None
     accumulate_grad_batches: int = 1
     gradient_clip_val: float = 1.0
     gradient_clip_algorithm: str = "norm"
@@ -427,7 +427,7 @@ class FastAPIConfig:
     version: Any = "${oc.env:PROJECT_VERSION,'0.1.0'}"
     generation_template: str = "rag_qa"
     generation_static_context: str = ""
-    cors_origins: List[str] = field(
+    cors_origins: list[str] = field(
         default_factory=lambda: ["http://localhost:3000", "http://localhost:8080"]
     )
 

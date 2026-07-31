@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import hydra
-from aiogram import types
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.security import APIKeyHeader
@@ -23,7 +22,7 @@ from src.decoder_pipeline.core.prompts.manager import PromptManager
 
 # Используем новый легкий клиент
 from src.decoder_pipeline.sdk.inference import LLMGenerationClient
-from src.tg_bot.bot_webhook import dp, get_webhook_bot
+from src.tg_bot.bot_webhook import get_webhook_bot
 
 
 logger = logging.getLogger(__name__)

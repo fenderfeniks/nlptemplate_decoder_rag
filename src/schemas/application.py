@@ -4,7 +4,6 @@ Telegram-бот, RAGOrchestrator и LlamaIndex-режим.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -31,7 +30,7 @@ class TgBotConfig:
 
     # Параметры ретривала
     top_k: int = 5
-    score_threshold: Optional[float] = None  # null = без порога
+    score_threshold: float | None = None  # null = без порога
 
     # Интервал редактирования сообщения при стриминге (Telegram rate limit ~1/сек)
     stream_edit_interval: float = 1.5

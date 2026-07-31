@@ -1,6 +1,5 @@
 # src/schemas/main.py
 from dataclasses import dataclass, field
-from typing import Optional
 
 from src.schemas.application import ApplicationConfig, TgBotConfig
 from src.schemas.decoder import DecoderPipelineConfig
@@ -27,11 +26,11 @@ class ConfigSchema:
     pipeline_name: str = "decoder_pipeline"
     resume_training: bool = False
 
-    ckpt_path: Optional[str] = None
+    ckpt_path: str | None = None
     metrics_output_path: str = "metrics.json"
-    drift_threshold: Optional[float] = None
+    drift_threshold: float | None = None
     drift_metric_key: str = "test_perplexity"
-    text: Optional[str] = None
+    text: str | None = None
 
     paths: PathsConfig = field(default_factory=PathsConfig)
     system: SystemConfig = field(default_factory=SystemConfig)
@@ -41,9 +40,9 @@ class ConfigSchema:
     strings: StringsConfig = field(default_factory=StringsConfig)
     hydra: HydraConfig = field(default_factory=HydraConfig)
 
-    vector_db: Optional[VectorDBConfig] = None
-    decoder_pipeline: Optional[DecoderPipelineConfig] = None
-    rag_pipeline: Optional[RAGPipelineConfig] = None
+    vector_db: VectorDBConfig | None = None
+    decoder_pipeline: DecoderPipelineConfig | None = None
+    rag_pipeline: RAGPipelineConfig | None = None
 
     # Application layer
     tg_bot: TgBotConfig = field(default_factory=TgBotConfig)

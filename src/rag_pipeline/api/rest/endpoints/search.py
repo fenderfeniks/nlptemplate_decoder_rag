@@ -52,7 +52,6 @@ async def search_endpoint(request: Request, body: SearchRequest) -> SearchRespon
             query_time_ms=round(query_time_ms, 2),
         )
 
-    except Exception:
-        # exc_info=True добавляет полный traceback в лог — критично для диагностики
+    except Exception as err:
         logger.error("Ошибка векторного поиска (query='%s')", body.query[:80], exc_info=True)
-        raise HTTPException(status_code=500, detail="Ошибка при выполнении поиска.")
+        raise HTTPException(status_code=500, detail="Ошибка при выполнении поиска.") from err
