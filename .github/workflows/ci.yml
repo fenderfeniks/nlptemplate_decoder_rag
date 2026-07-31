@@ -27,7 +27,7 @@ jobs:
         enable-cache: true      
 
     - name: Install dependencies
-      run: uv pip install -e ".[api,dev,training,data,orchestration]"
+      run: uv pip install -e ".[api,dev,data,training,orchestration]"
 
     - name: Check code formatting
       run: ruff format --check .
