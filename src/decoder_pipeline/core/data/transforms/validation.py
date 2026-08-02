@@ -98,7 +98,6 @@ class ValidationTransform(BaseDatasetTransform):
         valid_texts = []
         for text in batch.get(self.text_column, []):
             try:
-                # ИСПРАВЛЕНО: Теперь передаем аргумент text, а не prompt
                 record = RawDatasetRecord(text=text)
                 valid_texts.append(record.text)
             except ValidationError as e:
