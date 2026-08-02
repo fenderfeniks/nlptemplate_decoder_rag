@@ -1,3 +1,6 @@
 _target_: src.decoder_pipeline.core.data.transforms.filtering.LengthFilterTransform
 max_length: ${decoder_pipeline.data.max_length}
+# indexing-режим: фильтруем по input_ids.
+# contrastive-режим: меняйте на query_input_ids через override в конфиге задачи.
+column: "input_ids"
 num_proc: ${decoder_pipeline.data.num_proc}

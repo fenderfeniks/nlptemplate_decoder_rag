@@ -1,4 +1,4 @@
-# src/core/data/collators.py
+# src/decoder_pipeline/core/data/collators.py
 from typing import Any, Optional
 
 import torch

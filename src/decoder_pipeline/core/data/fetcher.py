@@ -1,11 +1,10 @@
-# src/core/data/fetcher.py
+# src/decoder_pipeline/core/data/fetcher.py
 import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
-from kaggle.api.kaggle_api_extended import KaggleApi
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +20,7 @@ _EXT_TO_LOADER: dict[str, str] = {
     "arrow": "arrow",
 }
 
+_SUPPORTED_SOURCE_TYPES = ("local", "kaggle", "hf")
 
 def _detect_loader(file_name: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     """Определяет тип загрузчика HF datasets по расширению файла.
@@ -38,7 +38,16 @@ def _detect_loader(file_name: str, kwargs: dict[str, Any]) -> tuple[str, dict[st
     Raises:
         ValueError: Если расширение файла не поддерживается.
     """
-    ext = file_name.rsplit(".", 1)[-1].lower()
+    parts = file_name.rsplit(".", 1)
+    if len(parts) < 2:
+        raise ValueError(
+            f"Не удалось определить расширение файла из '{file_name}'. "
+            f"Поддерживаются: {list(_EXT_TO_LOADER.keys())}"
+        )
+
+    raw_ext = parts[-1].lower()
+
+    ext = raw_ext.strip("*?[]")
     loader = _EXT_TO_LOADER.get(ext)
 
     if loader is None:
@@ -79,6 +88,12 @@ class RawDataFetcher:
             token: Токен доступа (используется только для HuggingFace).
             **kwargs: Дополнительные параметры для `load_dataset`.
         """
+        if source_type not in _SUPPORTED_SOURCE_TYPES:
+            raise ValueError(
+                f"Неизвестный тип источника данных: '{source_type}'. "
+                f"Поддерживаются: {_SUPPORTED_SOURCE_TYPES}."
+            )
+        
         self.source_type = source_type
         self.raw_dir = Path(raw_dir)
         self.dataset_name = dataset_name
@@ -86,28 +101,31 @@ class RawDataFetcher:
         self.token = token
         self.kwargs = kwargs
 
+        if self.source_type == "kaggle":
+                    self._validate_kaggle_env()
+
+    # ------------------------------------------------------------------
+    # Публичный интерфейс
+    # ------------------------------------------------------------------
+
     def load(self) -> Dataset | DatasetDict:
-        """Единая точка входа для получения датасета.
+        """Загружает датасет из сконфигурированного источника.
 
         Returns:
-            Загруженный датасет (Dataset или DatasetDict).
-
-        Raises:
-            ValueError: Если передан неизвестный `source_type`.
+            Dataset или DatasetDict в зависимости от источника и формата файла.
         """
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
-        if self.source_type == "local":
-            return self._load_local()
-        elif self.source_type == "kaggle":
-            return self._load_kaggle()
-        elif self.source_type == "hf":
-            return self._load_hf()
-        else:
-            raise ValueError(
-                f"Неизвестный тип источника данных: '{self.source_type}'. "
-                "Поддерживаются: 'local', 'kaggle', 'hf'."
-            )
+        dispatch = {
+            "local": self._load_local,
+            "kaggle": self._load_kaggle,
+            "hf": self._load_hf,
+        }
+        return dispatch[self.source_type]()
+
+    # ------------------------------------------------------------------
+    # Приватные загрузчики
+    # ------------------------------------------------------------------
 
     def _load_local(self) -> Dataset | DatasetDict:
         if not self.file_name:
@@ -137,6 +155,14 @@ class RawDataFetcher:
         if not self.file_name or not self.dataset_name:
             raise ValueError("Для kaggle источника необходимы dataset_name и file_name.")
 
+        # Импортируем здесь: kaggle — опциональная зависимость
+        try:
+            from kaggle.api.kaggle_api_extended import KaggleApi
+        except ImportError as e:
+            raise ImportError(
+                "Для kaggle источника установите: pip install kaggle"
+            ) from e
+        
         file_path = self.raw_dir / self.file_name
 
         if file_path.exists():
@@ -145,14 +171,6 @@ class RawDataFetcher:
             )
         else:
             username = os.getenv("KAGGLE_USERNAME")
-            key = os.getenv("KAGGLE_KEY")
-
-            if not username or not key:
-                raise EnvironmentError(
-                    "KAGGLE_USERNAME и KAGGLE_KEY не найдены в env. "
-                    "Проверь K8s Secret и прокидывание через KubernetesPodOperator."
-                )
-
             logger.info("Скачиваем %s с Kaggle (user: %s)...", self.dataset_name, username)
             api = KaggleApi()
             api.authenticate()
@@ -167,14 +185,34 @@ class RawDataFetcher:
         if not self.dataset_name:
             raise ValueError("Для hf источника необходимо указать dataset_name.")
 
-        hf_local_path = self.raw_dir / self.dataset_name.replace("/", "_")
+        cache_key = self.dataset_name.replace("/", "_")
+        extra = {k: v for k, v in self.kwargs.items() if k in ("name", "split")}
+        if extra:
+            suffix = "_".join(f"{k}-{v}" for k, v in sorted(extra.items()))
+            cache_key = f"{cache_key}_{suffix}"
 
-        if not hf_local_path.exists():
-            logger.info("Скачиваем %s из HuggingFace...", self.dataset_name)
-            dataset = load_dataset(self.dataset_name, token=self.token, **self.kwargs)
-            dataset.save_to_disk(str(hf_local_path))
-            logger.info("HF датасет сохранен в %s", hf_local_path)
-            return dataset
+        hf_local_path = self.raw_dir / cache_key
 
-        logger.info("HF датасет найден локально: %s", hf_local_path)
-        return load_from_disk(str(hf_local_path))
+        if hf_local_path.exists():
+            logger.info("HF датасет найден в кэше: %s", hf_local_path)
+            return load_from_disk(str(hf_local_path))
+
+        logger.info("Скачиваем '%s' из HuggingFace Hub...", self.dataset_name)
+        dataset = load_dataset(self.dataset_name, token=self.token, **self.kwargs)
+        dataset.save_to_disk(str(hf_local_path))
+        logger.info("HF датасет сохранён в кэш: %s", hf_local_path)
+        return dataset
+
+    # ------------------------------------------------------------------
+    # Вспомогательные методы
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_kaggle_env() -> None:
+        """Проверяет наличие Kaggle credentials в окружении (fail-fast)."""
+        missing = [v for v in ("KAGGLE_USERNAME", "KAGGLE_KEY") if not os.getenv(v)]
+        if missing:
+            raise EnvironmentError(
+                f"Переменные окружения не установлены: {missing}. "
+                "Для K8s: проверь Secret и прокидывание через KubernetesPodOperator env."
+            )

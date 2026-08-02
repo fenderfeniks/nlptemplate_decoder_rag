@@ -1,4 +1,4 @@
-# src/core/data/schemas.py
+# src/decoder_pipeline/core/data/schemas.py
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 

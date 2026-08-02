@@ -1,4 +1,4 @@
-# src/core/data/cleaners.py
+# src/decoder_pipeline/core/data/cleaners.py
 import re
 from abc import ABC, abstractmethod
 
@@ -48,6 +48,8 @@ class RegexCleaner(BaseCleaner):
         Returns:
             Текст после применения регулярного выражения.
         """
+        if not isinstance(text, str):
+                    return text
         return self.pattern.sub(self.replacement, text)
 
 
@@ -71,6 +73,8 @@ class TextCleaningPipeline:
         Returns:
             Текст после прохождения всех этапов очистки.
         """
+        if not isinstance(text, str):
+            return text
         for cleaner in self.cleaners:
             text = cleaner.clean(text)
         return text

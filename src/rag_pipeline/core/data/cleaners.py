@@ -1,4 +1,4 @@
-# src/core/data/cleaners.py
+# src/rag_pipeline/core/data/cleaners.py
 import re
 from abc import ABC, abstractmethod
 

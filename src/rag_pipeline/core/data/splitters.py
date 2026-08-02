@@ -1,4 +1,4 @@
-# src/core/data/splitters.py
+# src/rag_pipeline/core/data/splitters.py
 import logging
 
 from datasets import Dataset, DatasetDict

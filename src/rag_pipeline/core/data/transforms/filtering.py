@@ -1,3 +1,4 @@
+# src/rag_pipeline/core/data/transforms/filtering.py
 import logging
 
 from datasets import Dataset as HFDataset
@@ -10,8 +11,8 @@ logger = logging.getLogger(__name__)
 class LengthFilterTransform(BaseDatasetTransform):
     """Трансформация для отсечения слишком длинных токенизированных последовательностей.
 
-    Ожидает, что в датасете уже присутствует колонка `input_ids` (или другая,
-    заданная через `column`). Применяется после токенизации.
+    Ожидает, что в датасете уже присутствует колонка ``input_ids`` (или другая,
+    заданная через ``column``). Применяется после токенизации.
     """
 
     def __init__(
@@ -23,11 +24,19 @@ class LengthFilterTransform(BaseDatasetTransform):
         """
         Args:
             max_length: Максимально допустимая длина последовательности в токенах.
+                Должен быть положительным числом.
             column: Колонка, по длине которой производится фильтрация.
-                По умолчанию 'input_ids' (indexing-режим).
-                Для contrastive-режима передавайте 'query_input_ids'.
+                По умолчанию ``input_ids`` (indexing-режим).
+                Для contrastive-режима передавайте ``query_input_ids``.
             num_proc: Число процессов для параллельной фильтрации.
+
+        Raises:
+            ValueError: Если ``max_length`` не является положительным числом.
         """
+        if max_length <= 0:
+            raise ValueError(
+                f"max_length должен быть положительным числом, получено: {max_length}"
+            )
         self.max_length = max_length
         self.column = column
         self.num_proc = num_proc
@@ -50,6 +59,10 @@ class LengthFilterTransform(BaseDatasetTransform):
         removed = initial_count - len(filtered_ds)
         logger.info(
             "Фильтрация по длине ('%s' <= %d): %d -> %d (удалено %d)",
-            self.column, self.max_length, initial_count, len(filtered_ds), removed,
+            self.column,
+            self.max_length,
+            initial_count,
+            len(filtered_ds),
+            removed,
         )
         return filtered_ds

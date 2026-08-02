@@ -1,6 +1,7 @@
 _target_: src.decoder_pipeline.core.data.mixers.InterleavedDataFetcher
 seed: ${seed}
 stopping_strategy: "first_exhausted"
+imbalance_warning_ratio: 10.0
 probabilities:
   - 0.7
   - 0.3

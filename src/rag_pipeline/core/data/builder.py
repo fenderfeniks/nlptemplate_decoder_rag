@@ -1,4 +1,4 @@
-# src/core/data/builder.py
+# src/rag_pipeline/core/data/builder.py
 import hashlib
 import json
 import logging
@@ -62,7 +62,7 @@ class RAGDataModule(pl.LightningDataModule):
         }
         # SHA-256 надёжнее MD5 и не имеет deprecation-предупреждений в новых Python
         hash_str = json.dumps(hash_dict, sort_keys=True, default=str)
-        config_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()[:12]
+        config_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()[:8]
 
         dataset_name = self.data_cfg.get("dataset_name", "nlp_dataset")
         return (
@@ -144,11 +144,7 @@ class RAGDataModule(pl.LightningDataModule):
             return dataset
 
         n = len(dataset)
-        if isinstance(max_samples, float):
-            # Дробное значение → доля от датасета
-            k = max(1, int(n * max_samples))
-        else:
-            k = min(int(max_samples), n)
+        k = max(1, int(n * max_samples)) if isinstance(max_samples, float) else min(int(max_samples), n)
 
         if k >= n:
             return dataset

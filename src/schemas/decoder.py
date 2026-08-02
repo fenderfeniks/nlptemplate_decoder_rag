@@ -7,12 +7,81 @@ from omegaconf import MISSING
 
 
 # ==============================================================================
-# Data
+# Базовые классы
 # ==============================================================================
 
 
 @dataclass
-class DataSourceConfig:
+class BaseTransformConfig:
+    _target_: str
+
+
+@dataclass
+class BaseSourceConfig:
+    _target_: str
+
+
+@dataclass
+class BaseCollatorConfig:
+    _target_: str
+
+
+@dataclass
+class BaseCleanerConfig:
+    _target_: str
+
+
+@dataclass
+class BaseModifierConfig:
+    _target_: str
+
+
+@dataclass
+class BaseStrategyConfig:
+    _target_: str
+
+
+@dataclass
+class BaseCallbackConfig:
+    _target_: str
+
+
+# ==============================================================================
+# Трансформации данных
+# ==============================================================================
+
+
+@dataclass
+class InstructionTokenizationTransformConfig(BaseTransformConfig):
+    _target_: str = (
+        "src.decoder_pipeline.core.data.transforms.tokenization.InstructionTokenizationTransform"
+    )
+    text_column: str | None = None
+    prompt_column: str | None = None
+    target_column: str | None = None
+    messages_column: str | None = None
+    max_length: int = 2048
+    use_chat_template: bool = False
+    separator: str = "\n\n"
+    num_proc: int = 4
+    batch_size: int = 1000
+
+
+@dataclass
+class LengthFilterTransformConfig(BaseTransformConfig):
+    _target_: str = "src.decoder_pipeline.core.data.transforms.filtering.LengthFilterTransform"
+    max_length: int = 2048
+    column: str = "input_ids"
+    num_proc: int = 4
+
+
+# ==============================================================================
+# Источники данных, Клинеры и Коллаторы
+# ==============================================================================
+
+
+@dataclass
+class RawDataFetcherConfig(BaseSourceConfig):
     _target_: str = "src.decoder_pipeline.core.data.fetcher.RawDataFetcher"
     source_type: str = "local"
     raw_dir: str = "${paths.data_dir}/raw"
@@ -22,7 +91,17 @@ class DataSourceConfig:
 
 
 @dataclass
-class DataSplitterConfig:
+class InterleavedDataFetcherConfig(BaseSourceConfig):
+    _target_: str = "src.rag_pipeline.core.data.mixers.InterleavedDataFetcher"
+    seed: int = 42
+    stopping_strategy: str = "first_exhausted"
+    probabilities: list[float] = field(default_factory=list)
+    fetchers: list[Any] = field(default_factory=list)
+    imbalance_warning_ratio: float = 10.0
+
+
+@dataclass
+class RandomDatasetSplitterConfig:
     _target_: str = "src.decoder_pipeline.core.data.splitters.RandomDatasetSplitter"
     val_size: float = 0.1
     test_size: float = 0.1
@@ -30,12 +109,18 @@ class DataSplitterConfig:
 
 
 @dataclass
-class DataCollatorConfig:
+class InstructionDataCollatorConfig(BaseCollatorConfig):
     _target_: str = "src.decoder_pipeline.core.data.collators.InstructionDataCollator"
     max_sequence_length: int = 2048
     mask_prompt: bool = False
     response_template: str | None = None
     tokenizer: Any = None
+
+
+@dataclass
+class TextCleaningPipelineConfig(BaseCleanerConfig):
+    _target_: str = "src.decoder_pipeline.core.data.cleaners.TextCleaningPipeline"
+    cleaners: list[Any] = field(default_factory=list)
 
 
 @dataclass
@@ -45,71 +130,19 @@ class DataLoaderConfig:
     pin_memory: bool = "${system.pin_memory}"  # type: ignore[assignment]
 
 
-@dataclass
-class CleanerConfig:
-    _target_: str = "src.decoder_pipeline.core.data.cleaners.TextCleaningPipeline"
-    cleaners: Any = field(default_factory=list)
-
-
-@dataclass
-class DataConfig:
-    source: DataSourceConfig = field(default_factory=DataSourceConfig)
-    splitter: DataSplitterConfig = field(default_factory=DataSplitterConfig)
-    collator: DataCollatorConfig = field(default_factory=DataCollatorConfig)
-    dataloader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
-
-    task: str = ""
-    dataset_name: str = "nlp_dataset"
-    seed: int = "${seed}"  # type: ignore[assignment]
-    max_samples: Any = None
-    force_reprocess: bool = False
-    val_size: float = 0.1
-    test_size: float = 0.1
-
-    text_column: str | None = None
-    prompt_column: str | None = None
-    target_column: str | None = None
-
-    max_length: int = "${max_length}"  # type: ignore[assignment]
-    num_proc: int = "${system.num_proc}"  # type: ignore[assignment]
-    batch_size: int = 1000
-    use_chat_template: bool = False
-    messages_column: str | None = None
-    separator: str = "\n\n"
-    writer_batch_size: int = 1000
-    drop_remainder: bool = False
-
-    cleaner: CleanerConfig = field(default_factory=CleanerConfig)
-    paths: dict[str, str] = field(
-        default_factory=lambda: {"processed_data_dir": "${paths.processed_data_dir}"}
-    )
-    transforms: Any = field(default_factory=dict)
-
-
 # ==============================================================================
-# Model
+# Модели и Архитектура
 # ==============================================================================
 
 
 @dataclass
-class ModelArchitectureConfig:
-    model_name_or_path: str = MISSING
-    mlflow_model_name: str = MISSING
-    auto_model_class: str = "transformers.AutoModelForCausalLM"
-    torch_dtype: str = "bfloat16"
-    attn_implementation: str = "flash_attention_2"
-    trust_remote_code: bool = False
-    rope_scaling: dict[str, Any] | None = None
-    gradient_checkpointing: bool = True
-
-
-@dataclass
-class TokenizerConfig:
+class HFTokenizerBuilderConfig:
     _target_: str = "src.decoder_pipeline.core.models.tokenization.HFTokenizerBuilder"
     tokenizer_name: str = "${decoder_pipeline.model.architecture.model_name_or_path}"
     use_fast: bool = True
     padding_side: str = "right"
     add_eos_token: bool = False
+    trust_remote_code: bool = True
     chat_template: str | None = None
 
 
@@ -133,13 +166,13 @@ class PEFTLoraConfig:
 
 
 @dataclass
-class EmbeddingResizeModifierConfig:
+class EmbeddingResizeModifierConfig(BaseModifierConfig):
     _target_: str = "src.decoder_pipeline.core.models.modifiers.EmbeddingResizeModifier"
     tokenizer: Any = "${decoder_pipeline.model.tokenizer}"  # type: ignore[assignment]
 
 
 @dataclass
-class PEFTModifierConfig:
+class PEFTModifierConfig(BaseModifierConfig):
     _target_: str = "src.decoder_pipeline.core.models.modifiers.PEFTModifier"
     gradient_checkpointing: bool = True
     is_quantized: bool = True
@@ -148,26 +181,9 @@ class PEFTModifierConfig:
 
 
 @dataclass
-class FullFTModifierConfig:
+class FullFTModifierConfig(BaseModifierConfig):
     _target_: str = "src.decoder_pipeline.core.models.modifiers.FullFinetuningModifier"
     gradient_checkpointing: bool = True
-
-
-@dataclass
-class ModelModifiersConfig:
-    embedding_resize: EmbeddingResizeModifierConfig = field(
-        default_factory=EmbeddingResizeModifierConfig
-    )
-    finetuning: PEFTModifierConfig | FullFTModifierConfig = field(
-        default_factory=PEFTModifierConfig
-    )
-
-
-@dataclass
-class LoraResumeConfig:
-    enabled: bool = False
-    run_id: str = ""
-    artifact_path: str = "lora_weights"
 
 
 @dataclass
@@ -180,127 +196,12 @@ class HFModelBuilderConfig:
     trust_remote_code: bool = False
     torch_dtype: str = "bfloat16"
     attn_implementation: str = "flash_attention_2"
-    quantization_config: Any = None
-    modifiers: Any = field(default_factory=dict)
-
-
-@dataclass
-class ModelConfig:
-    builder: HFModelBuilderConfig = field(default_factory=HFModelBuilderConfig)
-    architecture: ModelArchitectureConfig = field(default_factory=ModelArchitectureConfig)
-    tokenizer: TokenizerConfig = field(default_factory=TokenizerConfig)
-    quantization: Any = None
-    lora_resume: LoraResumeConfig = field(default_factory=LoraResumeConfig)
-    compile: bool = False
-    modifiers: Any = field(default_factory=dict)
+    quantization_config: QuantizationConfig | None = None
+    modifiers: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
-# Optimizer & Scheduler
-# ==============================================================================
-
-
-@dataclass
-class OptimizerConfig:
-    _target_: str = "torch.optim.AdamW"
-    _partial_: bool = True
-    lr: float = 2e-4
-    weight_decay: float = 0.01
-    betas: tuple[float, float] = (0.9, 0.999)
-    eps: float = 1e-8
-
-
-@dataclass
-class SchedulerConfig:
-    _target_: str = "transformers.get_cosine_schedule_with_warmup"
-    _partial_: bool = True
-    num_warmup_steps: int = 100
-
-
-# ==============================================================================
-# training & Callbacks
-# ==============================================================================
-
-
-@dataclass
-class ModelCheckpointConfig:
-    _target_: str = "pytorch_lightning.callbacks.ModelCheckpoint"
-    dirpath: str = "${paths.log_dir}/checkpoints"
-    filename: str = "step={step}-val_loss={val_loss:.4f}"
-    monitor: str = "val_loss"
-    mode: str = "min"
-    save_top_k: int = 2
-    save_last: bool = True
-    auto_insert_metric_name: bool = False
-    every_n_train_steps: int = 200
-    save_on_train_epoch_end: bool = False
-
-
-@dataclass
-class LRMonitorConfig:
-    _target_: str = "pytorch_lightning.callbacks.LearningRateMonitor"
-    logging_interval: str = "step"
-
-
-@dataclass
-class RichProgressBarConfig:
-    _target_: str = "pytorch_lightning.callbacks.RichProgressBar"
-
-
-@dataclass
-class EarlyStoppingConfig:
-    _target_: str = "pytorch_lightning.callbacks.EarlyStopping"
-    monitor: str = "val_loss"
-    patience: int = 5
-    mode: str = "min"
-    min_delta: float = 0.001
-
-
-@dataclass
-class GenerationEvalConfig:
-    _target_: str = "src.decoder_pipeline.training.callbacks.GenerationEvaluationCallback"
-    model_name: str = "${decoder_pipeline.model.architecture.mlflow_model_name}"
-    num_random: int = 5
-    generation_batch_size: int = 2
-    mode: str = "auto"
-    generation_kwargs: dict[str, Any] = field(default_factory=dict)
-    fixed_samples: list[dict[str, str]] = field(default_factory=list)
-
-
-@dataclass
-class CallbacksConfig:
-    model_checkpoint: ModelCheckpointConfig = field(default_factory=ModelCheckpointConfig)
-    lr_monitor: LRMonitorConfig = field(default_factory=LRMonitorConfig)
-    rich_progress_bar: RichProgressBarConfig = field(default_factory=RichProgressBarConfig)
-    generation_eval: GenerationEvalConfig = field(default_factory=GenerationEvalConfig)
-
-
-@dataclass
-class TrainingConfig:
-    _target_: str = "pytorch_lightning.Trainer"
-    accelerator: str = "gpu"
-    devices: int = 1
-    precision: str = "bf16-mixed"
-    max_steps: int = 2000
-    max_epochs: int = -1
-    val_check_interval: int = 200
-    check_val_every_n_epoch: Any = None
-    accumulate_grad_batches: int = 4
-    gradient_clip_val: float = 1.0
-    gradient_clip_algorithm: str = "norm"
-    log_every_n_steps: int = 10
-    logger: Any = None
-    default_root_dir: str = "${paths.log_dir}"
-    num_sanity_val_steps: int = 2
-    deterministic: bool = False
-    limit_train_batches: Any = 1.0
-    limit_val_batches: Any = 1.0
-    limit_test_batches: Any = 1.0
-    callbacks: Any = field(default_factory=dict)
-
-
-# ==============================================================================
-# Inference
+# Инференс
 # ==============================================================================
 
 
@@ -315,7 +216,7 @@ class ResponseCleanerConfig:
 
 
 @dataclass
-class InferenceConfig:
+class HFTextGeneratorConfig:
     _target_: str = "src.decoder_pipeline.core.models.generator.HFTextGenerator"
     generation_kwargs: dict[str, Any] = field(
         default_factory=lambda: {
@@ -331,7 +232,103 @@ class InferenceConfig:
 
 
 # ==============================================================================
-# API (Decoder Specific)
+# Обучение: Лоссы, Оптимизаторы и Модуль
+# ==============================================================================
+
+
+@dataclass
+class AdamWConfig:
+    _target_: str = "torch.optim.AdamW"
+    _partial_: bool = True
+    lr: float = 2e-4
+    weight_decay: float = 0.01
+    betas: tuple[float, float] = (0.9, 0.999)
+    eps: float = 1e-8
+
+
+@dataclass
+class CosineScheduleWithWarmupConfig:
+    _target_: str = "transformers.get_cosine_schedule_with_warmup"
+    _partial_: bool = True
+    num_warmup_steps: int = 100
+
+
+# ==============================================================================
+# PyTorch Lightning: Trainer, Callbacks, Strategies
+# ==============================================================================
+
+
+@dataclass
+class ModelCheckpointConfig(BaseCallbackConfig):
+    _target_: str = "pytorch_lightning.callbacks.ModelCheckpoint"
+    dirpath: str = "${paths.log_dir}/checkpoints"
+    filename: str = "step={step}-val_loss={val_loss:.4f}"
+    monitor: str = "val_loss"
+    mode: str = "min"
+    save_top_k: int = 2
+    save_last: bool = True
+    auto_insert_metric_name: bool = False
+    every_n_train_steps: int = 200
+    save_on_train_epoch_end: bool = False
+
+
+@dataclass
+class LearningRateMonitorConfig(BaseCallbackConfig):
+    _target_: str = "pytorch_lightning.callbacks.LearningRateMonitor"
+    logging_interval: str = "step"
+
+
+@dataclass
+class RichProgressBarConfig(BaseCallbackConfig):
+    _target_: str = "pytorch_lightning.callbacks.RichProgressBar"
+
+
+@dataclass
+class EarlyStoppingConfig(BaseCallbackConfig):
+    _target_: str = "pytorch_lightning.callbacks.EarlyStopping"
+    monitor: str = "val_loss"
+    patience: int = 5
+    mode: str = "min"
+    min_delta: float = 0.001
+
+
+@dataclass
+class GenerationEvaluationCallbackConfig(BaseCallbackConfig):
+    _target_: str = "src.decoder_pipeline.training.callbacks.GenerationEvaluationCallback"
+    model_name: str = "${decoder_pipeline.model.architecture.mlflow_model_name}"
+    num_random: int = 5
+    generation_batch_size: int = 2
+    mode: str = "auto"
+    generation_kwargs: dict[str, Any] = field(default_factory=dict)
+    fixed_samples: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass
+class TrainingConfig:
+    _target_: str = "pytorch_lightning.Trainer"
+    default_root_dir: str = "${paths.log_dir}"
+    accelerator: str = "gpu"
+    devices: int = 1
+    precision: str = "bf16-mixed"
+    max_steps: int = 2000
+    max_epochs: int = -1
+    val_check_interval: int = 200
+    check_val_every_n_epoch: Any = None
+    accumulate_grad_batches: int = 4
+    gradient_clip_val: float = 1.0
+    gradient_clip_algorithm: str = "norm"
+    log_every_n_steps: int = 10
+    logger: Any = None
+    num_sanity_val_steps: int = 2
+    deterministic: bool = False
+    limit_train_batches: Any = 1.0
+    limit_val_batches: Any = 1.0
+    limit_test_batches: Any = 1.0
+    callbacks: Any = field(default_factory=dict)
+
+
+# ==============================================================================
+# API (FastAPI)
 # ==============================================================================
 
 
@@ -357,10 +354,7 @@ class DecoderAPIConfig:
     description: str = "API for LLM Text Generation"
     version: str = "0.1.0"
     cors_origins: list[str] = field(
-        default_factory=lambda: [
-            "http://localhost:3000",
-            "http://localhost:8080",
-        ]
+        default_factory=lambda: ["http://localhost:3000", "http://localhost:8080"]
     )
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     telegram_webhook: TelegramWebhookConfig = field(default_factory=TelegramWebhookConfig)
@@ -370,16 +364,16 @@ class DecoderAPIConfig:
 
 
 # ==============================================================================
-# Pipeline Container
+# Корневая сборка Decoder пайплайна
 # ==============================================================================
 
 
 @dataclass
 class DecoderPipelineConfig:
-    data: DataConfig = field(default_factory=DataConfig)
-    model: ModelConfig = field(default_factory=ModelConfig)
-    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
-    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    data: Any = field(default_factory=dict)
+    model: Any = field(default_factory=dict)
+    optimizer: Any = field(default_factory=dict)
+    scheduler: Any = field(default_factory=dict)
     training: Any = field(default_factory=dict)
-    inference: InferenceConfig = field(default_factory=InferenceConfig)
+    inference: HFTextGeneratorConfig = field(default_factory=HFTextGeneratorConfig)
     api: DecoderAPIConfig = field(default_factory=DecoderAPIConfig)

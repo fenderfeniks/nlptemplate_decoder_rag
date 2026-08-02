@@ -18,9 +18,13 @@ class OverlappingChunkingTransform(BaseDatasetTransform):
 
     .. warning:: ``chunk_size`` и ``chunk_overlap`` задаются в **символах**, а не в токенах.
         Один токен в среднем ≈ 4 символа, но это сильно зависит от модели и языка.
-        При ``chunk_size=500`` и ``max_length=128`` токенов гарантий не превышения нет.
-        Рекомендуется калибровать chunk_size эмпирически под конкретный токенизатор,
-        либо использовать достаточный запас (например, chunk_size=400 при max_length=128).
+        При ``chunk_size=500`` и ``max_length=128`` токенов гарантий непревышения нет.
+        Рекомендуется калибровать ``chunk_size`` эмпирически под конкретный токенизатор,
+        либо использовать достаточный запас (например, ``chunk_size=400`` при ``max_length=128``).
+
+    .. note:: ``chunk_size`` является мягкой границей: последнее слово чанка добавляется
+        целиком, даже если оно незначительно превышает лимит. Реальный размер чанка
+        может быть больше ``chunk_size`` на длину одного слова минус один символ.
     """
 
     def __init__(
@@ -35,16 +39,26 @@ class OverlappingChunkingTransform(BaseDatasetTransform):
         """
         Args:
             text_column: Колонка с исходным текстом.
-            chunk_size: Максимальный размер чанка в **символах**.
+            chunk_size: Максимальный размер чанка в **символах**. Мягкая граница —
+                последнее слово добавляется целиком. Должен быть положительным числом.
             chunk_overlap: Размер перекрытия между соседними чанками в **символах**.
-                Должен быть строго меньше chunk_size.
+                Должен быть строго меньше ``chunk_size``.
             separator: Разделитель слов. По умолчанию пробел.
             num_proc: Число процессов для параллельного map.
             batch_size: Размер батча для map.
+
+        Raises:
+            ValueError: Если ``chunk_size`` не является положительным числом.
+            ValueError: Если ``chunk_overlap`` >= ``chunk_size``.
         """
+        if chunk_size <= 0:
+            raise ValueError(
+                f"chunk_size должен быть положительным числом, получено: {chunk_size}"
+            )
         if chunk_overlap >= chunk_size:
             raise ValueError(
-                f"chunk_overlap ({chunk_overlap}) должен быть строго меньше chunk_size ({chunk_size})"
+                f"chunk_overlap ({chunk_overlap}) должен быть строго меньше "
+                f"chunk_size ({chunk_size})"
             )
         self.text_column = text_column
         self.chunk_size = chunk_size
@@ -55,12 +69,18 @@ class OverlappingChunkingTransform(BaseDatasetTransform):
 
     def __call__(self, dataset: HFDataset) -> HFDataset:
         if self.text_column not in dataset.column_names:
-            logger.warning("Колонка '%s' не найдена, чанкинг пропущен.", self.text_column)
+            logger.warning(
+                "Колонка '%s' не найдена в датасете — чанкинг пропущен. "
+                "Убедитесь, что колонка с текстом задана корректно через параметр text_column.",
+                self.text_column,
+            )
             return dataset
 
         logger.info(
             "Нарезка на чанки (size=%d симв., overlap=%d симв.) по колонке '%s'...",
-            self.chunk_size, self.chunk_overlap, self.text_column,
+            self.chunk_size,
+            self.chunk_overlap,
+            self.text_column,
         )
 
         sep_len = len(self.separator)
@@ -105,30 +125,35 @@ class OverlappingChunkingTransform(BaseDatasetTransform):
                 if current_words:
                     chunks.append(self.separator.join(current_words))
 
-                # Пустой или слишком короткий текст — возвращаем как есть (один чанк)
+                # Пустой текст — возвращаем как есть (один пустой чанк)
                 if not chunks:
                     chunks = [text]
 
                 # Дублируем все остальные колонки для каждого чанка
                 for chunk in chunks:
                     for key in batch.keys():
-                        new_batch[key].append(chunk if key == self.text_column else batch[key][i])
+                        new_batch[key].append(
+                            chunk if key == self.text_column else batch[key][i]
+                        )
 
             return new_batch
 
         initial_count = len(dataset)
+
+        # remove_columns намеренно не передаётся: _chunk_batch сам контролирует
+        # состав колонок через new_batch — передача remove_columns=dataset.column_names
+        # хрупка при изменении схемы датасета и зависит от версии HF.
         chunked_dataset = dataset.map(
             _chunk_batch,
             batched=True,
             batch_size=self.batch_size,
             num_proc=self.num_proc,
-            # HF требует явного указания remove_columns при изменении числа строк в батче
-            remove_columns=dataset.column_names,
             desc="Chunking documents",
         )
 
         logger.info(
             "Чанкинг завершён: %d документов → %d чанков",
-            initial_count, len(chunked_dataset),
+            initial_count,
+            len(chunked_dataset),
         )
         return chunked_dataset

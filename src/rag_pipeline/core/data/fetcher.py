@@ -1,4 +1,4 @@
-# src/core/data/fetcher.py
+# src/rag_pipeline/core/data/fetcher.py
 import logging
 import os
 from pathlib import Path
@@ -40,8 +40,6 @@ def _detect_loader(file_name: str, kwargs: dict[str, Any]) -> tuple[str, dict[st
     Raises:
         ValueError: Если расширение файла не поддерживается или не определено.
     """
-    # Берём финальный сегмент после последней точки
-    # и убеждаемся, что это не glob-символ (например, "*" или "?")
     parts = file_name.rsplit(".", 1)
     if len(parts) < 2:
         raise ValueError(
@@ -51,7 +49,6 @@ def _detect_loader(file_name: str, kwargs: dict[str, Any]) -> tuple[str, dict[st
 
     raw_ext = parts[-1].lower()
 
-    # Очищаем от glob-символов, которые могут прилипнуть к расширению
     ext = raw_ext.strip("*?[]")
 
     loader = _EXT_TO_LOADER.get(ext)

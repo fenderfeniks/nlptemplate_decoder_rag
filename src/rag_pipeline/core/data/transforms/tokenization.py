@@ -21,6 +21,9 @@ class RAGTokenizationTransform(BaseDatasetTransform):
       ``negative_doc`` в раздельные тензоры (``query_*``, ``pos_*``, ``neg_*``).
       Негативный документ токенизируется только если хотя бы один элемент батча
       не является ``None``.
+
+    .. note:: Все режимы применяют ``truncation=True`` с заданным ``max_length``.
+        Последовательности длиннее ``max_length`` будут обрезаны без предупреждения.
     """
 
     _VALID_MODES = ("indexing", "contrastive")
@@ -36,24 +39,37 @@ class RAGTokenizationTransform(BaseDatasetTransform):
         max_length: int = 512,
         num_proc: int = 4,
         batch_size: int = 1000,
-        empty_doc_placeholder: str = ""
+        empty_doc_placeholder: str = "",
     ) -> None:
         """
         Args:
             tokenizer: Токенизатор модели (PreTrainedTokenizerBase).
-            mode: Режим работы — 'indexing' или 'contrastive'.
-            text_column: Колонка с текстом (используется в режиме indexing).
-            query_column: Колонка с запросом (contrastive).
-            positive_column: Колонка с позитивным документом (contrastive).
-            negative_column: Колонка с негативным документом (contrastive, опционально).
+            mode: Режим работы — ``'indexing'`` или ``'contrastive'``.
+            text_column: Колонка с текстом (режим ``indexing``).
+            query_column: Колонка с запросом (режим ``contrastive``).
+            positive_column: Колонка с позитивным документом (режим ``contrastive``).
+            negative_column: Колонка с негативным документом (режим ``contrastive``,
+                опционально — записи без негатива передаются как ``None``).
             max_length: Максимальная длина последовательности в токенах.
+                Должен быть положительным числом.
             num_proc: Число процессов для параллельного map.
             batch_size: Размер батча для map.
+            empty_doc_placeholder: Строка-заменитель для ``None``-значений
+                негативного документа перед передачей в токенизатор.
+                Токенизатор не принимает ``None`` напрямую.
+
+        Raises:
+            ValueError: Если ``mode`` не входит в допустимые значения.
+            ValueError: Если ``max_length`` не является положительным числом.
         """
         if mode not in self._VALID_MODES:
             raise ValueError(
                 f"Неизвестный режим токенизации: '{mode}'. "
                 f"Допустимые значения: {self._VALID_MODES}"
+            )
+        if max_length <= 0:
+            raise ValueError(
+                f"max_length должен быть положительным числом, получено: {max_length}"
             )
         self.tokenizer = tokenizer
         self.mode = mode
@@ -107,8 +123,7 @@ class RAGTokenizationTransform(BaseDatasetTransform):
         has_any_negative = neg_values is not None and any(v is not None for v in neg_values)
 
         if has_any_negative:
-            # Подменяем None на пустую строку перед токенизацией, затем обнуляем маски.
-            # Токенизатор не принимает None в списке.
+            # Подменяем None на placeholder перед токенизацией — токенизатор не принимает None.
             filled = [v if v is not None else self.empty_doc_placeholder for v in neg_values]
             n_enc = self.tokenizer(
                 filled,
@@ -138,23 +153,43 @@ class RAGTokenizationTransform(BaseDatasetTransform):
     # ------------------------------------------------------------------
 
     def __call__(self, dataset: HFDataset) -> HFDataset:
+        mode_column_map: dict[str, str] = {
+            "indexing": self.text_column,
+            "contrastive": self.query_column,
+        }
+        required_column = mode_column_map[self.mode]
+        if required_column not in dataset.column_names:
+            logger.warning(
+                "Колонка '%s' не найдена в датасете — токенизация пропущена. "
+                "Убедитесь, что режим '%s' соответствует составу датасета.",
+                required_column,
+                self.mode,
+            )
+            return dataset
+
         logger.info(
             "Токенизация (режим: %s, max_length=%d)...", self.mode, self.max_length
         )
 
-        func = (
-            self._tokenize_indexing
-            if self.mode == "indexing"
-            else self._tokenize_contrastive
-        )
+        func_map = {
+            "indexing": self._tokenize_indexing,
+            "contrastive": self._tokenize_contrastive,
+        }
 
-        return dataset.map(
-            func,
+        # Оригинальные колонки НЕ удаляем:
+        # - indexing: текст и метаданные нужны для записи в векторную БД
+        # - contrastive: query/positive_doc могут использоваться в логировании
+        result = dataset.map(
+            func_map[self.mode],
             batched=True,
             batch_size=self.batch_size,
             num_proc=self.num_proc,
             desc=f"Tokenizing ({self.mode})",
-            # Оригинальные колонки НЕ удаляем:
-            # - indexing: текст и метаданные нужны для записи в векторную БД
-            # - contrastive: query/positive_doc могут использоваться в логировании
         )
+
+        logger.info(
+            "Токенизация завершена: %d записей, режим '%s'.",
+            len(result),
+            self.mode,
+        )
+        return result
