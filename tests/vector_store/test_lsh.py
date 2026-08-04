@@ -8,7 +8,7 @@ from src.vector_store.lsh import LSHIndex
 
 class TestLSHIndex:
     def test_lsh_unavailable_fallback(self):
-        """Если datasketch не установлен, LSH должен работать как no-op[cite: 25]."""
+        """Если datasketch не установлен, LSH должен работать как no-op."""
         # Искусственно отключаем флаг доступности datasketch
         with patch("src.vector_store.lsh._DATASKETCH_AVAILABLE", False):
             lsh = LSHIndex()
@@ -20,7 +20,7 @@ class TestLSHIndex:
             lsh.register("doc1", "любой текст")
 
     def test_lsh_duplicate_detection(self):
-        """Проверка регистрации и детекции near-duplicate текстов[cite: 25]."""
+        """Проверка регистрации и детекции near-duplicate текстов."""
         lsh = LSHIndex(threshold=0.5, ngram_size=2)
         if not lsh.is_available:
             pytest.skip("Пакет datasketch не установлен")
@@ -43,7 +43,7 @@ class TestLSHIndex:
         assert lsh.is_duplicate(text3) is False
 
     def test_lsh_reset(self):
-        """Проверка очистки индекса[cite: 25]."""
+        """Проверка очистки индекса."""
         lsh = LSHIndex()
         if not lsh.is_available:
             pytest.skip("Пакет datasketch не установлен")
@@ -55,7 +55,7 @@ class TestLSHIndex:
         assert lsh.is_duplicate("тестовый текст") is False
 
     def test_persistence(self, tmp_path: Path):
-        """Проверка сохранения и загрузки LSH через pickle[cite: 25]."""
+        """Проверка сохранения и загрузки LSH через pickle."""
         lsh = LSHIndex()
         if not lsh.is_available:
             pytest.skip("Пакет datasketch не установлен")

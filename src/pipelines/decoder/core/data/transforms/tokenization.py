@@ -31,12 +31,12 @@ class TokenizationTransform(BaseDatasetTransform):
         состав датасета, или после — чтобы отфильтровать обрезанные записи.
     """
 
-    _VALID_MODES = ("cpt", "sft", "chat")
+    _VALID_taskS = ("cpt", "sft", "chat")
 
     def __init__(
         self,
         tokenizer: PreTrainedTokenizerBase,
-        mode: str = "cpt",
+        task: str = "cpt",
         text_column: str = "text",
         prompt_column: str = "prompt",
         target_column: str = "target",
@@ -50,7 +50,7 @@ class TokenizationTransform(BaseDatasetTransform):
         """
         Args:
             tokenizer: Токенизатор модели (PreTrainedTokenizerBase).
-            mode: Режим работы — ``'cpt'``, ``'sft'`` или ``'chat'``.
+            task: Режим работы — ``'cpt'``, ``'sft'`` или ``'chat'``.
             text_column: Колонка с текстом (режим ``cpt``).
             prompt_column: Колонка с промптом (режим ``sft``).
             target_column: Колонка с целевым ответом (режим ``sft``).
@@ -65,20 +65,20 @@ class TokenizationTransform(BaseDatasetTransform):
                 нехватке RAM.
 
         Raises:
-            ValueError: Если ``mode`` не входит в допустимые значения.
+            ValueError: Если ``task`` не входит в допустимые значения.
             ValueError: Если ``max_length`` не является положительным числом.
         """
-        if mode not in self._VALID_MODES:
+        if task not in self._VALID_taskS:
             raise ValueError(
-                f"Неизвестный режим токенизации: '{mode}'. "
-                f"Допустимые значения: {self._VALID_MODES}"
+                f"Неизвестный режим токенизации: '{task}'. "
+                f"Допустимые значения: {self._VALID_taskS}"
             )
         if max_length <= 0:
             raise ValueError(
                 f"max_length должен быть положительным числом, получено: {max_length}"
             )
         self.tokenizer = tokenizer
-        self.mode = mode
+        self.task = task
         self.text_column = text_column
         self.prompt_column = prompt_column
         self.target_column = target_column
@@ -143,23 +143,23 @@ class TokenizationTransform(BaseDatasetTransform):
     # ------------------------------------------------------------------
 
     def __call__(self, dataset: HFDataset) -> HFDataset:
-        mode_column_map: dict[str, str] = {
+        task_column_map: dict[str, str] = {
             "cpt": self.text_column,
             "sft": self.prompt_column,
             "chat": self.messages_column,
         }
-        required_column = mode_column_map[self.mode]
+        required_column = task_column_map[self.task]
         if required_column not in dataset.column_names:
             logger.warning(
                 "Колонка '%s' не найдена в датасете — токенизация пропущена. "
                 "Убедитесь, что режим '%s' соответствует составу датасета.",
                 required_column,
-                self.mode,
+                self.task,
             )
             return dataset
 
         # SFT дополнительно требует target_column
-        if self.mode == "sft" and self.target_column not in dataset.column_names:
+        if self.task == "sft" and self.target_column not in dataset.column_names:
             logger.warning(
                 "Колонка '%s' не найдена в датасете — токенизация пропущена. "
                 "Для режима 'sft' необходимы обе колонки: '%s' и '%s'.",
@@ -170,7 +170,7 @@ class TokenizationTransform(BaseDatasetTransform):
             return dataset
 
         logger.info(
-            "Токенизация (режим: %s, max_length=%d)...", self.mode, self.max_length
+            "Токенизация (режим: %s, max_length=%d)...", self.task, self.max_length
         )
 
         func_map = {
@@ -182,18 +182,18 @@ class TokenizationTransform(BaseDatasetTransform):
         # Оригинальные текстовые колонки удаляем — в отличие от RAG,
         # decoder после токенизации работает только с тензорами.
         result = dataset.map(
-            func_map[self.mode],
+            func_map[self.task],
             batched=True,
             batch_size=self.batch_size,
             writer_batch_size=self.writer_batch_size,
             num_proc=self.num_proc,
             remove_columns=dataset.column_names,
-            desc=f"Tokenizing ({self.mode})",
+            desc=f"Tokenizing ({self.task})",
         )
 
         logger.info(
             "Токенизация завершена: %d записей, режим '%s'.",
             len(result),
-            self.mode,
+            self.task,
         )
         return result

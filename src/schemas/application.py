@@ -46,6 +46,7 @@ class OrchestratorConfig:
     (требуют загруженных весов — не могут быть instantiate напрямую).
     """
 
+    _target_: str = "src.application.orchestrator.RAGOrchestrator"
     default_template: str = "${tg_bot.rag_template}"
     default_top_k: int = "${tg_bot.top_k}"  # type: ignore[assignment]
 

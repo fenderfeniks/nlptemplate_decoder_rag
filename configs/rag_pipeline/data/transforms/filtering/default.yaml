@@ -1,4 +1,4 @@
-_target_: src.pipeline.base.core.data.transforms.filtering.LengthFilterTransform
+_target_: src.pipelines.base.core.data.transforms.filtering.LengthFilterTransform
 max_length: ${rag_pipeline.data.max_length}
 # indexing-режим: фильтруем по input_ids.
 # contrastive-режим: меняйте на query_input_ids через override в конфиге задачи.

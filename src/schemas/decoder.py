@@ -57,14 +57,24 @@ class InstructionTokenizationTransformConfig(BaseTransformConfig):
         "src.decoder_pipeline.core.data.transforms.tokenization.InstructionTokenizationTransform"
     )
     text_column: str | None = None
+    task: str | None = "sft"
     prompt_column: str | None = None
     target_column: str | None = None
     messages_column: str | None = None
     max_length: int = 2048
-    use_chat_template: bool = False
     separator: str = "\n\n"
     num_proc: int = 4
     batch_size: int = 1000
+    writer_batch_size: int = 1000
+
+
+@dataclass
+class CleaningTransformConfig(BaseTransformConfig):
+    _target_: str = "src.rag_pipeline.core.data.transforms.validation.CleaningTransform"
+    columns_to_clean: list[str] = field(default_factory=list)
+    num_proc: int = 4
+    batch_size: int = 1000
+    pipeline: list[Any] | None = None
 
 
 @dataclass

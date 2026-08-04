@@ -39,13 +39,13 @@ def dummy_components():
 
 class TestHFTextGenerator:
     def test_init_fixes_padding_side(self, dummy_components):
-        """Проверка принудительной установки padding_side='left' для батч-генерации[cite: 33]."""
+        """Проверка принудительной установки padding_side='left' для батч-генерации."""
         model, tokenizer = dummy_components
         HFTextGenerator(model, tokenizer, generation_kwargs={})
         assert tokenizer.padding_side == "left"
 
     def test_merge_kwargs(self, dummy_components):
-        """Проверка переопределения базовых аргументов[cite: 33]."""
+        """Проверка переопределения базовых аргументов."""
         model, tokenizer = dummy_components
         gen = HFTextGenerator(model, tokenizer, generation_kwargs={"temperature": 0.7, "top_k": 50})
 
@@ -72,7 +72,7 @@ class TestHFTextGenerator:
         assert call_tensor[0].tolist() == [30, 40]
 
     def test_generate_stream_invalid_input(self, dummy_components):
-        """Стриминг должен падать при попытке передать список промптов[cite: 33]."""
+        """Стриминг должен падать при попытке передать список промптов."""
         model, tokenizer = dummy_components
         gen = HFTextGenerator(model, tokenizer, generation_kwargs={})
 
@@ -82,7 +82,7 @@ class TestHFTextGenerator:
     @patch("src.pipelines.decoder.inference.generator.Thread")
     @patch("src.pipelines.decoder.inference.generator.TextIteratorStreamer")
     def test_generate_stream_success(self, mock_streamer_cls, mock_thread, dummy_components):
-        """Проверка потоковой генерации с моком треда и стримера[cite: 33]."""
+        """Проверка потоковой генерации с моком треда и стримера."""
         model, tokenizer = dummy_components
         gen = HFTextGenerator(model, tokenizer, generation_kwargs={})
 

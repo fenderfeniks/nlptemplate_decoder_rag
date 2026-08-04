@@ -18,13 +18,13 @@ def dummy_model():
 
 class TestCheckpointUtils:
     def test_missing_path(self, dummy_model):
-        """Ошибка при отсутствии файла/директории[cite: 31]."""
+        """Ошибка при отсутствии файла/директории."""
         with pytest.raises(FileNotFoundError, match="Указанный путь не существует"):
             load_checkpoint(dummy_model, "non_existent_path.bin")
 
     @patch("src.utils.checkpoint_utils.torch.load")
     def test_load_single_file(self, mock_load, dummy_model, tmp_path):
-        """Загрузка напрямую из файла .bin[cite: 31]."""
+        """Загрузка напрямую из файла .bin."""
         file_path = tmp_path / "model.bin"
         file_path.touch()
 
@@ -39,7 +39,7 @@ class TestCheckpointUtils:
 
     @patch("src.utils.checkpoint_utils.torch.load")
     def test_load_pl_checkpoint(self, mock_load, dummy_model, tmp_path):
-        """Разворачивание state_dict из PyTorch Lightning чекпоинта и обрезка префиксов[cite: 31]."""
+        """Разворачивание state_dict из PyTorch Lightning чекпоинта и обрезка префиксов."""
         file_path = tmp_path / "model.ckpt"
         file_path.touch()
 
@@ -52,7 +52,7 @@ class TestCheckpointUtils:
     @patch("src.utils.checkpoint_utils.logger")
     @patch("src.utils.checkpoint_utils.torch.load")
     def test_logging_missing_keys(self, mock_load, mock_logger, dummy_model, tmp_path):
-        """Проверка логирования missing/unexpected ключей[cite: 31]."""
+        """Проверка логирования missing/unexpected ключей."""
         file_path = tmp_path / "model.bin"
         file_path.touch()
         mock_load.return_value = {}

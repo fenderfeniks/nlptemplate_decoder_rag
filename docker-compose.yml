@@ -34,7 +34,7 @@ services:
     container_name: nlp_template_rag_api
     ports:
       - "8001:8001"
-    command: ["python", "-m", "src.rag_pipeline.api.run_api"]
+    command: ["python", "-m", "scripts.rag_pipeline.run_api"]
     environment:
       - PROJECT_ROOT=/app
       - RAG_API_PORT=8001

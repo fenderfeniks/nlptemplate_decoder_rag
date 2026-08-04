@@ -1,4 +1,6 @@
 _target_: src.pipelines.base.core.data.transforms.deduplication.ExactDeduplicationTransform
-text_column: ${decoder_pipeline.data.text_column}
-prompt_column: ${decoder_pipeline.data.prompt_column}
+target_columns:
+  - ${decoder_pipeline.data.text_column}
+  - ${decoder_pipeline.data.prompt_column}
 num_proc: ${system.num_proc}
+column_separator: "\n\n"

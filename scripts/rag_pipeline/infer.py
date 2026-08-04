@@ -7,7 +7,7 @@ from omegaconf import DictConfig
 
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
-from src.vector_store.vector_db import FAISSVectorDB
+from src.vector_store.faiss_store import FAISSVectorStore
 
 
 setup_logging()
@@ -42,7 +42,7 @@ def infer(cfg: DictConfig) -> None:
     # 3. Загрузка сохранённого FAISS-индекса с диска
     db_dir = Path(cfg.paths.db_dir)
     vector_db_cfg = hydra.utils.instantiate(cfg.vector_db)
-    vector_db = FAISSVectorDB.load(
+    vector_db = FAISSVectorStore.load(
         directory=db_dir,
         embedding_dim=vector_db_cfg.embedding_dim,
         index_type=vector_db_cfg.index_type,

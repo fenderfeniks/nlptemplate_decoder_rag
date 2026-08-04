@@ -42,9 +42,9 @@ def index_database(cfg: DictConfig) -> None:
     dataloader = datamodule.train_dataloader()
 
     indexer = KnowledgeBaseIndexer(
-        model=base_model,
-        pooler=pooler,
-        vector_db=vector_db,
+        # model=base_model,
+        # pooler=pooler,
+        # vector_db=vector_db,
         device=cfg.rag_pipeline.indexing.device,
         precision=cfg.rag_pipeline.indexing.precision,
         push_batch_size=cfg.rag_pipeline.indexing.push_batch_size,

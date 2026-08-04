@@ -15,7 +15,7 @@ defaults:
   - decoder_pipeline/api: fastapi
 
   # ── RAG Pipeline ──────────────────────────────────────────────────────────
-  - rag_pipeline/data: indexing
+  - rag_pipeline/data: contrastive
   - rag_pipeline/model: default
   - rag_pipeline/optimizer: adamw
   - rag_pipeline/scheduler: cosine_warmup

@@ -191,11 +191,14 @@ def _save_adapter_to_tempdir(model_to_save: Any, tokenizer: Any, tmp_path: Path)
 
 
 def _log_artifacts_to_run(run_id: str, tmp_path: Path, artifact_path: str) -> str:
-    """Загружает артефакты в MLflow и возвращает их URI."""
+    """Загружает артефакты в MLflow и возвращает их URI в формате runs:/."""
     with mlflow.start_run(run_id=run_id):
         mlflow.log_artifacts(str(tmp_path), artifact_path=artifact_path)
         logger.info("LoRA адаптер сохранён в run_id=%s artifact_path=%s", run_id, artifact_path)
-        return mlflow.get_artifact_uri(artifact_path)
+
+    # Возвращаем runs:/ URI вместо локального file:// пути,
+    # чтобы Model Registry мог корректно зарегистрировать модель.
+    return f"runs:/{run_id}/{artifact_path}"
 
 
 def _register_model_version(client: MlflowClient, artifact_uri: str, reg_model_name: str) -> str:
@@ -245,21 +248,47 @@ def log_lora_to_mlflow(
         # Шаг 1. Сохраняем локально во временную директорию
         _save_adapter_to_tempdir(model_to_save, tokenizer, tmp_path)
 
-        # Шаг 2. Логируем артефакты в run
-        artifact_uri = _log_artifacts_to_run(run_id, tmp_path, artifact_path)
-
-    if best_score is not None:
+        # Шаг 2. Логируем артефакты в run (используем ваш чистый log_artifacts)
         with mlflow.start_run(run_id=run_id):
-            mlflow.log_metric("promotion_candidate_val_loss", best_score)
+            mlflow.log_artifacts(str(tmp_path), artifact_path=artifact_path)
+            logger.info("LoRA адаптер сохранён в run_id=%s artifact_path=%s", run_id, artifact_path)
+
+            if best_score is not None:
+                mlflow.log_metric("promotion_candidate_val_loss", best_score)
 
     if not register_on_success:
         logger.info("Регистрация в Model Registry отключена (register_on_success=false).")
         return
 
-    # Шаг 3. Регистрация в Model Registry
-    mv_version = _register_model_version(client, artifact_uri, reg_model_name)
+    # Шаг 3. Безопасная регистрация версии через клиента MLflow (исправленный вариант)
+    # Убеждаемся, что зарегистрированная модель существует
+    try:
+        client.create_registered_model(reg_model_name)
+    except Exception:
+        pass  # Модель уже существует, это нормально
 
-    # Шаг 4. Навешивание алиасов и тегов
+    # Формируем правильный URI для артефакта внутри рана
+    model_uri = f"runs:/{run_id}/{artifact_path}"
+
+    # Создаем версию модели напрямую через client, что корректно обрабатывает runs:/ пути для произвольных артефактов
+    try:
+        model_version_obj = client.create_model_version(
+            name=reg_model_name,
+            source=model_uri,
+            run_id=run_id,
+        )
+        mv_version = model_version_obj.version
+    except Exception as e:
+        # Fallback на случай специфических версий MLflow
+        logger.warning(
+            "Не удалось зарегистрировать через client.create_model_version (%s). Пробуем mlflow.register_model...",
+            e,
+        )
+        mv_version = _register_model_version(client, model_uri, reg_model_name)
+
+    logger.info("Зарегистрирована '%s' версия %s.", reg_model_name, mv_version)
+
+    # Шаг 4. Навешивание алиасов и тегов (вся ваша логика сохранена)
     if promote_to_staging:
         client.set_registered_model_alias(name=reg_model_name, alias="Staging", version=mv_version)
         logger.info("Модель '%s' версии %s помечена алиасом 'Staging'.", reg_model_name, mv_version)

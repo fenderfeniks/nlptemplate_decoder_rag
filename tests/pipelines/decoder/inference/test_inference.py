@@ -18,7 +18,7 @@ class MockResponse:
 
 
 async def mock_async_generator():
-    """Эмулирует асинхронный стрим из OpenAI API[cite: 32]."""
+    """Эмулирует асинхронный стрим из OpenAI API."""
     yield MockResponse("hello")
     yield MockResponse(" world")
     # Эмулируем пустой чанк (должен быть проигнорирован)
@@ -29,7 +29,7 @@ async def mock_async_generator():
 class TestLLMGenerationClient:
     @patch("src.pipelines.decoder.inference.inference.AsyncOpenAI")
     async def test_call_single_prompt(self, mock_openai_cls):
-        """Проверка батч-генерации (1 промпт)[cite: 32]."""
+        """Проверка батч-генерации (1 промпт)."""
         mock_client = mock_openai_cls.return_value
         mock_client.completions.create = AsyncMock(return_value=MockResponse("ответ 1"))
 
@@ -44,7 +44,7 @@ class TestLLMGenerationClient:
 
     @patch("src.pipelines.decoder.inference.inference.AsyncOpenAI")
     async def test_call_batch_prompts(self, mock_openai_cls):
-        """Проверка параллельной батч-генерации через asyncio.gather[cite: 32]."""
+        """Проверка параллельной батч-генерации через asyncio.gather."""
         mock_client = mock_openai_cls.return_value
         # Возвращаем разные ответы для разных вызовов
         mock_client.completions.create = AsyncMock(
