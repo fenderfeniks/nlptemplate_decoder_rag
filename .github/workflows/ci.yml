@@ -36,4 +36,4 @@ jobs:
       run: ruff check --output-format=github .
 
     - name: Run Pytest
-      run: pytest --cov=src tests/ -v
+      run: pytest tests/ -v
