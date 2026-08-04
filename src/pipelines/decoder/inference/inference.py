@@ -38,12 +38,12 @@ class LLMGenerationClient:
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-    async def __call__(
+    async def generate(
         self,
         texts: str | list[str],
         max_tokens: int | None = None,
         temperature: float | None = None,
-    ) -> list[dict[str, str]]:
+    ) -> list[str]:
         """Параллельная батч-генерация через ``asyncio.gather``.
 
         Все запросы из батча отправляются одновременно — latency определяется
@@ -55,8 +55,7 @@ class LLMGenerationClient:
             temperature: Переопределяет ``self.temperature`` для этого вызова.
 
         Returns:
-            Список dict ``{'prompt': ..., 'generated_text': ...}``
-            в том же порядке что и входные тексты.
+            Список сгенерированных строк в том же порядке что и входные тексты.
         """
         if isinstance(texts, str):
             texts = [texts]
@@ -74,10 +73,7 @@ class LLMGenerationClient:
             for prompt in texts
         ]
         responses = await asyncio.gather(*tasks)
-        return [
-            {"prompt": prompt, "generated_text": resp.choices[0].text}
-            for prompt, resp in zip(texts, responses)  # noqa
-        ]
+        return [resp.choices[0].text for resp in responses]
 
     async def generate_stream(
         self,

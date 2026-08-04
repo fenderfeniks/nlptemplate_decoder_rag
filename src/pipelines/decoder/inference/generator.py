@@ -9,8 +9,8 @@ from collections.abc import Iterator
 from threading import Thread
 from typing import Any
 
+import hydra
 import torch
-from hydra.utils import instantiate
 from transformers import (
     PreTrainedModel,
     PreTrainedTokenizerBase,
@@ -57,7 +57,7 @@ class HFTextGenerator:
             )
             self.tokenizer.padding_side = "left"
 
-        self.cleaner = instantiate(cleaner_cfg) if cleaner_cfg else ResponseCleaner()
+        self.cleaner = hydra.utils.instantiate(cleaner_cfg) if cleaner_cfg else ResponseCleaner()
         self.model.eval()
 
     # ------------------------------------------------------------------

@@ -207,6 +207,7 @@ class HFTokenizerBuilderConfig:
     add_eos_token: bool = False
     trust_remote_code: bool = True
     chat_template: str | None = None
+    base_model_uri: str | None = None
 
 
 @dataclass

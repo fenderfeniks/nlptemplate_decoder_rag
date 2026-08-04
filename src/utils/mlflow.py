@@ -216,9 +216,22 @@ def log_lora_to_mlflow(
     model_module: Any,
     tokenizer: Any,
     run_id: str,
+    pipeline_name: str,
     best_score: float | None = None,
 ) -> None:
-    """Сохраняет PEFT LoRA-адаптер в MLflow через save_pretrained + log_artifacts."""
+    """Сохраняет PEFT LoRA-адаптер в MLflow через save_pretrained + log_artifacts.
+
+    Args:
+        cfg: Корневой конфиг Hydra.
+        model_module: Lightning-модуль с атрибутом .model.
+        tokenizer: Токенизатор для сохранения вместе с адаптером.
+        run_id: MLflow run ID активного эксперимента.
+        pipeline_name: Имя пайплайна («rag_pipeline» или «decoder_pipeline»).
+            Используется для разрешения пути к mlflow_model_name в конфиге —
+            зеркально тому, как это делает yaml:
+            ``model_name: ${${pipeline_name}.model.architecture.mlflow_model_name}``
+        best_score: Лучшее значение val_loss — логируется как тег версии.
+    """
     import tempfile
 
     logger.info("Подготовка к сохранению LoRA-адаптера в MLflow (run_id=%s)...", run_id)
@@ -229,8 +242,14 @@ def log_lora_to_mlflow(
     model_to_save = model_module.model
     client = MlflowClient()
 
-    # Делегируем извлечение имени конфигу и передаем в функцию-конструктор
-    mlflow_model_name = cfg.decoder_pipeline.model.architecture.mlflow_model_name
+    # Берём имя модели через pipeline_name — зеркально yaml-конфигу:
+    # model_name: ${${pipeline_name}.model.architecture.mlflow_model_name}
+    pipeline_cfg = OmegaConf.select(cfg, pipeline_name)
+    if pipeline_cfg is None:
+        raise ValueError(
+            f"Пайплайн '{pipeline_name}' не найден в конфиге. Доступные ключи: {list(cfg.keys())}"
+        )
+    mlflow_model_name = pipeline_cfg.model.architecture.mlflow_model_name
     reg_model_name = _build_reg_model_name(mlflow_model_name)
 
     registry_cfg = cfg.get("logger", {}).get("registry", {})

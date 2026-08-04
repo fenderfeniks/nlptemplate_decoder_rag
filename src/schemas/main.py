@@ -1,5 +1,6 @@
 # src/schemas/main.py
 from dataclasses import dataclass, field
+from typing import Any
 
 from src.schemas.application import ApplicationConfig, TgBotConfig
 from src.schemas.decoder import DecoderPipelineConfig
@@ -39,6 +40,8 @@ class ConfigSchema:
     prompts: PromptsConfig = field(default_factory=PromptsConfig)
     strings: StringsConfig = field(default_factory=StringsConfig)
     hydra: HydraConfig = field(default_factory=HydraConfig)
+    storage: Any | None = None
+    vector_db: VectorDBConfig | None = None
 
     vector_db: VectorDBConfig | None = None
     decoder_pipeline: DecoderPipelineConfig | None = None

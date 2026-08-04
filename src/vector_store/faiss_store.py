@@ -324,15 +324,23 @@ class FAISSVectorStore:
         )
 
     @classmethod
-    def load(cls, directory: str | Path, **init_kwargs: Any) -> FAISSVectorStore:
+    def load(
+        cls,
+        directory: str | Path,
+        **kwargs,  # absorbs extra keys Hydra may pass (embedding_dim already in file)
+    ) -> FAISSVectorStore:
         """Загружает индекс и метаданные с диска.
+
+        ``**kwargs`` принимает дополнительные аргументы которые Hydra передаёт
+        через ``cfg.vector_db.loader`` — это позволяет вызывать load через
+        ``hydra.utils.instantiate`` единообразно для всех бэкендов.
 
         Warning:
             Использует pickle. Загружайте только из доверенных источников.
 
         Args:
             directory: Директория с файлами ``index.faiss`` и ``metadata.pkl``.
-            **init_kwargs: Параметры для ``__init__`` (``embedding_dim`` обязателен).
+            **kwargs: Параметры для ``__init__`` (``embedding_dim`` обязателен).
         """
         dir_path = Path(directory)
         index_path = dir_path / "index.faiss"
@@ -350,14 +358,8 @@ class FAISSVectorStore:
             stacklevel=2,
         )
 
-        instance = cls(**init_kwargs)
-
-        # Читаем средствами Python, отдаем FAISS байты для десериализации
-        with open(index_path, "rb") as f:
-            index_bytes = f.read()
-
-        chunk = np.frombuffer(index_bytes, dtype=np.uint8)
-        instance.index = faiss.deserialize_index(chunk)
+        instance = cls(**kwargs)
+        instance.index = faiss.read_index(str(index_path))
 
         with open(meta_path, "rb") as f:
             instance._metadata = pickle.load(f)  # noqa: S301

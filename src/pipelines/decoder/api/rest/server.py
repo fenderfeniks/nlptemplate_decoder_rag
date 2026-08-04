@@ -21,35 +21,37 @@ from src.pipelines.decoder.api.rest.middlewares import setup_middlewares
 from src.pipelines.decoder.core.prompts.manager import PromptManager
 from src.pipelines.decoder.inference.inference import LLMGenerationClient
 from src.tg_bot.bot_webhook import get_webhook_bot
+from src.tools.storage.resolver import ArtifactResolver
 
 
 logger = logging.getLogger(__name__)
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-# Читаем ключ один раз при старте приложения, а не на каждый запрос.
-# Если переменная не задана — API работает без аутентификации (с предупреждением).
-_EXPECTED_API_KEY: str | None = os.getenv("API_KEY")
-if not _EXPECTED_API_KEY:
-    logger.warning(
-        "Переменная окружения API_KEY не задана. "
-        "Все запросы к защищённым эндпоинтам будут пропускаться без проверки ключа."
-    )
-
 
 async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
-    if _EXPECTED_API_KEY and api_key != _EXPECTED_API_KEY:
+    """Проверяет API-ключ из заголовка X-API-Key."""
+    expected = os.getenv("API_KEY")
+    if expected and api_key != expected:
         raise HTTPException(status_code=403, detail="Invalid or missing API Key")
     return api_key or ""
 
 
 def create_app() -> FastAPI:
+    """Фабрика FastAPI-приложения для decoder (LLM generation) пайплайна."""
     load_dotenv()
+
+    if not os.getenv("API_KEY"):
+        logger.warning(
+            "API_KEY не задан — все запросы к защищённым эндпоинтам "
+            "пропускаются без проверки ключа."
+        )
+
     config_dir = Path(__file__).resolve().parents[4] / "configs"
 
     try:
         GlobalHydra.instance().clear()
     except Exception:
-        pass  # Уже очищен или не инициализирован
+        pass
 
     with hydra.initialize_config_dir(config_dir=str(config_dir), version_base="1.3"):
         cfg = hydra.compose(config_name="main")
@@ -60,6 +62,26 @@ def create_app() -> FastAPI:
         app.state.ml_models = {}
         app.state.prompt_manager = PromptManager(templates=cfg.get("prompts", {}))
 
+        # 1. Резолвинг артефактов (Скачивание весов для vLLM)
+        logger.info("Синхронизация артефактов модели (Decoder)...")
+        router = hydra.utils.instantiate(cfg.storage_router)
+        cache_base = Path(cfg.paths.model_dir) / "decoder_cache"
+        resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
+
+        manifest_uri = os.getenv(
+            "MANIFEST_URI", "local://./prod_storage/manifests/decoder_manifest.json"
+        )
+
+        try:
+            # FastAPI скачивает веса в cache_base. Если vLLM и FastAPI работают
+            # в одном окружении (или через shared volume в Docker), vLLM подхватит эти файлы.
+            resolver.resolve_and_patch(cfg, manifest_uri, pipeline_name="decoder_pipeline")
+            logger.info("Артефакты успешно синхронизированы в %s", cache_base)
+        except Exception as e:
+            logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов Decoder: %s", e)
+            raise RuntimeError("Artifact resolution failed.") from e
+
+        # 2. Подключение к vLLM
         logger.info("Подключение к внешнему LLM-серверу...")
         llm_url = cfg.services.get("llm_api_url", "http://localhost:8000/v1")
         generator = LLMGenerationClient(
@@ -68,7 +90,7 @@ def create_app() -> FastAPI:
         )
         app.state.ml_models["generator"] = generator
 
-        # Telegram-бот: токен не попадает в логи
+        # 3. Telegram-бот
         bot_token: str | None = os.getenv("TG_BOT_TOKEN") or cfg.api.telegram.get("bot_token")
         if bot_token:
             bot = get_webhook_bot(bot_token)

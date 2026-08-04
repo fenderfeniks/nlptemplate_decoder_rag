@@ -1,7 +1,8 @@
 # configs/main.yaml
 defaults:
   - paths: default
-  - system: default                 
+  - system: default
+
   - logger/pylightning: pylightning_mlflow
   - logger/registry: registry_mlflow
 
@@ -29,10 +30,13 @@ defaults:
   # ── Векторная БД ──────────────────────────────────────────────────────────
   - vector_db: flat
 
+  # ── Хранилище (роутер со всеми клиентами) ────────────────────────────────
+  - storage: router
+
   # ── Telegram-бот ──────────────────────────────────────────────────────────
   - tg_bot: default
 
-  # ── Application layer (оркестратор, LlamaIndex) ───────────────────────────
+  # ── Application layer ─────────────────────────────────────────────────────
   - application/orchestrator: orchestrator
   - application/llamaindex: llamaindex
 

@@ -1,0 +1,5 @@
+# configs/storage/source/hf_hub.yaml
+_target_: src.tools.storage.hf_hub.HFHubStorage
+repo_id: "твоя-организация/твоя-модель"
+token: ${oc.env:HF_TOKEN, null}
+repo_type: "model"

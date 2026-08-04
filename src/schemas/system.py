@@ -76,8 +76,21 @@ class HydraConfig:
 
 
 @dataclass
+class VectorDBLoaderConfig:
+    _target_: str = MISSING
+    embedding_dim: int = 1024
+    url: str | None = None
+    collection_name: str | None = None
+    index_type: str | None = None
+    m: int | None = None
+    ef_construction: int | None = None
+    ef_search: int | None = None
+    normalize_embeddings: bool | None = None
+
+
+@dataclass
 class VectorDBConfig:
-    _target_: str = "src.utils.vector_db.FAISSVectorDB"
+    _target_: str = "src.vector_store.faiss_store.FAISSVectorStore"
     embedding_dim: int = 1024
     index_type: str = "flat"
     m: int = 16
@@ -87,3 +100,4 @@ class VectorDBConfig:
     insert_batch_size: int = 10000
     filter_fetch_multiplier: int = 5
     filter_max_fetch_multiplier: int = 50
+    loader: VectorDBLoaderConfig | None = None

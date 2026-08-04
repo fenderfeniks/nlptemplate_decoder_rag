@@ -1,54 +1,78 @@
-# src/rag_pipeline/api/rest/middlewares.py
+# src/pipelines/decoder/api/rest/middlewares.py
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from typing import Any
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 
 logger = logging.getLogger(__name__)
 
 
-class RequestTimeLoggingMiddleware(BaseHTTPMiddleware):
-    """Middleware для логирования времени выполнения всех запросов."""
+class RequestLoggingMiddleware:
+    """Чистый ASGI middleware для логирования времени запросов.
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        """Замеряет время запроса и добавляет заголовок X-Model-Process-Time.
+    Намеренно НЕ наследует ``BaseHTTPMiddleware``: тот буферизует весь
+    response body в памяти при стриминге или исключениях, что критично
+    для LLM-генерации где основной путь — ``StreamingResponse``.
 
-        Args:
-            request: Входящий HTTP-запрос.
-            call_next: Следующий обработчик в цепочке.
+    Добавляет заголовок ``X-Process-Time`` к каждому ответу.
+    """
 
-        Returns:
-            Ответ с заголовком X-Model-Process-Time.
-        """
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         start_time = time.perf_counter()
-        response = await call_next(request)
-        process_time = time.perf_counter() - start_time
+        status_code: int = 0
 
-        logger.info(
-            "[%s] %s | Статус: %d | Время: %.3f сек.",
-            request.method,
-            request.url.path,
-            response.status_code,
-            process_time,
-        )
+        async def send_with_logging(message: dict[str, Any]) -> None:
+            nonlocal status_code
 
-        response.headers["X-Model-Process-Time"] = f"{process_time:.4f}"
-        return response
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+                process_time = time.perf_counter() - start_time
+
+                headers = dict(message.get("headers", []))
+                headers[b"x-process-time"] = f"{process_time:.4f}".encode()
+                message = {**message, "headers": list(headers.items())}
+
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_logging)
+        finally:
+            process_time = time.perf_counter() - start_time
+            logger.info(
+                "[%s] %s | %d | %.3fs",
+                scope.get("method", "?"),
+                scope.get("path", "?"),
+                status_code,
+                process_time,
+            )
 
 
 def setup_middlewares(app: FastAPI, cors_origins: list[str]) -> None:
-    """Регистрирует все Middleware в приложении FastAPI.
+    """Регистрирует все middleware в приложении FastAPI.
+
+    Порядок важен: Starlette применяет middleware в обратном порядке добавления.
+    CORS должен быть внешним (добавлен последним) чтобы preflight-запросы
+    обрабатывались до логирования.
 
     Args:
         app: Экземпляр приложения FastAPI.
         cors_origins: Список разрешённых источников для CORS.
     """
+    # Логирование — внутренний слой
+    app.add_middleware(RequestLoggingMiddleware)
+
+    # CORS — внешний слой
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -56,4 +80,3 @@ def setup_middlewares(app: FastAPI, cors_origins: list[str]) -> None:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.add_middleware(RequestTimeLoggingMiddleware)

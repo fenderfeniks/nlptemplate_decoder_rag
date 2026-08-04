@@ -1,4 +1,4 @@
-# src/rag_pipeline/api/rest/endpoints/health.py
+# src/pipelines/rag/api/rest/endpoints/health.py
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
@@ -21,7 +21,7 @@ async def readiness(request: Request) -> JSONResponse:
     """Readiness probe — сервис готов принимать трафик.
 
     Kubernetes не направляет запросы на Pod пока этот эндпоинт возвращает не-200.
-    Проверяет, что RAG-стек полностью загружен и индекс не пуст.
+    Проверяет что RAG-стек полностью загружен и индекс не пуст.
     """
     retriever = request.app.state.ml_models.get("retriever")
 
@@ -31,7 +31,9 @@ async def readiness(request: Request) -> JSONResponse:
             content={"status": "not_ready", "reason": "retriever not initialized"},
         )
 
-    ntotal = retriever.vector_db.index.ntotal
+    # Используем .ntotal из BaseVectorStore протокола — не лезем в .index.ntotal
+    # напрямую. Это позволяет readiness probe работать с любым бэкендом (Qdrant и т.д.)
+    ntotal = retriever.vector_db.ntotal
     if ntotal == 0:
         return JSONResponse(
             status_code=503,
@@ -44,7 +46,7 @@ async def readiness(request: Request) -> JSONResponse:
     )
 
 
-# Оставляем /health как алиас liveness для обратной совместимости с Docker healthcheck
 @router.get("/health")
 async def health_check() -> dict[str, str]:
+    """Алиас liveness для обратной совместимости с Docker healthcheck."""
     return {"status": "ok", "service": "rag_api"}

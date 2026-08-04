@@ -5,3 +5,4 @@ torch_dtype: "bfloat16"
 attn_implementation: "sdpa"    # sdpa: Ampere не обязателен в отличие от fa2
 trust_remote_code: false
 rope_scaling: null
+base_model_uri: "hf://BAAI/bge-m3"

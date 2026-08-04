@@ -1,6 +1,8 @@
-# src/tools/merge_lora.py
 import gc
+import json
 import logging
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import hydra
@@ -21,45 +23,42 @@ logger = logging.getLogger(__name__)
 
 @hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
 def merge_and_export(cfg: DictConfig) -> None:
-    """Сливает LoRA адаптер с базовой моделью и сохраняет монолитную модель на диск."""
+    """Сливает LoRA адаптер с базовой моделью и экспортирует монолит в хранилище."""
     cfg = setup_config(cfg)
-
     pipeline_cfg = getattr(cfg, cfg.pipeline_name)
+    tracking_uri = cfg.logger.pylightning.tracking_uri
 
-    # ── 1. Токенизатор ────────────────────────────────────────────────────
-    logger.info("Сборка токенизатора через Hydra...")
+    storage_client = hydra.utils.instantiate(cfg.storage)
+    uri_prefix = cfg.storage.uri_prefix.rstrip("/")
+
+    # 1. Токенизатор и Базовая модель
+    logger.info("Сборка базовой модели...")
     tokenizer = hydra.utils.instantiate(pipeline_cfg.model.tokenizer).build()
 
-    # ── 2. Базовая модель ─────────────────────────────────────────────────
-    logger.info("Сборка базовой модели через Hydra-билдер...")
     builder = hydra.utils.instantiate(pipeline_cfg.model.builder)
-    builder.lora_resume_path = None  # LoRA навешивается вручную ниже
+    builder.lora_resume_path = None
     base_model = builder.build(tokenizer=tokenizer)
 
-    tracking_uri = cfg.logger.pylightning.tracking_uri
-    logger.info("MLflow tracking URI: %s", tracking_uri)
-
+    # 2. Поиск Production LoRA в MLflow
     mlflow_model_name = pipeline_cfg.model.architecture.mlflow_model_name
     lora_cfg = OmegaConf.create(
         {
             "enabled": True,
             "model_name": f"{mlflow_model_name}_LoRA",
-            "alias": "Staging",
+            "alias": "Production",
             "artifact_path": cfg.logger.registry.artifact_path,
         }
     )
 
-    logger.info("Поиск адаптера '%s' (алиас: %s)...", lora_cfg.model_name, lora_cfg.alias)
     lora_path = resolve_lora_resume_path(lora_cfg, tracking_uri=tracking_uri)
+    if not lora_path:
+        raise FileNotFoundError(f"Не найден LoRA адаптер (Production) для {lora_cfg.model_name}")
 
-    # ── 3. Навешивание и слияние ──────────────────────────────────────────
-    logger.info("Навешивание LoRA адаптера...")
-    model = PeftModel.from_pretrained(base_model, lora_path)
-
+    # 3. Навешивание и слияние
     logger.info("Слияние весов (Merge and Unload)...")
+    model = PeftModel.from_pretrained(base_model, lora_path)
     merged_model = model.merge_and_unload()
 
-    # Восстанавливаем pad_token_id, если он сбился при слиянии
     if hasattr(merged_model, "generation_config") and getattr(
         merged_model.generation_config, "pad_token_id", None
     ) in (None, -1):
@@ -67,30 +66,46 @@ def merge_and_export(cfg: DictConfig) -> None:
             tokenizer.pad_token_id or tokenizer.eos_token_id
         )
 
-    # ── 4. Сохранение ─────────────────────────────────────────────────────
-    base_model_name = pipeline_cfg.model.builder.model_name_or_path
-    model_short_name = Path(base_model_name).name
-    output_path = Path(cfg.paths.model_dir) / f"merged_{model_short_name}"
+    # 4. Сохранение локально перед выгрузкой
+    output_path = Path(cfg.paths.model_dir) / f"merged_{mlflow_model_name}"
     output_path.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Сохранение монолитной модели в: %s", output_path)
+    logger.info("Локальное сохранение монолитной модели в: %s", output_path)
     merged_model.save_pretrained(output_path)
     tokenizer.save_pretrained(output_path)
 
-    # ── 5. Очистка памяти ─────────────────────────────────────────────────
+    # 5. Загрузка монолита в Storage
+    remote_merged_dir = f"merged_models/{mlflow_model_name}_prod"
+    logger.info("Выгрузка монолита в Storage: %s", remote_merged_dir)
+    storage_client.upload(local_dir=output_path, remote_path=remote_merged_dir)
+
+    # 6. Очистка GPU
     del model, merged_model, base_model
     gc.collect()
     if torch.cuda.is_available():
-        # empty_cache() возвращает память в пул CUDA, но не обратно ОС.
-        # Полное освобождение происходит при завершении процесса.
         torch.cuda.empty_cache()
-        logger.debug(
-            "CUDA memory после очистки: allocated=%.1f MB, reserved=%.1f MB",
-            torch.cuda.memory_allocated() / 1e6,
-            torch.cuda.memory_reserved() / 1e6,
-        )
 
-    logger.info("Слияние успешно завершено!")
+    # 7. Формирование и выгрузка Манифеста
+    manifest = {
+        "load_type": "full_model",
+        "model_uri": f"{uri_prefix}/{remote_merged_dir}",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    manifest_remote_path = f"manifests/{cfg.pipeline_name}_manifest.json"
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        manifest_file = Path(tmp_dir) / f"{cfg.pipeline_name}_manifest.json"
+        with open(manifest_file, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=4, ensure_ascii=False)
+
+        storage_client.upload(local_dir=tmp_dir, remote_path="manifests")
+
+    logger.info(
+        "Манифест обновлен. Инференс будет использовать полную модель. Путь: %s/%s",
+        uri_prefix,
+        manifest_remote_path,
+    )
 
 
 if __name__ == "__main__":

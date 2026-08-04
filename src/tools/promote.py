@@ -1,15 +1,19 @@
-# src/tools/promote.py
+import json
 import logging
 import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
 
 import hydra
 import mlflow
 from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
+from src.utils.mlflow import resolve_lora_resume_path
 
 
 setup_logging()
@@ -21,15 +25,7 @@ class PromoteError(RuntimeError):
 
 
 def _promote(tracking_uri: str, reg_model_name: str) -> None:
-    """Продвигает модель из Staging в Production, если она лучше текущей.
-
-    Args:
-        tracking_uri: URI MLflow Tracking Server.
-        reg_model_name: Имя зарегистрированной модели в Registry.
-
-    Raises:
-        PromoteError: Если алиас 'Staging' не найден или у модели нет тега val_loss.
-    """
+    """Продвигает модель из Staging в Production, если она лучше текущей."""
     mlflow.set_tracking_uri(tracking_uri)
     client = MlflowClient()
 
@@ -85,17 +81,74 @@ def _promote(tracking_uri: str, reg_model_name: str) -> None:
 @hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
-
-    tracking_uri = cfg.logger.pylightning.tracking_uri
     pipeline_cfg = getattr(cfg, cfg.pipeline_name)
+    tracking_uri = cfg.logger.pylightning.tracking_uri
     mlflow_model_name = pipeline_cfg.model.architecture.mlflow_model_name
     reg_model_name = f"{mlflow_model_name}_LoRA"
 
+    # 1. Продвигаем модель в MLflow (сравниваем валидационный лосс)
     try:
         _promote(tracking_uri=tracking_uri, reg_model_name=reg_model_name)
     except PromoteError as e:
         logger.error("%s", e)
         sys.exit(1)
+
+    # 2. Инициализируем хранилище
+    storage_client = hydra.utils.instantiate(cfg.storage)
+    uri_prefix = cfg.storage.uri_prefix.rstrip("/")
+
+    # 3. Достаем Production-адаптер из MLflow
+    lora_cfg = OmegaConf.create(
+        {
+            "enabled": True,
+            "model_name": reg_model_name,
+            "alias": "Production",
+            "artifact_path": cfg.logger.registry.artifact_path,
+        }
+    )
+    lora_local_path = resolve_lora_resume_path(lora_cfg, tracking_uri=tracking_uri)
+    if not lora_local_path:
+        logger.error("Не удалось скачать Production LoRA адаптер из MLflow.")
+        sys.exit(1)
+
+    # 4. Загружаем адаптер в Production Storage (S3 / Local)
+    remote_adapter_dir = f"adapters/{mlflow_model_name}_prod"
+    logger.info("Загрузка адаптера в хранилище: %s", remote_adapter_dir)
+    storage_client.upload(local_dir=lora_local_path, remote_path=remote_adapter_dir)
+
+    # 5. Получаем URI базовой модели из конфигов
+    model_name_or_path = pipeline_cfg.model.architecture.model_name_or_path
+    base_model_uri = pipeline_cfg.model.architecture.get(
+        "base_model_uri",
+        f"hf://{model_name_or_path}"
+        if not model_name_or_path.startswith("hf://")
+        else model_name_or_path,
+    )
+
+    # 6. Формируем и загружаем Манифест
+    manifest = {
+        "load_type": "lora",
+        "base_model_uri": base_model_uri,
+        "lora_uri": f"{uri_prefix}/{remote_adapter_dir}",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    manifest_remote_path = f"manifests/{cfg.pipeline_name}_manifest.json"
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        manifest_file = Path(tmp_dir) / f"{cfg.pipeline_name}_manifest.json"
+        with open(manifest_file, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=4, ensure_ascii=False)
+
+        # Storage загружает директории, поэтому мы создаем папку с одним файлом манифеста
+        # и загружаем её содержимое в корень папки manifests/
+        storage_client.upload(local_dir=tmp_dir, remote_path="manifests")
+
+    logger.info(
+        "Манифест обновлен. Инференс будет использовать LoRA загрузку. Путь: %s/%s",
+        uri_prefix,
+        manifest_remote_path,
+    )
 
 
 if __name__ == "__main__":

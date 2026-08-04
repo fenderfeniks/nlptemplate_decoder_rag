@@ -1,7 +1,7 @@
-# src/rag_pipeline/api/schemas.py
+# src/pipelines/rag/api/schemas.py
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SearchRequest(BaseModel):
@@ -38,13 +38,24 @@ class Document(BaseModel):
 
     score: float = Field(
         ...,
-        description="Косинусное сходство запроса и документа [0, 1]",
-        ge=0.0,
-        le=1.0,
+        description="Косинусное сходство запроса и документа. "
+        "FAISS IndexFlatIP с нормализованными векторами возвращает inner product "
+        "в [-1, 1]; значения вне этого диапазона клипаются во избежание ошибок.",
     )
     metadata: dict[str, Any] = Field(
         description="Метаданные документа: text, doc_id, url, title и т.д."
     )
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def clamp_score(cls, v: float) -> float:
+        """Клипает score в [-1.0, 1.0].
+
+        FAISS с нормализованными векторами возвращает inner product в [-1, 1],
+        но floating point неточности могут дать 1.0000001 — это вызовет
+        ValidationError. Клипаем явно вместо надежды на точность.
+        """
+        return max(-1.0, min(1.0, float(v)))
 
 
 class SearchResponse(BaseModel):

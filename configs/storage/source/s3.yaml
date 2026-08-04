@@ -1,0 +1,6 @@
+# configs/storage/source/s3.yaml
+_target_: src.tools.storage.s3.S3Storage
+bucket_name: "my-production-models"
+endpoint_url: ${oc.env:S3_ENDPOINT_URL, null}
+aws_access_key_id: ${oc.env:AWS_ACCESS_KEY_ID, null}
+aws_secret_access_key: ${oc.env:AWS_SECRET_ACCESS_KEY, null}

@@ -229,6 +229,7 @@ def train(cfg: DictConfig) -> None:
                 tokenizer=tokenizer,
                 run_id=mlflow_run_id,
                 best_score=best_score,
+                pipeline_name="rag_pipeline",
             )
         elif not is_peft:
             logger.info("Full Fine-Tuning — MLflow регистрация адаптеров пропущена.")
