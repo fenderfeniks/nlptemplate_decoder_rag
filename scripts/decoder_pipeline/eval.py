@@ -10,8 +10,8 @@ from omegaconf import DictConfig, OmegaConf
 
 
 load_dotenv()
-from src.decoder_pipeline.core.data.builder import NLPDataModule  # noqa
-from src.decoder_pipeline.training.module import CausalLMLightningModule  # noqa
+from src.pipelines.base.core.data.builder import DataModule  # noqa
+from src.pipelines.decoder.training.module import CausalLMLightningModule  # noqa
 from src.utils.checkpoint_utils import load_checkpoint  # noqa
 from src.utils.hydra_utils import setup_config  # noqa
 from src.utils.logger import setup_logging  # noqa
@@ -73,7 +73,7 @@ def evaluate(cfg: DictConfig) -> None:
         if "scheduler" in cfg.decoder_pipeline
         else None,
     )
-    datamodule = NLPDataModule(data_cfg=cfg.decoder_pipeline.data, tokenizer=tokenizer)
+    datamodule = DataModule(data_cfg=cfg.decoder_pipeline.data, tokenizer=tokenizer)
     training = hydra.utils.instantiate(cfg.decoder_pipeline.training)
 
     ckpt_path = cfg.get("ckpt_path")

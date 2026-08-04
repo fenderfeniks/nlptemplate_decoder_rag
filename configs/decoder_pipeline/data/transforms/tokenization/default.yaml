@@ -1,4 +1,4 @@
-_target_: src.decoder_pipeline.core.data.transforms.tokenization.TokenizationTransform
+_target_: src.pipelines.decoder.core.data.transforms.tokenization.TokenizationTransform
 use_chat_template: ${decoder_pipeline.data.use_chat_template}
 text_column: ${decoder_pipeline.data.text_column}
 prompt_column: ${decoder_pipeline.data.prompt_column}

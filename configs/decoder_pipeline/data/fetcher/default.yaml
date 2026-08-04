@@ -1,4 +1,4 @@
-_target_: src.decoder_pipeline.core.data.fetcher.RawDataFetcher
+_target_: src.pipelines.base.core.data.fetcher.RawDataFetcher
 source_type: ${decoder_pipeline.data.source_type}
 raw_dir: ${decoder_pipeline.data.raw_dir}
 dataset_name: ${decoder_pipeline.data.dataset_name}

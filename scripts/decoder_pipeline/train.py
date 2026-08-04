@@ -15,8 +15,8 @@ from peft import PeftModel
 
 load_dotenv()
 
-from src.decoder_pipeline.core.data.builder import NLPDataModule  # noqa: E402
-from src.decoder_pipeline.training.module import CausalLMLightningModule  # noqa: E402
+from src.pipelines.base.core.data.builder import DataModule  # noqa: E402
+from src.pipelines.decoder.training.module import CausalLMLightningModule  # noqa: E402
 from src.utils.hydra_utils import setup_config  # noqa: E402
 from src.utils.logger import setup_logging  # noqa: E402
 from src.utils.mlflow import log_lora_to_mlflow, resolve_lora_resume_path  # noqa: E402
@@ -104,7 +104,7 @@ def train(cfg: DictConfig) -> None:
 
     # ── 3. DataModule ─────────────────────────────────────────────────────────
     logger.info("Инициализация DataModule...")
-    datamodule = NLPDataModule(data_cfg=cfg.decoder_pipeline.data, tokenizer=tokenizer)
+    datamodule = DataModule(data_cfg=cfg.decoder_pipeline.data, tokenizer=tokenizer)
 
     # ── 4. LightningModule (с определением task_mode) ─────────────────────────
     data_cfg = cfg.decoder_pipeline.data

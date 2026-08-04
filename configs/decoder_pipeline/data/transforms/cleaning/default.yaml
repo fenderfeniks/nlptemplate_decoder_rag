@@ -1,4 +1,4 @@
-_target_: src.decoder_pipeline.core.data.transforms.validation.CleaningTransform
+_target_: src.pipelines.base.core.data.transforms.validation.CleaningTransform
 pipeline: ${decoder_pipeline.data.cleaner}
 text_column: ${decoder_pipeline.data.text_column}
 prompt_column: ${decoder_pipeline.data.prompt_column}

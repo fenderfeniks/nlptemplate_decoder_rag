@@ -1,4 +1,4 @@
-_target_: src.rag_pipeline.core.data.transforms.metadata.MetadataInjectorTransform
+_target_: src.pipelines.rag.core.data.transforms.metadata.MetadataInjectorTransform
 text_column: ${rag_pipeline.data.text_column}
 metadata_column: "metadata"
 template: "{meta_string}\n\n{text}"

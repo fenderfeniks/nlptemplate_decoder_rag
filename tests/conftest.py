@@ -1,61 +1,35 @@
-# tests/conftest.py
-import asyncio
-import gc
-import os
-from unittest.mock import AsyncMock, MagicMock
-
+# conftest.py
 import pytest
-import pytest_asyncio
-import torch
-from httpx import ASGITransport, AsyncClient
-
-
-os.environ["PROJECT_ROOT"] = os.getcwd()
-os.environ.setdefault("ENVIRONMENT", "testing")
-
-from src.api_gateway.dependencies import get_orchestrator
-from src.api_gateway.server import create_gateway_app
-from src.application.orchestrator import RAGOrchestrator
-
-
-# --- Фикстура очистки мусора и асинхронных задач ---
-@pytest_asyncio.fixture(autouse=True)
-async def cleanup_memory_and_tasks():
-    """Принудительно отменяет фоновые задачи и чистит VRAM после каждого теста."""
-    yield
-
-    # 1. Находим все задачи, кроме текущей (самого Pytest)
-    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-
-    # 2. Отменяем их
-    for task in pending:
-        task.cancel()
-
-    # 3. Даем Event Loop возможность обработать отмену
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-
-    # 4. Жесткая сборка мусора
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-
-# --- Остальные фикстуры ---
-@pytest.fixture(scope="function")
-def test_app():
-    return create_gateway_app()
+from datasets import Dataset
 
 
 @pytest.fixture
-def mock_orchestrator() -> MagicMock:
-    orchestrator = AsyncMock(spec=RAGOrchestrator)
-    return orchestrator
+def sample_text_dataset() -> Dataset:
+    """Базовый датасет с дубликатами для тестирования дедупликации и очистки."""
+    return Dataset.from_dict(
+        {
+            "text": [
+                "Пример текста 1",
+                "Пример текста 1",  # Точный дубликат
+                "Пример текста 2",
+                "пример текста 1 ",  # Нечеткий дубликат (регистр, пробел)
+            ],
+            "prompt": ["p1", "p2", "p3", "p4"],
+            "metadata": [1, 2, 3, 4],
+        }
+    )
 
 
-@pytest_asyncio.fixture
-async def async_client(test_app, mock_orchestrator):
-    test_app.dependency_overrides[get_orchestrator] = lambda: mock_orchestrator
-    transport = ASGITransport(app=test_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        yield client
+@pytest.fixture
+def sample_tokenized_dataset() -> Dataset:
+    """Датасет с токенами для тестирования фильтрации по длине."""
+    return Dataset.from_dict(
+        {
+            "input_ids": [
+                [1, 2, 3],  # length 3
+                [1, 2, 3, 4, 5, 6, 7],  # length 7
+                [1, 2],  # length 2
+            ],
+            "text": ["short", "too long", "very short"],
+        }
+    )

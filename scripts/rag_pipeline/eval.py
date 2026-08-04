@@ -5,8 +5,8 @@ import hydra
 import pytorch_lightning as pl
 from omegaconf import DictConfig
 
-from src.rag_pipeline.core.data.builder import RAGDataModule
-from src.rag_pipeline.training.module import RAGLightningModule
+from src.pipelines.base.core.data.builder import DataModule
+from src.pipelines.rag.training.module import RAGLightningModule
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
 
@@ -52,7 +52,7 @@ def evaluate(cfg: DictConfig) -> None:
     # 2. DataModule в режиме contrastive
     # Для оценки используем val_dataloader: RetrievalEvaluationCallback
     # привязан к on_validation_epoch_end и вызывает training.datamodule.val_dataloader().
-    datamodule = RAGDataModule(data_cfg=cfg.rag_pipeline.data, tokenizer=tokenizer)
+    datamodule = DataModule(data_cfg=cfg.rag_pipeline.data, tokenizer=tokenizer)
     datamodule.prepare_data()
     datamodule.setup(stage="validate")
 

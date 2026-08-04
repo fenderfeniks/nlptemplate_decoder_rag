@@ -1,4 +1,4 @@
-_target_: src.rag_pipeline.core.data.transforms.deduplication.MinHashDeduplicationTransform
+_target_: src.pipelines.base.core.data.transforms.deduplication.MinHashDeduplicationTransform
 # Для indexing-режима дедупликация по тексту документа.
 # При необходимости можно добавить несколько колонок — значения склеиваются перед хэшированием.
 target_columns:

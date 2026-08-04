@@ -1,4 +1,4 @@
-_target_: src.decoder_pipeline.core.models.modifiers.PEFTModifier
+_target_: src.pipelines.base.core.models.modifiers.PEFTModifier
 gradient_checkpointing: true
 is_quantized: true
 lora_resume_path: null

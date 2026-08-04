@@ -42,7 +42,7 @@ num_proc: ${system.num_proc}
 batch_size: 1000
 
 cleaner:
-  _target_: src.rag_pipeline.core.data.cleaners.TextCleaningPipeline
+  _target_: src.pipelines.base.core.data.cleaners.TextCleaningPipeline
   cleaners: []
 
 # ==========================================

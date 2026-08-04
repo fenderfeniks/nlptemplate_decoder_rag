@@ -5,8 +5,8 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
-from src.decoder_pipeline.core.prompts.manager import PromptManager
-from src.decoder_pipeline.sdk.inference import LLMGenerationClient
+from src.pipelines.decoder.core.prompts.manager import PromptManager
+from src.pipelines.decoder.inference.inference import LLMGenerationClient
 
 
 logger = logging.getLogger(__name__)

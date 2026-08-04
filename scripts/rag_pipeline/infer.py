@@ -7,7 +7,7 @@ from omegaconf import DictConfig
 
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
-from src.utils.vector_db import FAISSVectorDB
+from src.vector_store.vector_db import FAISSVectorDB
 
 
 setup_logging()

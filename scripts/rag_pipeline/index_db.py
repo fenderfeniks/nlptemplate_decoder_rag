@@ -5,8 +5,8 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig
 
-from src.rag_pipeline.core.data.builder import RAGDataModule
-from src.rag_pipeline.indexing.indexer import KnowledgeBaseIndexer
+from src.pipelines.base.core.data.builder import DataModule
+from src.pipelines.rag.indexing.indexer import KnowledgeBaseIndexer
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
 
@@ -36,7 +36,7 @@ def index_database(cfg: DictConfig) -> None:
     vector_db = hydra.utils.instantiate(cfg.vector_db)
 
     # 3. Подготовка данных в режиме indexing
-    datamodule = RAGDataModule(data_cfg=cfg.rag_pipeline.data, tokenizer=tokenizer)
+    datamodule = DataModule(data_cfg=cfg.rag_pipeline.data, tokenizer=tokenizer)
     datamodule.prepare_data()
     datamodule.setup(stage="fit")
     dataloader = datamodule.train_dataloader()

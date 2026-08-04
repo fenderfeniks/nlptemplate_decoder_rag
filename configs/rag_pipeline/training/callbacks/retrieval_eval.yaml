@@ -1,2 +1,2 @@
-_target_: src.rag_pipeline.training.callbacks.RetrievalEvaluationCallback
+_target_: src.pipelines.rag.training.callbacks.RetrievalEvaluationCallback
 top_k: 10

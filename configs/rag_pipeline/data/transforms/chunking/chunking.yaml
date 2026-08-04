@@ -1,4 +1,4 @@
-_target_: src.rag_pipeline.core.data.transforms.chunking.OverlappingChunkingTransform
+_target_: src.pipelines.base.core.data.transforms.chunking.OverlappingChunkingTransform
 text_column: ${rag_pipeline.data.text_column}
 chunk_size: ${rag_pipeline.data.chunk_size}
 chunk_overlap: ${rag_pipeline.data.chunk_overlap}

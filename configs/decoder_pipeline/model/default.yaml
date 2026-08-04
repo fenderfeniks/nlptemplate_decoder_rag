@@ -8,7 +8,7 @@ defaults:
 
 # Этот узел передается в instantiate()
 builder:
-  _target_: src.decoder_pipeline.core.models.builder.HFModelBuilder
+  _target_: src.pipelines.base.core.models.builder.HFModelBuilder
   _recursive_: false
   
   # Прокидываем необходимые параметры

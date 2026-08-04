@@ -19,7 +19,7 @@ from llama_index.vector_stores.faiss import FaissVectorStore
 from omegaconf import DictConfig
 
 from src.application.llamaindex_ext import DecoderPipelineLLM, RAGPipelineEmbedding
-from src.decoder_pipeline.sdk.inference import LLMGenerationPipeline
+from src.pipelines.decoder.inference.inference import LLMGenerationPipeline
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
 

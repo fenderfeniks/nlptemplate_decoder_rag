@@ -7,8 +7,8 @@ from aiogram import Bot, Dispatcher
 from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 
-from src.decoder_pipeline.core.prompts.manager import PromptManager
-from src.decoder_pipeline.sdk.inference import LLMGenerationClient
+from src.pipelines.decoder.core.prompts.manager import PromptManager
+from src.pipelines.decoder.inference.inference import LLMGenerationClient
 from src.tg_bot.handlers.chat import router as chat_router
 
 

@@ -1,4 +1,4 @@
-_target_: src.rag_pipeline.indexing.indexer.KnowledgeBaseIndexer
+_target_: src.pipelines.rag.indexing.indexer.KnowledgeBaseIndexer
 device: "cpu"
 precision: "fp32"
 push_batch_size: 10000

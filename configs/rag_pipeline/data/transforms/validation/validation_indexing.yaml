@@ -1,4 +1,4 @@
-_target_: src.rag_pipeline.core.data.transforms.validation.ValidationTransform
+_target_: src.pipelines.rag.core.data.transforms.validation.RAGValidationTransform
 mode: "indexing"
 text_column: ${rag_pipeline.data.text_column}
 num_proc: ${rag_pipeline.data.num_proc}

@@ -1,4 +1,4 @@
-_target_: src.decoder_pipeline.inference.generator.HFTextGenerator
+_target_: src.pipelines.decoder.inference.generator.HFTextGenerator
 
 # Базовые параметры генерации
 generation_kwargs:
@@ -11,7 +11,7 @@ generation_kwargs:
 
 # Конфиг вложенного объекта для очистки
 cleaner_cfg:
-  _target_: src.decoder_pipeline.inference.response_cleaner.ResponseCleaner
+  _target_: src.pipelines.decoder.inference.response_cleaner.ResponseCleaner
   strip_prompt: true
   remove_special_tokens: true
   remove_markdown_blocks: false  # Обычно в чатах мы хотим оставлять код

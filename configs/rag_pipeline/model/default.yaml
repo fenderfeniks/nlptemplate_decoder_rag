@@ -11,7 +11,7 @@ defaults:
 
 # Этот узел передается в instantiate() в scripts/train.py
 builder:
-  _target_: src.rag_pipeline.core.models.builder.HFModelBuilder
+  _target_: src.pipelines.base.core.models.builder.HFModelBuilder
   _recursive_: false
   
   # Прокидываем необходимые параметры архитектуры
@@ -28,6 +28,6 @@ builder:
 
 # Пулер будет инстанцироваться отдельно в train.py и передаваться в LightningModule
 pooler:
-  _target_: src.rag_pipeline.core.models.pooling.Pooler
+  _target_: src.pipelines.rag.core.models.pooling.Pooler
   pooling_mode: ${rag_pipeline.model.pooling.pooling_mode}
   normalize: ${rag_pipeline.model.pooling.normalize}

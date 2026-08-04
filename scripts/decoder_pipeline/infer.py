@@ -13,7 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 
 load_dotenv()
 
-from src.decoder_pipeline.inference.generator import HFTextGenerator  # noqa
+from src.pipelines.decoder.inference.generator import HFTextGenerator  # noqa
 from src.utils.checkpoint_utils import load_checkpoint  # noqa
 from src.utils.hydra_utils import setup_config  # noqa
 from src.utils.logger import setup_logging  # noqa

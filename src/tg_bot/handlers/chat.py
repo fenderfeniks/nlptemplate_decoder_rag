@@ -9,8 +9,8 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from omegaconf import DictConfig
 
+from pipelines.decoder.core.prompts.manager import PromptManager
 from src.application.orchestrator import RAGOrchestrator
-from src.decoder_pipeline.core.prompts.manager import PromptManager
 from src.tg_bot.keyboards.reply import get_main_keyboard
 from src.tg_bot.states import ChatProcess
 

@@ -10,8 +10,8 @@ from omegaconf import OmegaConf
 from src.api_gateway.endpoints import chat
 from src.api_gateway.middlewares import setup_gateway_middlewares
 from src.application.orchestrator import RAGOrchestrator
-from src.decoder_pipeline.core.prompts.manager import PromptManager
-from src.decoder_pipeline.sdk.inference import LLMGenerationClient
+from src.pipelines.decoder.core.prompts.manager import PromptManager
+from src.pipelines.decoder.inference.inference import LLMGenerationClient
 
 
 logger = logging.getLogger(__name__)

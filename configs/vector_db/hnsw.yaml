@@ -1,6 +1,6 @@
 # @package _global_
 vector_db:
-  _target_: src.utils.vector_db.FAISSVectorDB
+  _target_: src.vector_store.faiss_store.FAISSVectorDB
   embedding_dim: 1024
   index_type: "hnsw"
   m: 16

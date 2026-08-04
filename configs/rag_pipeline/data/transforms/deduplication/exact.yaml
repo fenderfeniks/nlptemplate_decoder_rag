@@ -1,4 +1,4 @@
-_target_: src.rag_pipeline.core.data.transforms.deduplication.ExactDeduplicationTransform
+_target_: src.pipelines.base.core.data.transforms.deduplication.ExactDeduplicationTransform
 # Для contrastive-режима дедупликация по связке query + positive_doc:
 # это устраняет одинаковые пары при разных форматированиях.
 # Для indexing-режима достаточно ["text"].

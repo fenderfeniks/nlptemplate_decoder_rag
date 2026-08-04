@@ -28,7 +28,7 @@ num_proc: ${system.num_proc} # Тянем из настроек системы
 batch_size: 1000
 
 cleaner:
-  _target_: src.decoder_pipeline.core.data.cleaners.TextCleaningPipeline
+  _target_: src.pipelines.base.core.data.cleaners.TextCleaningPipeline
   cleaners: []
 
 # Вся логика путей ушла в ${paths}

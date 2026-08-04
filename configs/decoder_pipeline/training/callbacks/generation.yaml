@@ -1,4 +1,4 @@
-_target_: src.decoder_pipeline.training.callbacks.GenerationEvaluationCallback
+_target_: src.pipelines.decoder.training.callbacks.GenerationEvaluationCallback
 model_name: ${decoder_pipeline.model.architecture.mlflow_model_name}
 num_random: 5
 generation_batch_size: 2

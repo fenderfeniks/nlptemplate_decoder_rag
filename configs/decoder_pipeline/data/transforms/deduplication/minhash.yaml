@@ -1,4 +1,4 @@
-_target_: src.decoder_pipeline.core.data.transforms.deduplication.MinHashDeduplicationTransform
+_target_: src.pipelines.base.core.data.transforms.deduplication.MinHashDeduplicationTransform
 text_column: ${decoder_pipeline.data.text_column}
 prompt_column: ${decoder_pipeline.data.prompt_column}
 num_perm: 128          # 128 - стандартный баланс скорости и точности

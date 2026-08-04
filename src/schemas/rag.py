@@ -275,7 +275,7 @@ class BaseRetrieverConfig:
 
 @dataclass
 class RAGInferenceEmbedderConfig:
-    _target_: str = "src.rag_pipeline.sdk.embedder.RAGInferenceEmbedder"
+    _target_: str = "src.rag_pipeline.inference.embedder.RAGInferenceEmbedder"
     device: str = "cuda"
     precision: str = "bf16"
     max_length: int = 512

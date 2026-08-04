@@ -13,8 +13,8 @@ from llama_index.core.llms import CompletionResponse, CompletionResponseGen, Cus
 from llama_index.core.llms.callbacks import llm_completion_callback
 from pydantic import PrivateAttr
 
-from src.decoder_pipeline.sdk.inference import LLMGenerationPipeline
-from src.rag_pipeline.inference.embedder import RAGInferenceEmbedder
+from src.pipelines.decoder.inference.inference import LLMGenerationPipeline
+from src.pipelines.rag.inference.embedder import RAGInferenceEmbedder
 
 
 class DecoderPipelineLLM(CustomLLM):

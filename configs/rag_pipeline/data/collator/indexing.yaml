@@ -1,2 +1,2 @@
-_target_: src.rag_pipeline.core.data.collators.IndexingDataCollator
+_target_: src.pipelines.rag.core.data.collators.IndexingDataCollator
 text_column: ${rag_pipeline.data.text_column}

@@ -1,4 +1,4 @@
-_target_: src.rag_pipeline.core.data.transforms.tokenization.RAGTokenizationTransform
+_target_: src.pipelines.rag.core.data.transforms.tokenization.RAGTokenizationTransform
 mode: "indexing"
 text_column: ${rag_pipeline.data.text_column}
 max_length: ${rag_pipeline.data.max_length}

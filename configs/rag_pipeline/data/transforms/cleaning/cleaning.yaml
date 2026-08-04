@@ -1,4 +1,4 @@
-_target_: src.rag_pipeline.core.data.transforms.validation.CleaningTransform
+_target_: src.pipelines.base.core.data.transforms.validation.CleaningTransform
 # Перечисляем все возможные колонки. Класс сам отфильтрует отсутствующие.
 columns_to_clean:
   - ${rag_pipeline.data.text_column}

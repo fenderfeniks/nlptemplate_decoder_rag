@@ -15,8 +15,8 @@ from peft import PeftModel
 
 load_dotenv()
 
-from src.rag_pipeline.core.data.builder import RAGDataModule  # noqa: E402
-from src.rag_pipeline.training.module import RAGLightningModule  # noqa: E402
+from src.pipelines.base.core.data.builder import DataModule  # noqa: E402
+from src.pipelines.rag.training.module import RAGLightningModule  # noqa: E402
 from src.utils.hydra_utils import setup_config  # noqa: E402
 from src.utils.logger import setup_logging  # noqa: E402
 from src.utils.mlflow import log_lora_to_mlflow, resolve_lora_resume_path  # noqa: E402
@@ -163,7 +163,7 @@ def train(cfg: DictConfig) -> None:
 
     # ── 4. DataModule (режим contrastive) ────────────────────────────────────
     logger.info("Инициализация DataModule...")
-    datamodule = RAGDataModule(data_cfg=cfg.rag_pipeline.data, tokenizer=tokenizer)
+    datamodule = DataModule(data_cfg=cfg.rag_pipeline.data, tokenizer=tokenizer)
 
     # ── 5. LightningModule ───────────────────────────────────────────────────
     model_module = RAGLightningModule(

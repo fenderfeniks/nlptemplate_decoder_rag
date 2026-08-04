@@ -1,2 +1,2 @@
-_target_: src.rag_pipeline.core.models.modifiers.EmbeddingResizeModifier
+_target_: src.pipelines.base.core.models.modifiers.EmbeddingResizeModifier
 pad_to_multiple_of: 8
