@@ -1,5 +1,6 @@
 # src/api_gateway/server.py
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,7 +10,6 @@ from omegaconf import OmegaConf
 
 from src.api_gateway.endpoints import chat
 from src.api_gateway.middlewares import setup_gateway_middlewares
-from src.application.orchestrator import RAGOrchestrator
 from src.pipelines.decoder.core.prompts.manager import PromptManager
 from src.pipelines.decoder.inference.inference import LLMGenerationClient
 
@@ -32,18 +32,18 @@ def create_gateway_app() -> FastAPI:
         prompt_manager = PromptManager(templates=cfg.get("prompts", {}))
 
         # 2. Клиент к vLLM — URL берётся из Hydra-конфига
-        llm_client = LLMGenerationClient(api_base=cfg.services.llm_api_url)
+        llm_api_url = os.getenv("LLM_API_URL", "http://localhost:8000/v1")
+        llm_client = LLMGenerationClient(api_base=llm_api_url)
 
         # 3. Оркестратор — все параметры из конфига
-        orchestrator = RAGOrchestrator(
-            rag_api_url=cfg.services.rag_api_url,
+        rag_api_url = os.getenv("RAG_API_URL", "http://localhost:8001")
+        orchestrator = hydra.utils.instantiate(
+            cfg.application.orchestrator,
+            rag_api_url=rag_api_url,
             llm_client=llm_client,
             prompt_manager=prompt_manager,
-            default_template=cfg.get("default_template", "rag_qa"),
-            default_top_k=cfg.get("top_k", 5),
             http_timeout=cfg.get("http_timeout", 10.0),
         )
-
         app.state.orchestrator = orchestrator
         logger.info("API Gateway готов принимать запросы.")
 

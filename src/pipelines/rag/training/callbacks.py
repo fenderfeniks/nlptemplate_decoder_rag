@@ -37,14 +37,23 @@ class RetrievalEvaluationCallback(pl.Callback):
                 k: v.to(pl_module.device) if isinstance(v, torch.Tensor) else v
                 for k, v in batch.items()
             }
+            # .float() перед .numpy() — numpy не поддерживает bf16/fp16.
+            # .cpu() вызываем сразу чтобы не держать результаты на GPU
+            # пока считается следующий батч (снижает пиковое потребление VRAM).
             q = pl_module(batch["query_input_ids"], batch["query_attention_mask"])
-            query_embs.append(q.cpu().numpy())
+            query_embs.append(q.cpu().float().numpy())
 
             d = pl_module(batch["pos_input_ids"], batch["pos_attention_mask"])
-            doc_embs.append(d.cpu().numpy())
+            doc_embs.append(d.cpu().float().numpy())
 
         if was_training:
             pl_module.train()
+
+        # Явная очистка GPU-кэша после прогона всего val датасета.
+        # inference_mode() не освобождает кэш автоматически — делаем это руками
+        # чтобы не держать фрагментированную VRAM пока строится FAISS-индекс.
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return (
             np.concatenate(query_embs, axis=0),
@@ -64,6 +73,17 @@ class RetrievalEvaluationCallback(pl.Callback):
 
         query_embs, doc_embs = self._extract_embeddings(pl_module, val_dataloader)
         n_queries = len(query_embs)
+
+        # Предупреждение о потенциальном OOM: храним 2×N эмбеддингов в numpy
+        # плюс FAISS дублирует doc_embs в _metadata. Для больших val-сетов
+        # рассмотрите уменьшение val_size или переход на Qdrant-бэкенд.
+        emb_mb = (query_embs.nbytes + doc_embs.nbytes) / 1024**2
+        if emb_mb > 512:
+            logger.warning(
+                "RetrievalEval: эмбеддинги занимают %.0f МБ RAM. "
+                "При OOM уменьшите val_size или top_k.",
+                emb_mb,
+            )
         embedding_dim = doc_embs.shape[1]
 
         if self.vector_db is None or self.vector_db.embedding_dim != embedding_dim:

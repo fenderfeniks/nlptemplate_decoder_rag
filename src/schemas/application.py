@@ -47,8 +47,9 @@ class OrchestratorConfig:
     """
 
     _target_: str = "src.application.orchestrator.RAGOrchestrator"
-    default_template: str = "${tg_bot.rag_template}"
-    default_top_k: int = "${tg_bot.top_k}"  # type: ignore[assignment]
+    default_template: str = "${prompts.rag_qa}"
+    default_top_k: int = "${rag_pipeline.inference.top_k}"  # type: ignore[assignment]
+    max_history_msgs: int = 10
 
 
 @dataclass

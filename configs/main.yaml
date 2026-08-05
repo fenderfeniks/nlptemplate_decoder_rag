@@ -30,8 +30,8 @@ defaults:
   # ── Векторная БД ──────────────────────────────────────────────────────────
   - vector_db: flat
 
-  # ── Хранилище (роутер со всеми клиентами) ────────────────────────────────
-  - storage: router
+  # ── Активное хранилище ────────────────────────────────────────────────────
+  - storage: source/local
 
   # ── Telegram-бот ──────────────────────────────────────────────────────────
   - tg_bot: default
@@ -43,14 +43,19 @@ defaults:
   # ── Прочее ────────────────────────────────────────────────────────────────
   - prompts: default
   - strings: default
-
+  - manifest: default
   # ── Окружение (последним!) ────────────────────────────────────────────────
   - environment: local
   - _self_
 
+storage_router:
+  _target_: src.tools.storage.router.StorageRouter
+  clients:
+    - ${storage}
+
 seed: 42
 max_length: 2048
-pipeline_name: "rag_pipeline"
+pipeline_name: "decoder_pipeline"
 project_name: "industrial_nlp_template"
 
 system:

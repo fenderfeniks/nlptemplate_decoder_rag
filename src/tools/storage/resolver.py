@@ -21,18 +21,25 @@ class ArtifactResolver:
     ) -> Path | None:
         """Скачивает артефакты и мутирует конфиг.
 
+        Патчит напрямую в cfg до instantiate():
+        - builder.model_name_or_path    — локальный путь к весам
+        - builder.lora_resume_path      — путь к адаптеру (lora-режим) или None
+        - modifiers.finetuning.skip_peft — True при full_model, False при lora
+
         Args:
             cfg: Корневой конфиг Hydra.
             manifest_uri: URI манифеста (s3://, local://, hf://).
             pipeline_name: Имя пайплайна (rag_pipeline или decoder_pipeline).
 
         Returns:
-            Path | None: Путь к скачанной векторной БД (только для RAG), иначе None.
+            db_dir: Путь к скачанной векторной БД (только для RAG), иначе None.
         """
         logger.info("Скачивание манифеста развертывания: %s", manifest_uri)
         manifest = self.router.download_manifest(manifest_uri, self.cache_base / "manifests")
 
         db_dir = None
+        builder_cfg_path = f"{pipeline_name}.model.builder"
+        modifier_cfg_path = f"{pipeline_name}.model.modifiers.finetuning"
 
         # 1. Специфика RAG: Векторная база
         if "vector_db_uri" in manifest:
@@ -41,22 +48,27 @@ class ArtifactResolver:
             )
 
         # 2. Логика загрузки весов (общая для RAG и Decoder)
-        builder_config_path = f"{pipeline_name}.model.builder"
-
         if manifest["load_type"] == "lora":
             logger.info("Режим: Загрузка базы + LoRA адаптера.")
-            base_path = self.router.download_from_uri(
-                manifest["base_model_uri"], self.cache_base / "base_model"
-            )
-            lora_path = self.router.download_from_uri(
-                manifest["lora_uri"], self.cache_base / "adapter"
-            )
+
+            base_model_uri = manifest.get("base_model_uri", "")
+            if base_model_uri.startswith("hf://"):
+                # Убираем схему — оставляем чистый HF id: "hf-internal-testing/tiny-random-BertModel"
+                model_name_or_path = base_model_uri[len("hf://") :]
+            elif base_model_uri.startswith("local://"):
+                model_name_or_path = str(
+                    self.router.download_from_uri(base_model_uri, self.cache_base / "base_model")
+                )
+            else:
+                model_name_or_path = base_model_uri
 
             OmegaConf.update(
-                cfg, f"{builder_config_path}.model_name_or_path", str(base_path), force_add=True
+                cfg, f"{builder_cfg_path}.model_name_or_path", model_name_or_path, force_add=True
             )
-            OmegaConf.update(
-                cfg, f"{builder_config_path}.lora_resume_path", str(lora_path), force_add=True
+
+            # LoRA адаптер — качаем через Storage
+            lora_path = self.router.download_from_uri(
+                manifest["lora_uri"], self.cache_base / "adapter"
             )
 
         elif manifest["load_type"] == "full_model":
@@ -64,13 +76,10 @@ class ArtifactResolver:
             model_path = self.router.download_from_uri(
                 manifest["model_uri"], self.cache_base / "merged_model"
             )
-
             OmegaConf.update(
-                cfg, f"{builder_config_path}.model_name_or_path", str(model_path), force_add=True
+                cfg, f"{builder_cfg_path}.model_name_or_path", str(model_path), force_add=True
             )
-            OmegaConf.update(cfg, f"{builder_config_path}.lora_resume_path", None, force_add=True)
+            OmegaConf.update(cfg, f"{modifier_cfg_path}.skip_peft", True, force_add=True)
+            lora_path = None
 
-        else:
-            raise ValueError(f"Неизвестный тип загрузки в манифесте: {manifest['load_type']}")
-
-        return db_dir
+        return db_dir, lora_path

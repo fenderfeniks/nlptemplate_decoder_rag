@@ -93,9 +93,11 @@ def main(cfg: DictConfig) -> None:
         logger.error("%s", e)
         sys.exit(1)
 
-    # 2. Инициализируем хранилище
+    # 2. Инициализируем хранилище и роутер
     storage_client = hydra.utils.instantiate(cfg.storage)
-    uri_prefix = cfg.storage.uri_prefix.rstrip("/")
+    router = hydra.utils.instantiate(cfg.storage_router)
+    uri_prefix = cfg.storage.uri_prefix
+    manifest_uri = cfg.manifest.uri
 
     # 3. Достаем Production-адаптер из MLflow
     lora_cfg = OmegaConf.create(
@@ -125,29 +127,35 @@ def main(cfg: DictConfig) -> None:
         else model_name_or_path,
     )
 
-    # 6. Формируем и загружаем Манифест
-    manifest = {
-        "load_type": "lora",
-        "base_model_uri": base_model_uri,
-        "lora_uri": f"{uri_prefix}/{remote_adapter_dir}",
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    manifest_remote_path = f"manifests/{cfg.pipeline_name}_manifest.json"
-
+    # 6. Безопасное обновление Манифеста
     with tempfile.TemporaryDirectory() as tmp_dir:
-        manifest_file = Path(tmp_dir) / f"{cfg.pipeline_name}_manifest.json"
+        tmp_path = Path(tmp_dir)
+
+        try:
+            manifest = router.download_manifest(manifest_uri, cache_dir=tmp_path / "old_manifest")
+            logger.info("Найден существующий манифест. Обновляем ключи модели.")
+        except Exception:
+            logger.warning("Существующий манифест не найден. Будет создан новый.")
+            manifest = {}
+
+        manifest["load_type"] = "lora"
+        manifest["base_model_uri"] = base_model_uri
+        manifest["lora_uri"] = f"{uri_prefix}adapters/{mlflow_model_name}_prod"
+        manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        # Удаляем ключи от монолитной сборки, если они были
+        manifest.pop("model_uri", None)
+
+        manifest_file = tmp_path / f"{cfg.pipeline_name}_manifest.json"
         with open(manifest_file, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=4, ensure_ascii=False)
 
-        # Storage загружает директории, поэтому мы создаем папку с одним файлом манифеста
-        # и загружаем её содержимое в корень папки manifests/
         storage_client.upload(local_dir=tmp_dir, remote_path="manifests")
 
     logger.info(
         "Манифест обновлен. Инференс будет использовать LoRA загрузку. Путь: %s/%s",
         uri_prefix,
-        manifest_remote_path,
+        f"manifests/{cfg.pipeline_name}_manifest.json",
     )
 
 

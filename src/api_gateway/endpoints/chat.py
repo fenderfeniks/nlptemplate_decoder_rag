@@ -21,21 +21,21 @@ async def chat_stream_endpoint(
 ) -> StreamingResponse:
     """Принимает вопрос пользователя, ретривает документы и стримит ответ LLM."""
 
-    # 1. Ретривал выполняется ДО начала стриминга.
-    # Если RAG упадет, FastAPI корректно перехватит HTTPException и вернет 502 JSON.
+    # Конвертируем Pydantic модели Message обратно в словари для оркестратора
+    history_dicts = [msg.model_dump() for msg in body.chat_history] if body.chat_history else None
+
     prompt = await orchestrator.build_prompt(
         query=body.query,
+        chat_history=history_dicts,
         top_k=body.top_k,
         filters=body.filters,
     )
 
-    # 2. Генератор занимается ИСКЛЮЧИТЕЛЬНО стримингом LLM
     async def _stream_generator() -> AsyncIterator[str]:
         try:
             async for chunk in orchestrator.llm_client.generate_stream(prompt):
                 yield chunk
         except Exception as e:
-            # Ошибки самой генерации (когда заголовки 200 уже ушли) глушим маркером
             logger.exception("Непредвиденная ошибка при генерации ответа: %s", e)
             yield "\n[Ошибка при получении ответа]"
 

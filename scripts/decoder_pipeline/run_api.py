@@ -20,7 +20,7 @@ def main() -> None:
 
     logger.info("Запуск Uvicorn сервера на порту %d", api_port)
     uvicorn.run(
-        "src.api.rest.server:app",
+        "src.pipelines.decoder.api.rest.server:app",
         host="0.0.0.0",
         port=api_port,
         reload=False,

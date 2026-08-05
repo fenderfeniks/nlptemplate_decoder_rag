@@ -36,6 +36,7 @@ dependencies = [
     "tomli>=2.0.0; python_version < '3.11'",
     "sacrebleu>=2.6.0",
     "faiss-cpu>=1.14.3",
+    "boto3>=1.43.64",
 ]
 
 [project.optional-dependencies]

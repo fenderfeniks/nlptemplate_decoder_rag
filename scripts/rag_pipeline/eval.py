@@ -1,12 +1,15 @@
 # scripts/rag/eval.py
 import logging
+import sys
+from pathlib import Path
 
 import hydra
 import pytorch_lightning as pl
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from src.pipelines.base.core.data.builder import DataModule
 from src.pipelines.rag.training.module import RAGLightningModule
+from src.tools.storage.resolver import ArtifactResolver
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
 
@@ -31,18 +34,39 @@ def evaluate(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.seed, workers=True)
 
-    # 1. Токенизатор и энкодер
+    # 1. Резолвинг артефактов (Энкодер + БД)
+    router = hydra.utils.instantiate(cfg.storage_router)
+    cache_base = Path(cfg.paths.model_dir) / "rag_cache"
+    resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
+
+    manifest_uri = cfg.manifest.uri
+
+    try:
+        db_dir, lora_path = resolver.resolve_and_patch(
+            cfg, manifest_uri, pipeline_name="rag_pipeline"
+        )
+        if not db_dir:
+            raise ValueError("Манифест не содержит 'vector_db_uri'. База не найдена.")
+    except Exception as e:
+        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов RAG: %s", e)
+        sys.exit(1)
+
+    # 2. Сборка Энкодера (с уже пропатченными локальными путями)
     tokenizer = hydra.utils.instantiate(cfg.rag_pipeline.model.tokenizer).build()
+
+    # Отключаем модификаторы — при инференсе не нужны
+    OmegaConf.update(cfg, "rag_pipeline.model.builder.modifiers", None, force_add=True)
+
     builder = hydra.utils.instantiate(cfg.rag_pipeline.model.builder)
-
-    # При наличии LoRA — передаём путь к адаптеру перед build().
-    # Для eval адаптер загружается в режиме is_trainable=False (inference).
-    lora_resume = cfg.rag_pipeline.model.get("lora_resume_path", None)
-    if lora_resume:
-        builder.lora_resume_path = lora_resume
-        logger.info("LoRA: загрузка адаптера из '%s'", lora_resume)
-
     base_model = builder.build(tokenizer=tokenizer)
+
+    # Навешиваем адаптер явно если lora-режим
+    if lora_path:
+        from peft import PeftModel
+
+        logger.info("LoRA: загрузка адаптера из '%s'", lora_path)
+        base_model = PeftModel.from_pretrained(base_model, str(lora_path), is_trainable=False)
+
     pooler = hydra.utils.instantiate(cfg.rag_pipeline.model.pooling)
 
     # Loss нужен для инициализации RAGLightningModule (интерфейс требует),
@@ -85,4 +109,26 @@ def evaluate(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
+    expected_pipeline = "rag_pipeline"
+
+    # Ищем, передал ли пользователь аргумент pipeline_name=...
+    pipeline_arg_idx = next(
+        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
+    )
+
+    if pipeline_arg_idx is not None:
+        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
+        if current_pipeline != expected_pipeline:
+            logger.warning(
+                "ВНИМАНИЕ! Запущен RAG-скрипт, но передано pipeline_name=%s. "
+                "Принудительно переопределяем на '%s' для предотвращения сбоя конфигов Hydra.",
+                current_pipeline,
+                expected_pipeline,
+            )
+            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
+    else:
+        # Если аргумент не передан CLI, Hydra возьмет дефолт из main.yaml.
+        # Защищаемся от неправильного дефолта, добавляя аргумент явно:
+        sys.argv.append(f"pipeline_name={expected_pipeline}")
+
     evaluate()

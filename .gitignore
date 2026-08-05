@@ -55,6 +55,7 @@ lightning_logs/
 hf_cache/
 
 .cursor/
+metrics.json
 
 # ==============================
 # 4. Секреты и Локальные конфиги

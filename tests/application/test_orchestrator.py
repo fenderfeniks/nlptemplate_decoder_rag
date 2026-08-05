@@ -67,8 +67,9 @@ class TestRAGOrchestrator:
             orchestrator.http_client, "post", side_effect=httpx.RequestError("Timeout")
         ):
             with pytest.raises(HTTPException) as exc:
-                # ИСПРАВЛЕНО: Вызываем новый метод
-                await orchestrator.build_prompt("Запрос", 5, None, "rag_qa")
+                await orchestrator.build_prompt(
+                    query="Запрос", top_k=5, filters=None, template="rag_qa"
+                )
 
             assert exc.value.status_code == 502
             assert "RAG Service is unavailable" in exc.value.detail

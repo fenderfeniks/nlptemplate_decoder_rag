@@ -1,4 +1,3 @@
-# src/schemas/main.py
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -11,6 +10,7 @@ from src.schemas.system import (
     PathsConfig,
     PromptsConfig,
     RootLoggerConfig,
+    StorageRouterConfig,
     StringsConfig,
     SystemConfig,
     VectorDBConfig,
@@ -28,11 +28,12 @@ class ConfigSchema:
     resume_training: bool = False
 
     ckpt_path: str | None = None
-    metrics_output_path: str = "metrics.json"
+    metrics_output_path: str = "${paths.output_dir}metrics.json"
     drift_threshold: float | None = None
     drift_metric_key: str = "test_perplexity"
     text: str | None = None
-
+    manifest_uri: str | None = None
+    incremental: bool = False
     paths: PathsConfig = field(default_factory=PathsConfig)
     system: SystemConfig = field(default_factory=SystemConfig)
     environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
@@ -40,8 +41,9 @@ class ConfigSchema:
     prompts: PromptsConfig = field(default_factory=PromptsConfig)
     strings: StringsConfig = field(default_factory=StringsConfig)
     hydra: HydraConfig = field(default_factory=HydraConfig)
+    manifest: Any | None = None
     storage: Any | None = None
-    vector_db: VectorDBConfig | None = None
+    storage_router: StorageRouterConfig = field(default_factory=StorageRouterConfig)
 
     vector_db: VectorDBConfig | None = None
     decoder_pipeline: DecoderPipelineConfig | None = None

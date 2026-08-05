@@ -106,12 +106,12 @@ class PEFTModifier(BaseModelModifier):
     ) -> None:
         """
         Args:
-            peft_config: DictConfig или LoraConfig с параметрами адаптера.
-            lora_resume_path: Путь к сохранённому PEFT-адаптеру для продолжения
-                обучения. ``None`` → инициализируется новый адаптер.
-            gradient_checkpointing: Включить gradient checkpointing для экономии VRAM.
-            is_quantized: Если True — вызывает ``prepare_model_for_kbit_training``
-                перед применением LoRA (обязательно для 4bit/8bit моделей).
+            ...
+            skip_peft: Если True — модификатор пропускает навешивание адаптера.
+                Используется при full_model инференсе/мердже: веса уже слиты,
+                LoRA поверх монолита не нужна. При обучении всегда False.
+                Устанавливается через resolver.resolve_and_patch() → caller
+                прокидывает через OmegaConf.update перед instantiate().
         """
         self.peft_config = peft_config
         self.lora_resume_path = lora_resume_path

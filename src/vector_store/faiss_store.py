@@ -4,16 +4,15 @@
 Реализует ``BaseVectorStore``. Для смены бэкенда на Qdrant — замените
 этот класс на ``QdrantVectorStore`` в конфиге, интерфейс не изменится.
 
-Предупреждение по безопасности:
-    Метод ``load()`` использует pickle для десериализации метаданных.
-    Загружайте только файлы из доверенных источников.
+Метаданные сохраняются в JSON (не pickle) — безопасный формат без риска
+выполнения произвольного кода при десериализации.
 """
 
 from __future__ import annotations
 
+import inspect
+import json
 import logging
-import pickle
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +36,7 @@ class FAISSVectorStore:
     - Опциональную L2-нормализацию векторов перед вставкой/поиском.
     - Батчевую индексацию с прогресс-баром.
     - Итеративную пост-фильтрацию по метаданным с гарантированным top_k.
-    - Персистентность индекса и метаданных на диск.
+    - Персистентность индекса (FAISS-бинарник) и метаданных (JSON).
 
     LSH-дедупликация вынесена в ``src.vector_store.lsh.LSHIndex`` —
     она не является ответственностью хранилища.
@@ -303,19 +302,21 @@ class FAISSVectorStore:
     # ------------------------------------------------------------------
 
     def save(self, directory: str | Path) -> None:
-        """Сохраняет индекс и метаданные на диск."""
+        """Сохраняет индекс (FAISS-бинарник) и метаданные (JSON) на диск."""
         self._check_consistency()
         dir_path = Path(directory)
         dir_path.mkdir(parents=True, exist_ok=True)
 
         # Обход бага FAISS на Windows с не-ASCII путями:
-        # сериализуем индекс в памяти и пишем на диск средствами Python
+        # сериализуем индекс в памяти и пишем на диск средствами Python.
         index_bytes = faiss.serialize_index(self.index).tobytes()
         with open(dir_path / "index.faiss", "wb") as f:
             f.write(index_bytes)
 
-        with open(dir_path / "metadata.pkl", "wb") as f:
-            pickle.dump(self._metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
+        # JSON вместо pickle — безопасный формат, читается любым инструментом,
+        # не выполняет произвольный код при десериализации.
+        with open(dir_path / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(self._metadata, f, ensure_ascii=False)
 
         logger.info(
             "FAISSVectorStore сохранён в '%s' (%d векторов).",
@@ -327,42 +328,63 @@ class FAISSVectorStore:
     def load(
         cls,
         directory: str | Path,
-        **kwargs,  # absorbs extra keys Hydra may pass (embedding_dim already in file)
+        **kwargs,
     ) -> FAISSVectorStore:
         """Загружает индекс и метаданные с диска.
 
-        ``**kwargs`` принимает дополнительные аргументы которые Hydra передаёт
-        через ``cfg.vector_db.loader`` — это позволяет вызывать load через
-        ``hydra.utils.instantiate`` единообразно для всех бэкендов.
-
-        Warning:
-            Использует pickle. Загружайте только из доверенных источников.
+        Принимает ``**kwargs`` для совместимости с ``hydra.utils.instantiate`` —
+        Hydra передаёт все ключи из ``cfg.vector_db.loader`` включая возможные
+        лишние (например, из storage-интерполяций). Лишние ключи фильтруются
+        через сигнатуру ``__init__`` и логируются как warning.
 
         Args:
-            directory: Директория с файлами ``index.faiss`` и ``metadata.pkl``.
+            directory: Директория с файлами ``index.faiss`` и ``metadata.json``.
             **kwargs: Параметры для ``__init__`` (``embedding_dim`` обязателен).
+                Неизвестные ключи игнорируются с предупреждением.
         """
         dir_path = Path(directory)
         index_path = dir_path / "index.faiss"
-        meta_path = dir_path / "metadata.pkl"
+        meta_path = dir_path / "metadata.json"
+
+        # Обратная совместимость: если json не найден, пробуем старый pkl.
+        # Позволяет плавно мигрировать существующие индексы без переиндексации.
+        legacy_meta_path = dir_path / "metadata.pkl"
+        use_legacy = not meta_path.exists() and legacy_meta_path.exists()
 
         if not index_path.exists():
             raise FileNotFoundError(f"Файл индекса не найден: {index_path}")
-        if not meta_path.exists():
+        if not meta_path.exists() and not use_legacy:
             raise FileNotFoundError(f"Файл метаданных не найден: {meta_path}")
 
-        warnings.warn(
-            "FAISSVectorStore.load() использует pickle. "
-            "Убедитесь что файлы получены из доверенного источника.",
-            UserWarning,
-            stacklevel=2,
-        )
+        # Фильтруем kwargs — оставляем только параметры __init__.
+        # Hydra может подмешать лишние ключи из конфига (например 'url'
+        # из storage-интерполяции в storage_router).
+        valid_keys = set(inspect.signature(cls.__init__).parameters) - {"self"}
+        filtered = {k: v for k, v in kwargs.items() if k in valid_keys}
+        dropped = set(kwargs) - valid_keys
+        if dropped:
+            logger.warning(
+                "FAISSVectorStore.load: игнорируем неизвестные kwargs из конфига: %s", dropped
+            )
 
-        instance = cls(**kwargs)
-        instance.index = faiss.read_index(str(index_path))
+        instance = cls(**filtered)
+        with open(index_path, "rb") as f:
+            index_bytes = f.read()
 
-        with open(meta_path, "rb") as f:
-            instance._metadata = pickle.load(f)  # noqa: S301
+        instance.index = faiss.deserialize_index(np.frombuffer(index_bytes, dtype=np.uint8))
+
+        if use_legacy:
+            import pickle  # noqa: S403
+
+            logger.warning(
+                "metadata.json не найден — загружаем legacy metadata.pkl. "
+                "Запустите переиндексацию чтобы мигрировать на JSON."
+            )
+            with open(legacy_meta_path, "rb") as f:
+                instance._metadata = pickle.load(f)  # noqa: S301
+        else:
+            with open(meta_path, encoding="utf-8") as f:
+                instance._metadata = json.load(f)
 
         instance._check_consistency()
         logger.info(

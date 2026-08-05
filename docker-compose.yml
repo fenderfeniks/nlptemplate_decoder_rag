@@ -1,30 +1,63 @@
 version: '3.8'
 
+# Общие volumes для шаринга моделей между контейнером-загрузчиком и API
+volumes:
+  grafana_data:
+  models_cache:
+  vector_db_cache:
+  mlflow_data:
+
 services:
   # ----------------------------------------------------
-  # 1. API Gateway (Оркестратор + Telegram Бот)
+  # 0. Init Container (Загрузчик моделей)
   # ----------------------------------------------------
-  api_gateway:
+  artifact_downloader:
     image: my-company/nlp_template:latest
     build: 
       context: .
       dockerfile: Dockerfile
       args:
         INSTALL_EXTRAS: "api"
-    container_name: nlp_template_api_gateway
-    ports:
-      - "${GATEWAY_PORT:-8000}:8000"
-    command: ["python", "-m", "src.api_gateway.run_api"]
+    container_name: nlp_template_downloader
+    command: ["python", "-m", "scripts.download_artifacts"]
     environment:
       - PROJECT_ROOT=/app
-      - RAG_API_URL=http://rag_api:8001
-      - LLM_API_URL=http://llm_api:8000/v1
     env_file:
       - .env
     volumes:
-      - ./configs:/app/configs
-      - ./logs:/app/logs
+      - ./configs:/app/configs # Для локальной разработки, если меняем конфиги на лету
+      - models_cache:/app/models
+      - vector_db_cache:/app/vector_db
+      - ./prod_storage:/app/prod_storage # Если используем LocalStorage как source
+    restart: "no" # Отрабатывает один раз и выключается
+
+  # ----------------------------------------------------
+  # 1. LLM API (Инференс генератора через vLLM)
+  # ----------------------------------------------------
+  llm_api:
+    image: vllm/vllm-openai:latest
+    container_name: nlp_template_llm_api
+    ports:
+      - "8002:8000"
+    command: >
+      --model /app/models/decoder_cache/merged_model
+      --host 0.0.0.0
+      --port 8000
+      --max-model-len 2048
+    volumes:
+      - models_cache:/app/models
+      - ~/.cache/huggingface:/root/.cache/huggingface
     restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      artifact_downloader:
+        condition: service_completed_successfully
 
   # ----------------------------------------------------
   # 2. RAG API (Векторный поиск и Энкодер)
@@ -42,8 +75,8 @@ services:
       - .env
     volumes:
       - ./configs:/app/configs
-      - ./models:/app/models
-      - ./vector_db:/app/vector_db
+      - models_cache:/app/models
+      - vector_db_cache:/app/vector_db
     restart: always
     deploy:
       resources:
@@ -52,40 +85,63 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    depends_on:
+      artifact_downloader:
+        condition: service_completed_successfully
 
   # ----------------------------------------------------
-  # 3. LLM API (Инференс генератора через vLLM)
+  # 3. API Gateway (Оркестратор)
   # ----------------------------------------------------
-  llm_api:
-    image: vllm/vllm-openai:latest
-    container_name: nlp_template_llm_api
+  api_gateway:
+    image: my-company/nlp_template:latest
+    container_name: nlp_template_api_gateway
     ports:
-      - "8002:8000"
-    command: >
-      --model ${LLM_MODEL:-facebook/opt-125m}
-      --host 0.0.0.0
-      --port 8000
-      --max-model-len 2048
+      - "${GATEWAY_PORT:-8000}:8000"
+    command: ["python", "-m", "scripts.api"]
+    environment:
+      - PROJECT_ROOT=/app
+      - RAG_API_URL=http://rag_api:8001
+      - LLM_API_URL=http://llm_api:8000/v1
+    env_file:
+      - .env
     volumes:
-      - ./models:/app/models
-      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ./configs:/app/configs
+      - ./logs:/app/logs
     restart: always
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    depends_on:
+      llm_api:
+        condition: service_started
+      rag_api:
+        condition: service_started
 
   # ----------------------------------------------------
-  # 4. Воркер обучения Decoder Pipeline (Batch Job)
+  # Инфраструктура MLOps
+  # ----------------------------------------------------
+  mlflow:
+    image: my-company/nlp_template:latest
+    container_name: nlp_template_mlflow
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    command: >
+      mlflow ui
+      --backend-store-uri sqlite:///mlflow/mlflow.db
+      --default-artifact-root /mlflow/mlartifacts
+      --host 0.0.0.0
+      --port 5000
+    volumes:
+      - mlflow_data:/mlflow
+    restart: unless-stopped
+    profiles:
+      - training
+      - mlflow
+
+  # ----------------------------------------------------
+  # Training сервисы — добавить volume mlflow и MLFLOW_TRACKING_URI
   # ----------------------------------------------------
   train_decoder:
     image: my-company/nlp_template:latest
-    build: 
+    build:
       context: .
-      dockerfile: Dockerfile
       args:
         INSTALL_EXTRAS: "training"
     container_name: nlp_template_train_decoder
@@ -94,12 +150,13 @@ services:
     command: ["python", "-m", "scripts.decoder_pipeline.train"]
     environment:
       - PROJECT_ROOT=/app
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
     env_file:
       - .env
     volumes:
       - ./configs:/app/configs
       - ~/.cache/huggingface:/root/.cache/huggingface
-    restart: "no"
+      - mlflow_data:/mlflow  # <- шарим volume
     deploy:
       resources:
         reservations:
@@ -107,29 +164,24 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    depends_on:
+      - mlflow
 
-  # ----------------------------------------------------
-  # 5. Воркер обучения RAG Pipeline (Batch Job)
-  # ----------------------------------------------------
-  train_rag:
+  train_rag:                                    
     image: my-company/nlp_template:latest
-    build: 
-      context: .
-      dockerfile: Dockerfile
-      args:
-        INSTALL_EXTRAS: "training"
     container_name: nlp_template_train_rag
     profiles:
       - training
     command: ["python", "-m", "scripts.rag_pipeline.train"]
     environment:
       - PROJECT_ROOT=/app
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
     env_file:
       - .env
     volumes:
       - ./configs:/app/configs
       - ~/.cache/huggingface:/root/.cache/huggingface
-    restart: "no"
+      - mlflow_data:/mlflow
     deploy:
       resources:
         reservations:
@@ -137,35 +189,9 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    depends_on:
+      - mlflow
 
-  # ----------------------------------------------------
-  # 6. Airflow (Оркестратор для локального тестирования DAG-ов)
-  # ----------------------------------------------------
-  airflow:
-    image: apache/airflow:${AIRFLOW_IMAGE_TAG:-2.8.1}
-    container_name: nlp_template_airflow
-    ports:
-      - "8080:8080"
-    environment:
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW_VAR_PROJECT_IMAGE=my-company/nlp_template:api-latest
-      - AIRFLOW_VAR_K8S_NAMESPACE=ml-pipelines
-    env_file:
-      - .env
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./deploy/airflow:/opt/airflow/deploy
-      - ./logs/airflow:/opt/airflow/logs
-    command: >
-      bash -c "airflow db migrate &&
-               (airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true) &&
-               airflow variables import /opt/airflow/deploy/variables.json &&
-               airflow standalone"
-    restart: unless-stopped
-
-  # ----------------------------------------------------
-  # 7. Prometheus (Сбор метрик)
-  # ----------------------------------------------------
   prometheus:
     image: prom/prometheus:latest
     container_name: nlp_template_prometheus
@@ -179,9 +205,6 @@ services:
     depends_on:
       - api_gateway
 
-  # ----------------------------------------------------
-  # 8. Grafana (Дашборды)
-  # ----------------------------------------------------
   grafana:
     image: grafana/grafana:latest
     container_name: nlp_template_grafana
@@ -195,22 +218,3 @@ services:
     restart: unless-stopped
     depends_on:
       - prometheus
-
-  # ----------------------------------------------------
-  # 9. Тонкий клиент (Streamlit Demo)
-  # ----------------------------------------------------
-  demo:
-    build:
-      context: .
-      dockerfile: demo/Dockerfile
-    container_name: nlp_template_demo
-    ports:
-      - "8501:8501"
-    environment:
-      - API_URL=http://api_gateway:8000/api/v1/generate
-    depends_on:
-      - api_gateway
-    restart: unless-stopped
-
-volumes:
-  grafana_data:

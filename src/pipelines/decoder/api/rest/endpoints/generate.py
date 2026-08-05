@@ -26,7 +26,7 @@ def _build_prompt(request: Request, body: GenerationRequest, prompt_manager: Pro
     Вынесено в отдельную функцию, чтобы не дублировать между stream и non-stream эндпоинтами.
     """
     cfg = request.app.state.config
-    api_gen_cfg = cfg.api.get("generation", {})
+    api_gen_cfg = cfg.decoder_pipeline.get("generation", {})
     template_name = api_gen_cfg.get("default_template", "rag_qa")
     static_context = api_gen_cfg.get("static_context", "")
 
@@ -76,9 +76,11 @@ async def generate_text(
 
     try:
         with LLM_GENERATION_TIME.labels(source="rest").time():
-            results = await generator(final_prompt)
+            # Вызываем правильный метод
+            results = await generator.generate(final_prompt)
 
-        generated_text = results[0]["generated_text"]
+        # Берем строку напрямую
+        generated_text = results[0]
 
         # Аппроксимация токенов через split — достаточно для метрики нагрузки.
         # Точный подсчёт требует токенизатора или response.usage от vLLM.

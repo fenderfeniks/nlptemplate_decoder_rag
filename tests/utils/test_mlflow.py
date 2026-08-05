@@ -118,17 +118,17 @@ class TestMLflowResumeAndConfig:
 
 class TestMLflowLoggingLogic:
     @patch("src.utils.mlflow._save_adapter_to_tempdir")
-    @patch("src.utils.mlflow._log_artifacts_to_run")
     @patch("src.utils.mlflow._register_model_version")
     @patch("src.utils.mlflow.MlflowClient")
     @patch("src.utils.mlflow.mlflow")
     def test_log_lora_to_mlflow_full_pipeline(
-        self, mock_mlflow, mock_client_cls, mock_reg_model, mock_log_art, mock_save
+        self, mock_mlflow, mock_client_cls, mock_reg_model, mock_save
     ):
         """Проверка полного пайплайна сохранения, регистрации и алиасов."""
-        mock_log_art.return_value = "s3://fake-uri/lora"
         mock_reg_model.return_value = "v1"
         mock_client = mock_client_cls.return_value
+
+        mock_client.create_model_version.return_value.version = "v1"
 
         cfg = OmegaConf.create(
             {
@@ -144,20 +144,19 @@ class TestMLflowLoggingLogic:
         )
 
         log_lora_to_mlflow(
-            cfg, model_module=MagicMock(), tokenizer=MagicMock(), run_id="run123", best_score=0.15
+            cfg,
+            model_module=MagicMock(),
+            tokenizer=MagicMock(),
+            run_id="run123",
+            pipeline_name="decoder_pipeline",
+            best_score=0.15,
         )
 
-        # 1. Вызов сохранения и логирования артефактов
         mock_save.assert_called_once()
-        mock_log_art.assert_called_once()
-
-        # 2. Метрика промоушена
+        mock_mlflow.log_artifacts.assert_called_once()
         mock_mlflow.log_metric.assert_called_once_with("promotion_candidate_val_loss", 0.15)
 
-        # 3. Регистрация в реестре с правильным именем
-        mock_reg_model.assert_called_once_with(mock_client, "s3://fake-uri/lora", "TestModel_LoRA")
-
-        # 4. Навешивание алиасов и тегов
+        # Проверяем, что алиасы и теги навесились
         mock_client.set_registered_model_alias.assert_called_once_with(
             name="TestModel_LoRA", alias="Staging", version="v1"
         )
@@ -166,12 +165,9 @@ class TestMLflowLoggingLogic:
         )
 
     @patch("src.utils.mlflow._save_adapter_to_tempdir")
-    @patch("src.utils.mlflow._log_artifacts_to_run")
     @patch("src.utils.mlflow._register_model_version")
     @patch("src.utils.mlflow.mlflow")
-    def test_log_lora_to_mlflow_skip_registration(
-        self, mock_mlflow, mock_reg_model, mock_log_art, mock_save
-    ):
+    def test_log_lora_to_mlflow_skip_registration(self, mock_mlflow, mock_reg_model, mock_save):
         """Если register_on_success=False, пайплайн прерывается после загрузки артефактов."""
         cfg = OmegaConf.create(
             {
@@ -180,11 +176,14 @@ class TestMLflowLoggingLogic:
             }
         )
 
-        log_lora_to_mlflow(cfg, model_module=MagicMock(), tokenizer=MagicMock(), run_id="run123")
+        log_lora_to_mlflow(
+            cfg,
+            model_module=MagicMock(),
+            tokenizer=MagicMock(),
+            run_id="run123",
+            pipeline_name="decoder_pipeline",
+        )
 
-        # Артефакты сохранены и залиты
         mock_save.assert_called_once()
-        mock_log_art.assert_called_once()
-
-        # Регистрация НЕ вызвана
+        mock_mlflow.log_artifacts.assert_called_once()
         mock_reg_model.assert_not_called()

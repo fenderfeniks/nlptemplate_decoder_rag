@@ -86,8 +86,10 @@ class HFModelBuilder:
         self.rope_scaling = rope_scaling
         self.device_map = device_map
         self.modifiers_cfg = modifiers
-        # Устанавливается снаружи через train.py после резолва пути из MLflow
+        # Устанавливается снаружи после резолва пути из MLflow или манифеста.
         self.lora_resume_path: str | None = None
+        # True только при full_model инференсе — пропускает PEFTModifier целиком.
+        # При обучении всегда False: lora_resume_path=None означает новый адаптер.
 
     # ------------------------------------------------------------------
     # Вспомогательные методы
@@ -257,7 +259,6 @@ class HFModelBuilder:
                 extra_kwargs["tokenizer"] = tokenizer
 
             if getattr(modifier_cls, "_needs_lora_path", False):
-                # lora_resume_path=None → модификатор создаст новый адаптер
                 extra_kwargs["lora_resume_path"] = self.lora_resume_path
 
             modifier = instantiate(modifier_cfg, **extra_kwargs)

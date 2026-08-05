@@ -41,9 +41,9 @@ RUN addgroup --system mlgroup && adduser --system --group mluser
 
 COPY src/ ./src/
 COPY scripts/ ./scripts/
-# Конфиги монтируются через volume в docker-compose, 
-# поэтому копирование на уровне сборки образа можно опустить.
-# COPY configs/ ./configs/
+COPY configs/ ./configs/
 
-RUN chown -R mluser:mlgroup /app
+RUN mkdir -p /mlflow/mlartifacts && \
+    chown -R mluser:mlgroup /app /mlflow
+
 USER mluser

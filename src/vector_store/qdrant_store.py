@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import uuid
 from pathlib import Path
@@ -224,11 +225,7 @@ class QdrantVectorStore:
         return embeddings
 
     def _build_filter(self, filter_metadata: dict[str, Any] | None) -> qmodels.Filter | None:
-        """Конвертирует dict фильтров в нативный Qdrant Filter (AND-семантика).
-
-        Нативная фильтрация в Qdrant эффективнее post-filtering в FAISS:
-        индекс сужается до подходящих точек до поиска, не после.
-        """
+        """Конвертирует dict фильтров в нативный Qdrant Filter (AND-семантика)."""
         if not filter_metadata:
             return None
 
@@ -248,9 +245,6 @@ class QdrantVectorStore:
     def insert(self, embeddings: np.ndarray, metadata: list[dict[str, Any]]) -> None:
         """Вставляет векторы в Qdrant батчами через upsert.
 
-        Использует upsert (а не insert) — если точка с таким id уже есть,
-        она обновится. Это делает операцию идемпотентной при повторных вызовах.
-
         Raises:
             ValueError: При несоответствии размерностей или длин.
         """
@@ -266,7 +260,6 @@ class QdrantVectorStore:
 
         prepared = self._prepare(embeddings)
 
-        # Батчевый upsert
         for start in range(0, len(prepared), self.insert_batch_size):
             end = min(start + self.insert_batch_size, len(prepared))
             batch_emb = prepared[start:end]
@@ -274,8 +267,6 @@ class QdrantVectorStore:
 
             points = [
                 qmodels.PointStruct(
-                    # UUID как id — Qdrant требует int или UUID, не строку doc_id.
-                    # doc_id сохраняется в payload для дедупликации и фильтрации.
                     id=str(uuid.uuid4()),
                     vector=emb.tolist(),
                     payload=meta,
@@ -285,7 +276,7 @@ class QdrantVectorStore:
             self._client.upsert(
                 collection_name=self.collection_name,
                 points=points,
-                wait=True,  # ждём подтверждения — гарантия консистентности
+                wait=True,
             )
 
         self._invalidate_cache()
@@ -301,11 +292,7 @@ class QdrantVectorStore:
         top_k: int = 5,
         filter_metadata: dict[str, Any] | None = None,
     ) -> list[list[dict[str, Any]]]:
-        """Поиск ближайших векторов с опциональной нативной фильтрацией.
-
-        В отличие от FAISS, фильтрация выполняется на стороне Qdrant до поиска —
-        нет нужды в over-fetch и итеративном расширении.
-        """
+        """Поиск ближайших векторов с опциональной нативной фильтрацией."""
         if self.ntotal == 0:
             return [[] for _ in range(len(query_embeddings))]
 
@@ -338,11 +325,7 @@ class QdrantVectorStore:
     # ------------------------------------------------------------------
 
     def save(self, directory: str | Path | None = None) -> None:
-        """No-op: данные уже персистентны на сервере Qdrant.
-
-        Метод существует для соответствия протоколу ``BaseVectorStore``.
-        Qdrant сохраняет данные автоматически — явного вызова не требуется.
-        """
+        """No-op: данные уже персистентны на сервере Qdrant."""
         logger.info(
             "QdrantVectorStore.save() вызван — данные уже персистентны в Qdrant "
             "(коллекция '%s'). Никаких дополнительных действий не требуется.",
@@ -363,34 +346,22 @@ class QdrantVectorStore:
     @classmethod
     def connect(
         cls,
-        embedding_dim: int,
-        collection_name: str = "knowledge_base",
-        url: str = "http://localhost:6333",
-        api_key: str | None = None,
-        distance: str = "Cosine",
-        normalize_embeddings: bool = True,
-        insert_batch_size: int = 256,
-        directory: str | Path | None = None,  # принимаем для унификации с FAISS, игнорируем
+        directory: str | Path | None = None,
         **kwargs: Any,
     ) -> QdrantVectorStore:
         """Подключается к существующей коллекции Qdrant.
 
         Используется через ``cfg.vector_db.loader`` при старте сервера —
-        аналог ``FAISSVectorStore.load()``. Параметр ``directory`` принимается
-        но игнорируется: он нужен для унифицированного вызова через
-        ``hydra.utils.instantiate(cfg.vector_db.loader, directory=cfg.paths.db_dir)``
-        без изменений в ``server.py``.
+        аналог ``FAISSVectorStore.load()``.
+
+        Фильтрует ``**kwargs`` через сигнатуру ``__init__`` — лишние ключи
+        которые Hydra подмешивает из конфига (например из storage-интерполяций)
+        отсекаются с предупреждением, не вызывая TypeError.
 
         Args:
-            embedding_dim: Размерность векторов.
-            collection_name: Имя существующей коллекции.
-            url: URL Qdrant-сервера.
-            api_key: API-ключ (Qdrant Cloud).
-            distance: Метрика расстояния.
-            normalize_embeddings: Нормализовать векторы на клиентской стороне.
-            insert_batch_size: Размер батча для upsert.
-            directory: Игнорируется. Принимается для совместимости с FAISS-интерфейсом.
-            **kwargs: Дополнительные аргументы — игнорируются для прямой совместимости.
+            directory: Игнорируется. Принимается для совместимости с FAISS-интерфейсом
+                при вызове ``hydra.utils.instantiate(cfg.vector_db.loader, directory=...)``.
+            **kwargs: Параметры для ``__init__``. Неизвестные ключи игнорируются.
 
         Returns:
             Инициализированный ``QdrantVectorStore`` подключённый к коллекции.
@@ -402,28 +373,30 @@ class QdrantVectorStore:
                 directory,
             )
 
-        instance = cls(
-            embedding_dim=embedding_dim,
-            collection_name=collection_name,
-            url=url,
-            api_key=api_key,
-            distance=distance,
-            normalize_embeddings=normalize_embeddings,
-            insert_batch_size=insert_batch_size,
-            recreate_collection=False,  # подключаемся к существующей
-        )
+        # Фильтруем kwargs через сигнатуру __init__ — та же защита что в FAISSVectorStore.load.
+        # Hydra может подмешать лишние ключи из storage-интерполяций конфига.
+        valid_keys = set(inspect.signature(cls.__init__).parameters) - {"self"}
+        filtered = {k: v for k, v in kwargs.items() if k in valid_keys}
+        dropped = set(kwargs) - valid_keys
+        if dropped:
+            logger.warning(
+                "QdrantVectorStore.connect: игнорируем неизвестные kwargs из конфига: %s",
+                dropped,
+            )
+
+        instance = cls(**filtered, recreate_collection=False)
 
         ntotal = instance.ntotal
         if ntotal == 0:
             logger.warning(
                 "QdrantVectorStore.connect(): коллекция '%s' пуста. "
                 "Запустите индексацию перед стартом сервера.",
-                collection_name,
+                instance.collection_name,
             )
         else:
             logger.info(
                 "QdrantVectorStore подключён к '%s' (%d документов).",
-                collection_name,
+                instance.collection_name,
                 ntotal,
             )
 

@@ -23,6 +23,12 @@ help:
 	@echo "  make docker_down          - Остановить все Docker контейнеры"
 
 # --- Локальные команды ---
+# ==========================================
+# MLflow UI
+# ==========================================
+mlflow:
+	@echo Запуск MLflow UI...
+	@python scripts/mlflow_ui.py
 
 install:
 	uv venv
@@ -43,10 +49,6 @@ api_gateway:
 api_rag:
 	@echo "🚀 Запуск локального RAG API (Энкодер + Поиск)..."
 	python -m src.rag_pipeline.api.run_api
-
-mlflow:
-	@echo "📊 Запуск MLflow UI..."
-	mlflow ui --backend-store-uri sqlite:///logs/mlflow.db --default-artifact-root ./logs/mlartifacts --host 127.0.0.1 --port 5000
 
 clean:
 	@echo "🧹 Очистка временных файлов и кэша..."

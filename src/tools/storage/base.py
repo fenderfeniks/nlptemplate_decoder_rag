@@ -5,6 +5,9 @@ from pathlib import Path
 class BaseStorage(ABC):
     """Абстрактный интерфейс для работы с хранилищами артефактов."""
 
+    def __init__(self, uri_prefix: str) -> None:
+        self.uri_prefix = uri_prefix
+
     @abstractmethod
     def upload(self, local_dir: Path | str, remote_path: str) -> None:
         """Загружает локальную директорию в удаленное хранилище.
@@ -26,4 +29,9 @@ class BaseStorage(ABC):
         Returns:
             Path: Путь к готовой локальной директории с весами.
         """
+        pass
+
+    @abstractmethod
+    def exists(self, remote_path: str) -> bool:
+        """Проверяет, существует ли директория или файл в удаленном хранилище."""
         pass

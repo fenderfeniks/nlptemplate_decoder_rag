@@ -1,5 +1,5 @@
 _target_: src.pipelines.decoder.inference.generator.HFTextGenerator
-
+_recursive_: false
 # Базовые параметры генерации
 generation_kwargs:
   max_new_tokens: 512

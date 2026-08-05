@@ -1,5 +1,0 @@
-storage_router:
-  _target_: src.tools.storage.router.StorageRouter
-  s3_client: ${storage.s3}       # Ссылка на конфиг S3
-  hf_client: ${storage.hf_hub}   # Ссылка на конфиг HF
-  local_client: ${storage.local} # Ссылка на конфиг Local

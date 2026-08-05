@@ -8,7 +8,7 @@ from pathlib import Path
 
 import hydra
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from src.pipelines.decoder.inference.generator import HFTextGenerator
 from src.pipelines.decoder.inference.inference import LLMGenerationClient
@@ -26,30 +26,41 @@ def infer(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
     logger.info("Инициализация decoder-пайплайна...")
 
-    # 1. Резолвинг артефактов (веса базовой модели + LoRA-адаптер)
+    # 1. Резолвинг артефактов (Энкодер + БД)
     router = hydra.utils.instantiate(cfg.storage_router)
     cache_base = Path(cfg.paths.model_dir) / "decoder_cache"
     resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
 
-    manifest_uri = cfg.get("manifest_uri", "local://./prod_storage/manifests/decoder_manifest.json")
+    manifest_uri = cfg.manifest.uri
 
     try:
-        resolver.resolve_and_patch(cfg, manifest_uri, pipeline_name="decoder_pipeline")
+        _, lora_path = resolver.resolve_and_patch(
+            cfg, manifest_uri, pipeline_name="decoder_pipeline"
+        )
     except Exception as e:
-        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов decoder: %s", e)
+        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов RAG: %s", e)
         sys.exit(1)
 
-    # 2. Сборка токенизатора и модели (пути уже пропатчены резолвером)
+    # 2. Сборка Энкодера (с уже пропатченными локальными путями)
     tokenizer = hydra.utils.instantiate(cfg.decoder_pipeline.model.tokenizer).build()
 
+    # Отключаем модификаторы — при инференсе не нужны
+    OmegaConf.update(cfg, "decoder_pipeline.model.builder.modifiers", None, force_add=True)
+
     builder = hydra.utils.instantiate(cfg.decoder_pipeline.model.builder)
-    builder.modifiers_cfg = cfg.decoder_pipeline.model.get("modifiers")
-    model = builder.build(tokenizer=tokenizer)
+    base_model = builder.build(tokenizer=tokenizer)
+
+    # Навешиваем адаптер явно если lora-режим
+    if lora_path:
+        from peft import PeftModel
+
+        logger.info("LoRA: загрузка адаптера из '%s'", lora_path)
+        base_model = PeftModel.from_pretrained(base_model, str(lora_path), is_trainable=False)
 
     # 3. Сборка генератора
     generator = hydra.utils.instantiate(
         cfg.decoder_pipeline.inference,
-        model=model,
+        model=base_model,
         tokenizer=tokenizer,
     )
 
@@ -58,7 +69,7 @@ def infer(cfg: DictConfig) -> None:
     # 4. Пакетная или одиночная генерация
     input_file = cfg.decoder_pipeline.inference.get("input_file")
     output_file = cfg.decoder_pipeline.inference.get("output_file", "predictions.jsonl")
-    query = cfg.get("text", "Объясни, что такое Retrieval-Augmented Generation (RAG).")
+    query = str(cfg.get("text", "Объясни, что такое Retrieval-Augmented Generation (RAG)."))
 
     if input_file and Path(input_file).exists():
         _run_batch(generator, tokenizer, input_file, output_file)
@@ -146,4 +157,26 @@ def _run_single(generator, tokenizer, query: str) -> None:
 
 
 if __name__ == "__main__":
+    expected_pipeline = "decoder_pipeline"
+
+    # Ищем, передал ли пользователь аргумент pipeline_name=...
+    pipeline_arg_idx = next(
+        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
+    )
+
+    if pipeline_arg_idx is not None:
+        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
+        if current_pipeline != expected_pipeline:
+            logger.warning(
+                "ВНИМАНИЕ! Запущен RAG-скрипт, но передано pipeline_name=%s. "
+                "Принудительно переопределяем на '%s' для предотвращения сбоя конфигов Hydra.",
+                current_pipeline,
+                expected_pipeline,
+            )
+            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
+    else:
+        # Если аргумент не передан CLI, Hydra возьмет дефолт из main.yaml.
+        # Защищаемся от неправильного дефолта, добавляя аргумент явно:
+        sys.argv.append(f"pipeline_name={expected_pipeline}")
+
     infer()

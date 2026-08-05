@@ -1,5 +1,5 @@
-# src/schemas/system.py
 from dataclasses import dataclass, field
+from typing import Any
 
 from omegaconf import MISSING
 
@@ -41,7 +41,8 @@ class MLFlowRegistryConfig:
 class MLFlowLoggerConfig:
     _target_: str = "lightning.pytorch.loggers.MLFlowLogger"
     experiment_name: str = "nlp_project"
-    tracking_uri: str = "sqlite:///${paths.log_dir}/mlflow.db"
+    tracking_uri: str = "sqlite:///${paths.mlflow_bd_dir}/mlflow.db"
+    artifact_location: str = "file://${paths.log_dir}/mlruns"
     run_name: str = "${now:%Y-%m-%d_%H-%M-%S}"
     log_model: bool = False
     tags: dict[str, str] = field(default_factory=lambda: {"env": "${environment.name}"})
@@ -91,6 +92,7 @@ class VectorDBLoaderConfig:
 @dataclass
 class VectorDBConfig:
     _target_: str = "src.vector_store.faiss_store.FAISSVectorStore"
+    _recursive_: bool = False
     embedding_dim: int = 1024
     index_type: str = "flat"
     m: int = 16
@@ -101,3 +103,9 @@ class VectorDBConfig:
     filter_fetch_multiplier: int = 5
     filter_max_fetch_multiplier: int = 50
     loader: VectorDBLoaderConfig | None = None
+
+
+@dataclass
+class StorageRouterConfig:
+    _target_: str = "src.tools.storage.router.StorageRouter"
+    clients: list[Any] = field(default_factory=list)

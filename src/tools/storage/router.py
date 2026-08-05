@@ -8,60 +8,50 @@ logger = logging.getLogger(__name__)
 
 
 class StorageRouter:
-    """Маршрутизатор для скачивания артефактов по URI (s3://, hf://, local://).
+    """Маршрутизатор для скачивания артефактов по URI.
 
-    Таблица маршрутизации строится из явных пар (uri_prefix → клиент),
-    переданных в конструктор. Клиенты-хранилища ничего не знают о своих
-    URI-префиксах — это ответственность роутера.
+    Принимает список инициализированных клиентов и автоматически
+    строит маршруты на основе их атрибута `uri_prefix`.
     """
 
-    def __init__(
-        self,
-        routes: dict[str, Any],
-    ) -> None:
-        """
-        Args:
-            routes: Словарь {uri_prefix: client}, например:
-                {
-                    "s3://":     <S3Storage>,
-                    "hf://":     <HFHubStorage>,
-                    "local://":  <LocalStorage>,
-                }
-        """
-        self.routes = routes
+    def __init__(self, clients: list[Any]) -> None:
+        # Автоматическая сборка словаря маршрутов: {"s3://": <S3Storage>, ...}
+        self.routes = {client.uri_prefix: client for client in clients}
+
+    def _normalize_uri(self, uri: str) -> str:
+        """Гарантирует что схема URI имеет двойной слеш: local:/ → local://"""
+        import re
+
+        return re.sub(r"^([a-z][a-z0-9+\-.]*):(?!//)", r"\1://", uri)
 
     def _get_client_and_path(self, uri: str) -> tuple[Any, str]:
+        uri = self._normalize_uri(uri)
         for prefix, client in self.routes.items():
             if uri.startswith(prefix):
-                if client is None:
-                    raise RuntimeError(f"Клиент для схемы '{prefix}' не передан в StorageRouter.")
                 remote_path = uri[len(prefix) :].lstrip("/")
                 return client, remote_path
-
         raise ValueError(
             f"Неизвестная схема URI: '{uri}'. Поддерживаемые: {list(self.routes.keys())}"
         )
 
     def download_from_uri(self, uri: str, cache_dir: Path | str) -> Path:
-        """Скачивает артефакт по URI в локальную папку."""
         client, remote_path = self._get_client_and_path(uri)
         logger.info("StorageRouter: скачивание '%s' через %s", uri, client.__class__.__name__)
         return client.download(remote_path=remote_path, local_dir=cache_dir)
 
     def download_manifest(self, manifest_uri: str, cache_dir: Path | str) -> dict[str, Any]:
-        """Скачивает JSON-манифест и возвращает его как словарь."""
-        uri_path = Path(manifest_uri)
-        manifest_filename = uri_path.name
-        manifest_dir_uri = str(uri_path.parent).replace("\\", "/")
+        # Разбиваем URI строкой, чтобы не терять двойной слеш схемы
+        last_slash = manifest_uri.rfind("/")
+        manifest_filename = manifest_uri[last_slash + 1 :]
+        manifest_dir_uri = manifest_uri[:last_slash]
 
         logger.info("StorageRouter: поиск манифеста '%s'", manifest_uri)
-
         downloaded_dir = self.download_from_uri(manifest_dir_uri, cache_dir)
 
         manifest_file = downloaded_dir / manifest_filename
         if not manifest_file.exists():
             raise FileNotFoundError(
-                f"Файл '{manifest_filename}' не найден в скачанной директории {downloaded_dir}"
+                f"Файл '{manifest_filename}' не найден в директории {downloaded_dir}"
             )
 
         with open(manifest_file, encoding="utf-8") as f:

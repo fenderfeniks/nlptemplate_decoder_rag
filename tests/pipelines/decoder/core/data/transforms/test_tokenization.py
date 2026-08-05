@@ -31,28 +31,28 @@ def dummy_tokenizer():
 class TestTokenizationTransform:
     def test_invalid_init(self, dummy_tokenizer):
         with pytest.raises(ValueError, match="Неизвестный режим токенизации"):
-            TokenizationTransform(tokenizer=dummy_tokenizer, mode="invalid")
+            TokenizationTransform(tokenizer=dummy_tokenizer, task="invalid")
         with pytest.raises(ValueError, match="max_length должен быть положительным"):
             TokenizationTransform(tokenizer=dummy_tokenizer, max_length=0)
 
     def test_missing_required_column_skipped(self, dummy_tokenizer):
         """Проверка пропуска, если нет основной колонки для выбранного режима."""
         ds = Dataset.from_dict({"wrong_column": ["text"]})
-        transform = TokenizationTransform(tokenizer=dummy_tokenizer, mode="cpt")
+        transform = TokenizationTransform(tokenizer=dummy_tokenizer, task="cpt")
         result = transform(ds)
         assert result is ds
 
     def test_sft_missing_target_column_skipped(self, dummy_tokenizer):
         """Проверка пропуска, если в режиме sft есть prompt, но нет target."""
         ds = Dataset.from_dict({"prompt": ["Текст промпта"]})
-        transform = TokenizationTransform(tokenizer=dummy_tokenizer, mode="sft")
+        transform = TokenizationTransform(tokenizer=dummy_tokenizer, task="sft")
         result = transform(ds)
         assert result is ds
 
     def test_cpt_tokenization(self, dummy_tokenizer):
         """Проверка CPT: текстовая колонка удаляется, остаются тензоры."""
         ds = Dataset.from_dict({"text": ["abc", "defg"]})
-        transform = TokenizationTransform(tokenizer=dummy_tokenizer, mode="cpt", num_proc=1)
+        transform = TokenizationTransform(tokenizer=dummy_tokenizer, task="cpt", num_proc=1)
         
         result = transform(ds)
         assert "text" not in result.column_names
@@ -62,7 +62,7 @@ class TestTokenizationTransform:
         """Проверка SFT: separator добавляется, вычисляется prompt_len."""
         ds = Dataset.from_dict({"prompt": ["Q1"], "target": ["A1"]})
         transform = TokenizationTransform(
-            tokenizer=dummy_tokenizer, mode="sft", separator=" SEP ", num_proc=1
+            tokenizer=dummy_tokenizer, task="sft", separator=" SEP ", num_proc=1
         )
         
         result = transform(ds)
@@ -75,7 +75,7 @@ class TestTokenizationTransform:
     def test_chat_tokenization(self, dummy_tokenizer):
         """Проверка режима chat через apply_chat_template."""
         ds = Dataset.from_dict({"messages": [[{"role": "user", "content": "hi"}]]})
-        transform = TokenizationTransform(tokenizer=dummy_tokenizer, mode="chat", num_proc=1)
+        transform = TokenizationTransform(tokenizer=dummy_tokenizer, task="chat", num_proc=1)
         
         result = transform(ds)
         assert "messages" not in result.column_names

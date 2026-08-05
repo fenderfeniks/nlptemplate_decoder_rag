@@ -2,6 +2,7 @@
 import json
 import logging
 import sys
+from pathlib import Path
 from typing import Any
 
 import hydra
@@ -15,9 +16,8 @@ from src.pipelines.decoder.training.module import CausalLMLightningModule  # noq
 from src.utils.checkpoint_utils import load_checkpoint  # noqa
 from src.utils.hydra_utils import setup_config  # noqa
 from src.utils.logger import setup_logging  # noqa
-from src.utils.mlflow import resolve_lora_resume_path  # noqa
 from src.utils.torch_utils import register_safe_globals  # noqa
-
+from src.tools.storage.resolver import ArtifactResolver  # noqa
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -48,23 +48,36 @@ def evaluate(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
 
     logger.info("Инициализация компонентов для оценки...")
+    # 1. Резолвинг артефактов (Энкодер + БД)
+    router = hydra.utils.instantiate(cfg.storage_router)
+    cache_base = Path(cfg.paths.model_dir) / "decoder_cache"
+    resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
+
+    manifest_uri = cfg.manifest.uri
+
+    try:
+        _, lora_path = resolver.resolve_and_patch(
+            cfg, manifest_uri, pipeline_name="decoder_pipeline"
+        )
+    except Exception as e:
+        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов RAG: %s", e)
+        sys.exit(1)
+
+    # 2. Сборка Энкодера (с уже пропатченными локальными путями)
     tokenizer = hydra.utils.instantiate(cfg.decoder_pipeline.model.tokenizer).build()
 
-    resume_cfg = cfg.decoder_pipeline.model.get("lora_resume", {})
-    lora_resume_path = resolve_lora_resume_path(resume_cfg)
-    if lora_resume_path:
-        logger.info("LoRA адаптер будет загружен из: %s", lora_resume_path)
-        OmegaConf.update(
-            cfg,
-            "decoder_pipeline.model.modifiers.finetuning.lora_resume_path",
-            lora_resume_path,
-            force_add=True,
-        )
+    # Отключаем модификаторы — при инференсе не нужны
+    OmegaConf.update(cfg, "decoder_pipeline.model.builder.modifiers", None, force_add=True)
 
-    # Единая точка сборки модели со всеми модификаторами
     builder = hydra.utils.instantiate(cfg.decoder_pipeline.model.builder)
-    builder.modifiers_cfg = cfg.decoder_pipeline.model.get("modifiers")
     base_model = builder.build(tokenizer=tokenizer)
+
+    # Навешиваем адаптер явно если lora-режим
+    if lora_path:
+        from peft import PeftModel
+
+        logger.info("LoRA: загрузка адаптера из '%s'", lora_path)
+        base_model = PeftModel.from_pretrained(base_model, str(lora_path), is_trainable=False)
 
     model_module = CausalLMLightningModule(
         model=base_model,
@@ -107,4 +120,26 @@ def evaluate(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
+    expected_pipeline = "decoder_pipeline"
+
+    # Ищем, передал ли пользователь аргумент pipeline_name=...
+    pipeline_arg_idx = next(
+        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
+    )
+
+    if pipeline_arg_idx is not None:
+        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
+        if current_pipeline != expected_pipeline:
+            logger.warning(
+                "ВНИМАНИЕ! Запущен RAG-скрипт, но передано pipeline_name=%s. "
+                "Принудительно переопределяем на '%s' для предотвращения сбоя конфигов Hydra.",
+                current_pipeline,
+                expected_pipeline,
+            )
+            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
+    else:
+        # Если аргумент не передан CLI, Hydra возьмет дефолт из main.yaml.
+        # Защищаемся от неправильного дефолта, добавляя аргумент явно:
+        sys.argv.append(f"pipeline_name={expected_pipeline}")
+
     evaluate()

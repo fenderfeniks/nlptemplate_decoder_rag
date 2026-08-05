@@ -3,6 +3,7 @@
 
 import gc
 import logging
+import sys
 from pathlib import Path
 
 import hydra
@@ -154,7 +155,6 @@ def train(cfg: DictConfig) -> None:
     logger.info("Сборка энкодера...")
     builder = hydra.utils.instantiate(cfg.rag_pipeline.model.builder)
     builder.lora_resume_path = lora_resume_path
-    builder.modifiers_cfg = cfg.rag_pipeline.model.get("modifiers")
     base_model = builder.build(tokenizer=tokenizer)
 
     # ── 3. Пулер и Loss ──────────────────────────────────────────────────────
@@ -242,4 +242,26 @@ def train(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
+    expected_pipeline = "rag_pipeline"
+
+    # Ищем, передал ли пользователь аргумент pipeline_name=...
+    pipeline_arg_idx = next(
+        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
+    )
+
+    if pipeline_arg_idx is not None:
+        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
+        if current_pipeline != expected_pipeline:
+            logger.warning(
+                "ВНИМАНИЕ! Запущен RAG-скрипт, но передано pipeline_name=%s. "
+                "Принудительно переопределяем на '%s' для предотвращения сбоя конфигов Hydra.",
+                current_pipeline,
+                expected_pipeline,
+            )
+            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
+    else:
+        # Если аргумент не передан CLI, Hydra возьмет дефолт из main.yaml.
+        # Защищаемся от неправильного дефолта, добавляя аргумент явно:
+        sys.argv.append(f"pipeline_name={expected_pipeline}")
+
     train()

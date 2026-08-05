@@ -6,6 +6,7 @@
 vector_db:
   # --- Параметры создания коллекции ---
   _target_: src.vector_store.qdrant_store.QdrantVectorStore
+  _recursive_: false
   embedding_dim: 1024
   url: ${oc.env:QDRANT_URL,http://localhost:6333}
   collection_name: ${project_name}_kb

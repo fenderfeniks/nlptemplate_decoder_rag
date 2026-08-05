@@ -229,6 +229,7 @@ class ResponseCleanerConfig:
 @dataclass
 class HFTextGeneratorConfig:
     _target_: str = "src.decoder_pipeline.core.models.generator.HFTextGenerator"
+    _recursive_: bool = False
     generation_kwargs: dict[str, Any] = field(
         default_factory=lambda: {
             "max_new_tokens": 512,

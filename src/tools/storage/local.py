@@ -9,9 +9,10 @@ logger = logging.getLogger(__name__)
 
 
 class LocalStorage(BaseStorage):
-    """Реализация хранилища для локальной файловой системы с атомарными операциями."""
+    """Реализация хранилища для локальной файловой системы."""
 
-    def __init__(self, base_dir: str) -> None:
+    def __init__(self, base_dir: str, uri_prefix: str) -> None:
+        super().__init__(uri_prefix=uri_prefix)
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -57,3 +58,7 @@ class LocalStorage(BaseStorage):
 
         logger.info("Модель атомарно загружена из хранилища в: %s", target_path)
         return target_path
+
+    def exists(self, remote_path: str) -> bool:
+        target_path = self.base_dir / remote_path
+        return target_path.exists()

@@ -83,7 +83,7 @@ class TestFAISSVectorStore:
         assert res[0][0]["metadata"]["doc_id"] == "2"
 
     def test_persistence(self, tmp_path: Path, store):
-        """Сохранение и загрузка состояния базы (индекс + pickle метаданных)."""
+        """Сохранение и загрузка состояния базы (индекс + json метаданных)."""
         embs = np.array([[1, 0, 0, 0]], dtype=np.float32)
         meta = [{"doc_id": "123"}]
         store.insert(embs, meta)
@@ -91,7 +91,7 @@ class TestFAISSVectorStore:
         store.save(tmp_path)
 
         assert (tmp_path / "index.faiss").exists()
-        assert (tmp_path / "metadata.pkl").exists()
+        assert (tmp_path / "metadata.json").exists()
 
         store2 = FAISSVectorStore.load(tmp_path, embedding_dim=4)
         assert store2.ntotal == 1

@@ -34,10 +34,10 @@ class TestLLMGenerationClient:
         mock_client.completions.create = AsyncMock(return_value=MockResponse("ответ 1"))
 
         client = LLMGenerationClient()
-        result = await client("один промпт", max_tokens=50)
+        result = await client.generate("один промпт", max_tokens=50)
 
         assert len(result) == 1
-        assert result[0] == {"prompt": "один промпт", "generated_text": "ответ 1"}
+        assert result[0] == "ответ 1"
         mock_client.completions.create.assert_called_once_with(
             model="my-decoder-model", prompt="один промпт", max_tokens=50, temperature=0.7
         )
@@ -52,11 +52,11 @@ class TestLLMGenerationClient:
         )
 
         client = LLMGenerationClient()
-        result = await client(["промпт 1", "промпт 2"], temperature=0.9)
+        result = await client.generate(["промпт 1", "промпт 2"], temperature=0.9)
 
         assert len(result) == 2
-        assert result[0] == {"prompt": "промпт 1", "generated_text": "ответ 1"}
-        assert result[1] == {"prompt": "промпт 2", "generated_text": "ответ 2"}
+        assert result[0] == "ответ 1"
+        assert result[1] == "ответ 2"
         assert mock_client.completions.create.call_count == 2
 
     @patch("src.pipelines.decoder.inference.inference.AsyncOpenAI")

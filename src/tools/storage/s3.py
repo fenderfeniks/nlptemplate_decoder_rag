@@ -19,11 +19,13 @@ class S3Storage(BaseStorage):
     def __init__(
         self,
         bucket_name: str,
+        uri_prefix: str,
         endpoint_url: str | None = None,
         aws_access_key_id: str | None = None,
         aws_secret_access_key: str | None = None,
         max_concurrency: int = 10,
     ) -> None:
+        super().__init__(uri_prefix=uri_prefix)
         self.bucket_name = bucket_name
         self.max_concurrency = max_concurrency
         self.s3_client = boto3.client(
@@ -137,3 +139,16 @@ class S3Storage(BaseStorage):
                 shutil.rmtree(tmp_path)
             logger.error("Критический сбой скачивания из S3. Временные файлы очищены.")
             raise e
+
+    def exists(self, remote_path: str) -> bool:
+        try:
+            # В S3 нет директорий, проверяем наличие хотя бы одного объекта с нужным префиксом
+            # Если remote_path это конкретный файл, Prefix тоже сработает.
+
+            response = self.s3_client.list_objects_v2(
+                Bucket=self.bucket_name, Prefix=remote_path.rstrip("/") + "/", MaxKeys=1
+            )
+            return "Contents" in response
+        except Exception as e:
+            logger.error("Ошибка при проверке существования пути '%s' в S3: %s", remote_path, e)
+            return False

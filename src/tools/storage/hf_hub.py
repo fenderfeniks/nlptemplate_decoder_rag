@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 
 from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub.utils import RepositoryNotFoundError
 
 from src.tools.storage.base import BaseStorage
 
@@ -13,7 +14,10 @@ logger = logging.getLogger(__name__)
 class HFHubStorage(BaseStorage):
     """Хранилище Hugging Face Hub с защитой от битых кэшей и симлинков."""
 
-    def __init__(self, repo_id: str, token: str | None = None, repo_type: str = "model") -> None:
+    def __init__(
+        self, repo_id: str, uri_prefix: str, token: str | None = None, repo_type: str = "model"
+    ) -> None:
+        super().__init__(uri_prefix=uri_prefix)
         self.repo_id = repo_id
         self.token = token
         self.repo_type = repo_type
@@ -74,3 +78,25 @@ class HFHubStorage(BaseStorage):
                 shutil.rmtree(tmp_path)
             logger.error("Сбой скачивания из HF Hub. Временные директории очищены.")
             raise e
+
+    def exists(self, remote_path: str) -> bool:
+        """Проверяет наличие файла или директории в репозитории HF Hub."""
+        try:
+            # Скачиваем плоский список всех путей к файлам в репозитории
+            files = self.api.list_repo_files(repo_id=self.repo_id, repo_type=self.repo_type)
+
+            # Если remote_path указывает на конкретный файл
+            if remote_path in files:
+                return True
+
+            # Если remote_path указывает на директорию (добавляем слэш,
+            # чтобы 'models/model_v1' не сматчило 'models/model_v10')
+            prefix = remote_path.rstrip("/") + "/"
+            return any(f.startswith(prefix) for f in files)
+
+        except RepositoryNotFoundError:
+            logger.warning("Репозиторий %s не найден в HF Hub.", self.repo_id)
+            return False
+        except Exception as e:
+            logger.error("Ошибка при проверке пути '%s' в HF Hub: %s", remote_path, e)
+            return False

@@ -9,6 +9,7 @@ defaults:
   - modifiers/finetuning: lora
   - _self_
 
+
 # Этот узел передается в instantiate() в scripts/train.py
 builder:
   _target_: src.pipelines.base.core.models.builder.HFModelBuilder

@@ -1,11 +1,10 @@
-# configs/application/orchestrator.yaml
 _target_: src.application.orchestrator.RAGOrchestrator
 
 # Шаблон промпта из PromptManager
-default_template: ${tg_bot.rag_template}
+default_template: "rag_qa"
 
 # Число документов для ретривала
-default_top_k: ${tg_bot.top_k}
+default_top_k: ${rag_pipeline.inference.top_k}
 
-# retriever и generator пробрасываются как runtime-аргументы из кода
-# (они требуют загруженных моделей и не могут быть instantiate напрямую)
+# Лимит сообщений в истории диалога для защиты контекстного окна LLM
+max_history_msgs: 10

@@ -33,7 +33,7 @@ def main() -> None:
     logger.info("Запуск RAG API: host=0.0.0.0, port=%d, workers=%d", api_port, workers)
 
     uvicorn.run(
-        "src.rag_pipeline.api.rest.server:app",
+        "src.pipelines.rag.api.rest.server:app",
         host="0.0.0.0",
         port=api_port,
         workers=workers,

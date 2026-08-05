@@ -4,3 +4,4 @@ bucket_name: "my-production-models"
 endpoint_url: ${oc.env:S3_ENDPOINT_URL, null}
 aws_access_key_id: ${oc.env:AWS_ACCESS_KEY_ID, null}
 aws_secret_access_key: ${oc.env:AWS_SECRET_ACCESS_KEY, null}
+uri_prefix: "s3://"

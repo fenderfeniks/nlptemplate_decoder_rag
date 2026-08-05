@@ -58,24 +58,38 @@ def _load_rag_stack_sync(cfg: object, app: FastAPI) -> None:
         router=router, cache_base_dir=Path(cfg.paths.model_dir) / "rag_cache"
     )
 
-    manifest_uri = os.getenv("MANIFEST_URI", "local://./prod_storage/manifests/rag_manifest.json")
+    manifest_uri = cfg.manifest.uri
 
-    try:
-        # Эта одна строчка делает всё: качает манифест, веса, БД и патчит cfg
-        db_dir = resolver.resolve_and_patch(cfg, manifest_uri, pipeline_name="rag_pipeline")
-    except Exception as e:
-        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов RAG: %s", e)
-        raise RuntimeError("Artifact resolution failed.") from e
-
-    # 2. Сборка токенизатора и энкодера (уже с пропатченными локальными путями)
+    db_dir, lora_path = resolver.resolve_and_patch(cfg, manifest_uri, pipeline_name="rag_pipeline")
     tokenizer = hydra.utils.instantiate(cfg.rag_pipeline.model.tokenizer).build()
+    OmegaConf.update(cfg, "rag_pipeline.model.builder.modifiers", None, force_add=True)
     builder = hydra.utils.instantiate(cfg.rag_pipeline.model.builder)
     base_model = builder.build(tokenizer=tokenizer)
+
+    if lora_path:
+        from peft import PeftModel
+
+        base_model = PeftModel.from_pretrained(base_model, str(lora_path), is_trainable=False)
+
     pooler = hydra.utils.instantiate(cfg.rag_pipeline.model.pooling)
 
-    # 3. Эмбеддер
-    embedder = hydra.utils.instantiate(
+    # 3. Эмбеддер — фильтруем конфиг через сигнатуру __init__,
+    # test_query/top_k из embedder.yaml не являются параметрами RAGInferenceEmbedder
+    import inspect as _inspect
+
+    from omegaconf import OmegaConf as _OmegaConf
+
+    from src.pipelines.rag.inference.embedder import RAGInferenceEmbedder
+
+    _valid_keys = frozenset(_inspect.signature(RAGInferenceEmbedder.__init__).parameters) | {
+        "_target_"
+    }
+    _embedder_cfg = _OmegaConf.masked_copy(
         cfg.rag_pipeline.inference,
+        [k for k in cfg.rag_pipeline.inference if k in _valid_keys],
+    )
+    embedder = hydra.utils.instantiate(
+        _embedder_cfg,
         model=base_model,
         pooler=pooler,
         tokenizer=tokenizer,
@@ -99,7 +113,7 @@ def _load_rag_stack_sync(cfg: object, app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     load_dotenv()
-    config_dir = Path(__file__).resolve().parents[4] / "configs"
+    config_dir = Path(__file__).resolve().parents[5] / "configs"
 
     if not os.getenv("API_KEY"):
         logger.warning(
@@ -113,7 +127,7 @@ def create_app() -> FastAPI:
         pass
 
     with hydra.initialize_config_dir(config_dir=str(config_dir), version_base="1.3"):
-        cfg = hydra.compose(config_name="main")
+        cfg = hydra.compose(config_name="main", overrides=["pipeline_name=rag_pipeline"])
         OmegaConf.resolve(cfg)
 
     @asynccontextmanager
