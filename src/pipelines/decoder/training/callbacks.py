@@ -32,6 +32,12 @@ class GenerationEvaluationCallback(pl.Callback):
 
     Режим определяется автоматически из конфига данных (``task`` или наличие
     ``prompt_column``), либо задаётся явно через ``mode``.
+
+    Judge-оценка (LLM-as-a-Judge или NLI) запускается только в SFT-режиме
+    на ``on_test_epoch_end`` — после завершения обучения. Опционально —
+    каждые ``judge_every_n_steps`` шагов в ``on_validation_epoch_end``.
+    Judge инстанциируется лениво при первом вызове чтобы не держать
+    NLI-модель в памяти во время обучения.
     """
 
     def __init__(
@@ -42,6 +48,9 @@ class GenerationEvaluationCallback(pl.Callback):
         generation_kwargs: dict[str, Any] | None = None,
         fixed_samples: list[dict[str, Any]] | None = None,
         mode: str = _MODE_AUTO,
+        # ── Judge ──────────────────────────────────────────────────────
+        judge_cfg: Any | None = None,
+        judge_every_n_steps: int | None = None,
     ) -> None:
         """
         Args:
@@ -54,6 +63,10 @@ class GenerationEvaluationCallback(pl.Callback):
                 ``'prompt'`` и ``'target'``). Логируются каждую эпоху для
                 отслеживания прогресса на одних и тех же входах.
             mode: ``'auto'`` — определяется из конфига; ``'cpt'`` или ``'sft'`` — явно.
+            judge_cfg: DictConfig узла ``cfg.evaluation.judge``. Если ``None`` —
+                judge отключён. Инстанциируется лениво при первом вызове.
+            judge_every_n_steps: Запускать judge каждые N глобальных шагов
+                на валидации. ``None`` — только на тесте (дефолт).
         """
         self.model_name = model_name
         self.num_random = num_random
@@ -61,6 +74,8 @@ class GenerationEvaluationCallback(pl.Callback):
         self.generation_kwargs = generation_kwargs or {}
         self.fixed_samples = fixed_samples or []
         self.mode = mode
+        self.judge_cfg = judge_cfg
+        self.judge_every_n_steps = judge_every_n_steps
 
         self._env_ready: dict[str, bool] = {"val": False, "test": False}
         self._resolved_mode: str | None = None
@@ -68,6 +83,123 @@ class GenerationEvaluationCallback(pl.Callback):
         self.bleu_metric: Any | None = None
         self.generator = None
         self.eval_datasets: dict[str, list[dict[str, str]]] = {"val": [], "test": []}
+
+        # Инстанс judge — создаётся лениво при первом реальном вызове
+        self._judge: Any | None = None
+        self._judge_initialized: bool = False
+
+    # ------------------------------------------------------------------
+    # Judge
+    # ------------------------------------------------------------------
+
+    def _get_judge(self) -> Any | None:
+        """Лениво инстанциирует judge из cfg при первом вызове.
+
+        Ленивая инициализация намеренна:
+        - NLI-модель не занимает VRAM во время обучения.
+        - LLM-judge не делает лишних сетевых вызовов при старте.
+        - Ошибка конфига/сети проявляется только при реальном использовании.
+        """
+        if self._judge_initialized:
+            return self._judge
+
+        self._judge_initialized = True
+
+        if self.judge_cfg is None:
+            logger.info("GenerationEvaluationCallback: judge не задан, оценка judge отключена.")
+            return None
+
+        try:
+            from hydra.utils import instantiate
+
+            self._judge = instantiate(self.judge_cfg)
+            logger.info(
+                "GenerationEvaluationCallback: judge инициализирован (%s).",
+                self.judge_cfg.get("_target_", "unknown"),
+            )
+        except Exception as e:
+            logger.error(
+                "GenerationEvaluationCallback: сбой инициализации judge — %s. "
+                "Оценка judge будет пропущена.",
+                e,
+            )
+            self._judge = None
+
+        return self._judge
+
+    def _should_run_judge_on_val(self, trainer: pl.Trainer) -> bool:
+        """True если judge нужно запустить на текущем валидационном шаге."""
+        if self.judge_every_n_steps is None:
+            return False
+        if self._resolved_mode != _MODE_SFT:
+            return False
+        return trainer.global_step > 0 and trainer.global_step % self.judge_every_n_steps == 0
+
+    def _run_judge_eval(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        prompts: list[str],
+        targets: list[str],
+        generated: list[str],
+        stage: str,
+    ) -> None:
+        """Запускает judge и логирует результаты в MLflow.
+
+        Принимает уже готовые prompts/targets/generated из _run_sft_eval —
+        не делает повторную генерацию. Score логируется как скаляр в pl_module
+        и как колонка в MLflow-таблицу.
+        """
+        from src.tools.evaluation.schema import EvalInput
+
+        judge = self._get_judge()
+        if judge is None:
+            return
+
+        inputs = [
+            EvalInput(prompt=p, response=g, reference=t)
+            for p, g, t in zip(prompts, generated, targets)  # noqa
+        ]
+
+        try:
+            results = judge.evaluate_batch(inputs)
+        except Exception as e:
+            logger.error("GenerationEvaluationCallback: judge.evaluate_batch сбой — %s", e)
+            return
+
+        scores = [r.score for r in results if r.score is not None]
+        verdicts = [r.verdict for r in results if r.verdict is not None]
+
+        if scores:
+            avg_score = sum(scores) / len(scores)
+            pl_module.log(f"{stage}_judge_score", avg_score, sync_dist=True, prog_bar=True)
+            logger.info(
+                "GenerationEvaluationCallback: judge avg_score=%.4f (n=%d, stage=%s)",
+                avg_score,
+                len(scores),
+                stage,
+            )
+
+        if verdicts:
+            pass_rate = sum(verdicts) / len(verdicts)
+            pl_module.log(f"{stage}_judge_pass_rate", pass_rate, sync_dist=True)
+
+        # Добавляем judge-колонки в MLflow-таблицу
+        self._log_mlflow_table(
+            trainer,
+            pd.DataFrame(
+                {
+                    "Prompt": prompts,
+                    "Target": targets,
+                    "Generated": generated,
+                    "Judge Score": [r.score for r in results],
+                    "Judge Verdict": [r.verdict for r in results],
+                    "Judge Reasoning": [r.reasoning for r in results],
+                }
+            ),
+            stage=stage,
+            artifact_suffix="_judge",
+        )
 
     # ------------------------------------------------------------------
     # Инициализация окружения
@@ -84,7 +216,7 @@ class GenerationEvaluationCallback(pl.Callback):
         else:
             resolved = _MODE_SFT if _cfg_get(data_cfg, "prompt_column") else _MODE_CPT
 
-        logger.info("GenerationEvaluationCallback: mode=auto → resolved=%s", resolved)
+        logger.info("GenerationEvaluationCallback: mode=auto -> resolved=%s", resolved)
         return resolved
 
     def _setup_eval_env(
@@ -268,6 +400,12 @@ class GenerationEvaluationCallback(pl.Callback):
             stage,
         )
 
+        # ── Judge — после логирования основных метрик ──────────────────
+        # На тесте: всегда. На валидации: только если задан every_n_steps.
+        run_judge = stage == "test" or self._should_run_judge_on_val(trainer)
+        if run_judge:
+            self._run_judge_eval(trainer, pl_module, prompts, targets, generated, stage)
+
     def _run_cpt_eval(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
         dataset = self.eval_datasets[stage]
         actual_num = min(self.num_random, len(dataset))
@@ -304,11 +442,18 @@ class GenerationEvaluationCallback(pl.Callback):
         return float(score)
 
     @staticmethod
-    def _log_mlflow_table(trainer: pl.Trainer, df: pd.DataFrame, stage: str) -> None:
+    def _log_mlflow_table(
+        trainer: pl.Trainer,
+        df: pd.DataFrame,
+        stage: str,
+        artifact_suffix: str = "",
+    ) -> None:
         if not (trainer.logger and hasattr(trainer.logger, "experiment")):
             return
         trainer.logger.experiment.log_table(
             run_id=trainer.logger.run_id,
             data=df,
-            artifact_file=f"generations/{stage}_step_{trainer.global_step}_results.json",
+            artifact_file=(
+                f"generations/{stage}_step_{trainer.global_step}_results{artifact_suffix}.json"
+            ),
         )

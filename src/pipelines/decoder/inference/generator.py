@@ -41,7 +41,7 @@ class HFTextGenerator:
                 (``temperature``, ``top_p``, ``max_new_tokens`` и т.д.).
                 Переопределяются per-call через ``**kwargs`` в ``generate``.
             cleaner_cfg: Hydra DictConfig для инстанцирования ``ResponseCleaner``.
-                ``None`` → создаётся ``ResponseCleaner()`` с дефолтными параметрами.
+                ``None`` -> создаётся ``ResponseCleaner()`` с дефолтными параметрами.
         """
         self.model = model
         self.tokenizer = tokenizer
@@ -51,7 +51,7 @@ class HFTextGenerator:
         # при 'right' паддинге модель "видит" pad-токены перед EOS и генерирует мусор
         if self.tokenizer.padding_side != "left":
             logger.warning(
-                "padding_side='%s' → принудительно устанавливаем 'left' "
+                "padding_side='%s' -> принудительно устанавливаем 'left' "
                 "для корректной батч-генерации.",
                 self.tokenizer.padding_side,
             )

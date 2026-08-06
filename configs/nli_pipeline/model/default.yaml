@@ -1,0 +1,16 @@
+# configs/nli_pipeline/model/default.yaml
+defaults:
+  - architecture: roberta-large-mnli
+  - _self_
+
+builder:
+  _target_: src.pipelines.base.core.models.builder.HFModelBuilder
+  _recursive_: false
+  model_name_or_path: ${nli_pipeline.model.architecture.model_name_or_path}
+  auto_model_class: ${nli_pipeline.model.architecture.auto_model_class}
+  cache_dir: ${paths.data_dir}/weights
+  trust_remote_code: ${nli_pipeline.model.architecture.trust_remote_code}
+  torch_dtype: ${nli_pipeline.model.architecture.torch_dtype}
+  attn_implementation: ${nli_pipeline.model.architecture.attn_implementation}
+  quantization_config: null
+  modifiers: null

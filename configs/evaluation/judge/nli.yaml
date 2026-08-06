@@ -1,0 +1,34 @@
+# configs/evaluation/nli/default.yaml
+_target_: src.tools.evaluation.judges.nli_judge.NLIJudge
+
+# ── Источник модели ───────────────────────────────────────────────────────────
+# Манифест создаётся через prepare_artifacts.py с pipeline_name=nli_pipeline
+# (или отдельным вызовом с нужным architecture-конфигом)
+manifest_uri: "${storage.uri_prefix}manifests/nli_pipeline_manifest.json"
+
+# StorageRouter инжектируется из корневого конфига
+router: ${storage_router}
+
+# Локальный кэш для весов после скачивания из storage
+cache_dir: "${paths.data_dir}/nli_cache"
+
+# ── Параметры модели ──────────────────────────────────────────────────────────
+# Рекомендуемые модели:
+#   cross-encoder/nli-roberta-base        (быстрая, ~500MB)
+#   cross-encoder/nli-deberta-v3-large    (точнее, ~900MB)
+#   facebook/bart-large-mnli              (альтернатива)
+# tokenizer_name берётся из весов автоматически если не указан
+tokenizer_name: null
+
+device: "auto"        # "auto" -> GPU если есть, иначе CPU; или "cpu", "cuda:0"
+batch_size: 32
+max_length: 512
+
+# ── Логика оценки ─────────────────────────────────────────────────────────────
+entailment_label: "entailment"   # метка энтейлмента в конкретной модели
+verdict_threshold: 0.5           # score >= threshold -> verdict=True (pass)
+
+# Что возвращать в EvalResult
+return_score: true
+return_verdict: true
+return_reasoning: false          # true -> добавляет распределение меток в reasoning

@@ -1,0 +1,9 @@
+# configs/nli_pipeline/model/architecture/roberta-large-mnli.yaml
+# Используется prepare_artifacts.py при pipeline_name=nli_pipeline
+# для скачивания весов и создания манифеста.
+model_name_or_path: "cross-encoder/nli-roberta-base"
+mlflow_model_name: "nli-roberta-base"
+auto_model_class: "transformers.AutoModelForSequenceClassification"
+torch_dtype: "float32"           # NLI-модели обычно float32, bfloat16 не всегда поддерживается
+attn_implementation: null        # sdpa/fa2 не нужны для энкодера
+trust_remote_code: false

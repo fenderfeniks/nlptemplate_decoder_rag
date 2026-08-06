@@ -27,6 +27,9 @@ defaults:
   - rag_pipeline/indexing: indexer
   - rag_pipeline/api: fastapi
 
+  # ── NLI Pipeline ──────────────────────────────────────────────────────────
+  - nli_pipeline/model: default
+
   # ── Векторная БД ──────────────────────────────────────────────────────────
   - vector_db: flat
 
@@ -39,6 +42,9 @@ defaults:
   # ── Application layer ─────────────────────────────────────────────────────
   - application/orchestrator: orchestrator
   - application/llamaindex: llamaindex
+
+  # ── Evaluation ────────────────────────────────────────────────────────────
+  - evaluation/judge: nli
 
   # ── Прочее ────────────────────────────────────────────────────────────────
   - prompts: default
@@ -55,7 +61,7 @@ storage_router:
 
 seed: 42
 max_length: 2048
-pipeline_name: "decoder_pipeline"
+pipeline_name: "nli_pipeline"
 project_name: "industrial_nlp_template"
 
 system:
