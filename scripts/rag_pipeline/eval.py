@@ -5,9 +5,10 @@ from pathlib import Path
 
 import hydra
 import pytorch_lightning as pl
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from src.pipelines.base.core.data.builder import DataModule
+from src.pipelines.rag.inference.builder import build_inference_encoder
 from src.pipelines.rag.training.module import RAGLightningModule
 from src.tools.storage.resolver import ArtifactResolver
 from src.utils.hydra_utils import setup_config
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 def evaluate(cfg: DictConfig) -> None:
     """Оценка качества RAG-энкодера на отложенной выборке.
 
-    Использует ``training.validate()``, который вызывает ``on_validation_epoch_end``
+    Использует ``trainer.validate()``, который вызывает ``on_validation_epoch_end``
     у зарегистрированных callbacks — в том числе ``RetrievalEvaluationCallback``,
     считающий MRR@K, Recall@K и NDCG@K.
 
@@ -34,16 +35,14 @@ def evaluate(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.seed, workers=True)
 
-    # 1. Резолвинг артефактов (Энкодер + БД)
+    # 1. Резолвинг артефактов (энкодер + БД)
     router = hydra.utils.instantiate(cfg.storage_router)
     cache_base = Path(cfg.paths.model_dir) / "rag_cache"
     resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
 
-    manifest_uri = cfg.manifest.uri
-
     try:
         db_dir, lora_path = resolver.resolve_and_patch(
-            cfg, manifest_uri, pipeline_name="rag_pipeline"
+            cfg, cfg.manifest.uri, pipeline_name="rag_pipeline"
         )
         if not db_dir:
             raise ValueError("Манифест не содержит 'vector_db_uri'. База не найдена.")
@@ -51,84 +50,40 @@ def evaluate(cfg: DictConfig) -> None:
         logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов RAG: %s", e)
         sys.exit(1)
 
-    # 2. Сборка Энкодера (с уже пропатченными локальными путями)
-    tokenizer = hydra.utils.instantiate(cfg.rag_pipeline.model.tokenizer).build()
+    # 2. Сборка энкодера
+    base_model, pooler, tokenizer = build_inference_encoder(cfg, lora_path)
 
-    # Отключаем модификаторы — при инференсе не нужны
-    OmegaConf.update(cfg, "rag_pipeline.model.builder.modifiers", None, force_add=True)
-
-    builder = hydra.utils.instantiate(cfg.rag_pipeline.model.builder)
-    base_model = builder.build(tokenizer=tokenizer)
-
-    # Навешиваем адаптер явно если lora-режим
-    if lora_path:
-        from peft import PeftModel
-
-        logger.info("LoRA: загрузка адаптера из '%s'", lora_path)
-        base_model = PeftModel.from_pretrained(base_model, str(lora_path), is_trainable=False)
-
-    pooler = hydra.utils.instantiate(cfg.rag_pipeline.model.pooling)
-
-    # Loss нужен для инициализации RAGLightningModule (интерфейс требует),
-    # но при training.validate() backward не вызывается — Loss не считается.
-    loss_fn = hydra.utils.instantiate(cfg.rag_pipeline.loss)
-
-    # 2. DataModule в режиме contrastive
-    # Для оценки используем val_dataloader: RetrievalEvaluationCallback
-    # привязан к on_validation_epoch_end и вызывает training.datamodule.val_dataloader().
+    # 3. DataModule в режиме contrastive (val_dataloader → RetrievalEvaluationCallback)
     datamodule = DataModule(data_cfg=cfg.rag_pipeline.data, tokenizer=tokenizer)
     datamodule.prepare_data()
     datamodule.setup(stage="validate")
 
-    val_loader = datamodule.val_dataloader()
-    if val_loader is None:
+    if datamodule.val_dataloader() is None:
         logger.error(
             "val_dataloader пуст — оценка невозможна. "
             "Проверьте val_size в конфиге (должен быть > 0 для contrastive)."
         )
         return
 
-    # 3. LightningModule
+    # 4. LightningModule
+    # Loss нужен для интерфейса, но при validate() backward не вызывается.
     model_module = RAGLightningModule(
         model=base_model,
         pooler=pooler,
-        loss_fn=loss_fn,
+        loss_fn=hydra.utils.instantiate(cfg.rag_pipeline.loss),
         optimizer_cfg=hydra.utils.instantiate(cfg.rag_pipeline.optimizer),
-        scheduler_cfg=None,  # При оценке планировщик не нужен
+        scheduler_cfg=None,
     )
 
-    # 4. training (должен содержать RetrievalEvaluationCallback в конфиге)
-    training = hydra.utils.instantiate(cfg.rag_pipeline.training)
-
-    # 5. Запуск оценки
-    # training.validate() прогоняет один validation epoch и вызывает все callbacks.
-    # Метрики логируются через pl_module.log() и попадают в MLflow/WandB.
-    logger.info("Запуск training.validate()...")
-    training.validate(model=model_module, datamodule=datamodule)
+    # 5. Запуск оценки через Trainer (несёт RetrievalEvaluationCallback из конфига)
+    logger.info("Запуск trainer.validate()...")
+    trainer = hydra.utils.instantiate(cfg.rag_pipeline.training)
+    trainer.validate(model=model_module, datamodule=datamodule)
     logger.info("Оценка завершена.")
 
 
 if __name__ == "__main__":
-    expected_pipeline = "rag_pipeline"
+    from src.utils.cli import enforce_pipeline
 
-    # Ищем, передал ли пользователь аргумент pipeline_name=...
-    pipeline_arg_idx = next(
-        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
-    )
-
-    if pipeline_arg_idx is not None:
-        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
-        if current_pipeline != expected_pipeline:
-            logger.warning(
-                "ВНИМАНИЕ! Запущен RAG-скрипт, но передано pipeline_name=%s. "
-                "Принудительно переопределяем на '%s' для предотвращения сбоя конфигов Hydra.",
-                current_pipeline,
-                expected_pipeline,
-            )
-            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
-    else:
-        # Если аргумент не передан CLI, Hydra возьмет дефолт из main.yaml.
-        # Защищаемся от неправильного дефолта, добавляя аргумент явно:
-        sys.argv.append(f"pipeline_name={expected_pipeline}")
-
+    enforce_pipeline("rag_pipeline")
     evaluate()

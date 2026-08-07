@@ -1,12 +1,13 @@
-import inspect
+# scripts/rag/infer.py
 import logging
 import sys
 from pathlib import Path
 
 import hydra
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
-from src.pipelines.rag.inference.embedder import RAGInferenceEmbedder
+from src.pipelines.rag.inference.builder import build_inference_encoder
+from src.pipelines.rag.inference.embedder_factory import build_embedder
 from src.tools.storage.resolver import ArtifactResolver
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
@@ -18,19 +19,18 @@ logger = logging.getLogger(__name__)
 
 @hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
 def infer(cfg: DictConfig) -> None:
+    """Тестовый прогон RAG-ретривера по одному запросу."""
     cfg = setup_config(cfg)
     logger.info("Инициализация RAG-ретривера...")
 
-    # 1. Резолвинг артефактов (Энкодер + БД)
+    # 1. Резолвинг артефактов (энкодер + БД)
     router = hydra.utils.instantiate(cfg.storage_router)
     cache_base = Path(cfg.paths.model_dir) / "rag_cache"
     resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
 
-    manifest_uri = cfg.manifest.uri
-
     try:
         db_dir, lora_path = resolver.resolve_and_patch(
-            cfg, manifest_uri, pipeline_name="rag_pipeline"
+            cfg, cfg.manifest.uri, pipeline_name="rag_pipeline"
         )
         if not db_dir:
             raise ValueError("Манифест не содержит 'vector_db_uri'. База не найдена.")
@@ -38,53 +38,20 @@ def infer(cfg: DictConfig) -> None:
         logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов RAG: %s", e)
         sys.exit(1)
 
-    # 2. Сборка Энкодера (с уже пропатченными локальными путями)
-    tokenizer = hydra.utils.instantiate(cfg.rag_pipeline.model.tokenizer).build()
+    # 2. Сборка энкодера и эмбеддера
+    base_model, pooler, tokenizer = build_inference_encoder(cfg, lora_path)
+    embedder = build_embedder(cfg, base_model, pooler, tokenizer)
 
-    # Отключаем модификаторы — при инференсе не нужны
-    OmegaConf.update(cfg, "rag_pipeline.model.builder.modifiers", None, force_add=True)
+    # 3. Загрузка векторной БД
+    vector_db = hydra.utils.instantiate(cfg.vector_db.loader, directory=db_dir)
+    logger.info("Векторная БД загружена из '%s' (%d документов).", db_dir, vector_db.ntotal)
 
-    builder = hydra.utils.instantiate(cfg.rag_pipeline.model.builder)
-    base_model = builder.build(tokenizer=tokenizer)
-
-    # Навешиваем адаптер явно если lora-режим
-    if lora_path:
-        from peft import PeftModel
-
-        logger.info("LoRA: загрузка адаптера из '%s'", lora_path)
-        base_model = PeftModel.from_pretrained(base_model, str(lora_path), is_trainable=False)
-
-    pooler = hydra.utils.instantiate(cfg.rag_pipeline.model.pooling)
-
-    # Вытаскиваем поля для тестового прогона ДО instantiate —
-    # они не являются параметрами RAGInferenceEmbedder.__init__()
-    # и Hydra бросит TypeError если передать их через конфиг.
+    # 4. Сборка ретривера и тестовый запрос
+    # test_query / top_k — поля inference.yaml для smoke-теста, не параметры эмбеддера.
     inference_cfg = cfg.rag_pipeline.inference
     query: str = inference_cfg.get("test_query", "Тестовый запрос")
     top_k: int = inference_cfg.get("top_k", 3)
 
-    # Фильтруем конфиг: оставляем только _target_ + параметры __init__ эмбеддера.
-    # Читаем сигнатуру динамически — не хардкодим список ключей, чтобы не
-    # рассинхронизироваться при добавлении новых параметров в RAGInferenceEmbedder.
-    _valid_keys = frozenset(inspect.signature(RAGInferenceEmbedder.__init__).parameters) | {
-        "_target_"
-    }
-    embedder_cfg = OmegaConf.masked_copy(
-        inference_cfg, [k for k in inference_cfg if k in _valid_keys]
-    )
-
-    embedder = hydra.utils.instantiate(
-        embedder_cfg,
-        model=base_model,
-        pooler=pooler,
-        tokenizer=tokenizer,
-    )
-
-    # 3. Динамическая сборка Векторной БД
-    vector_db = hydra.utils.instantiate(cfg.vector_db.loader, directory=db_dir)
-    logger.info("Векторная БД загружена из '%s' (%d документов).", db_dir, vector_db.ntotal)
-
-    # 4. Сборка ретривера
     retriever = hydra.utils.instantiate(
         cfg.rag_pipeline.retrieval,
         embedder=embedder,
@@ -101,23 +68,7 @@ def infer(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
-    expected_pipeline = "rag_pipeline"
+    from src.utils.cli import enforce_pipeline
 
-    pipeline_arg_idx = next(
-        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
-    )
-
-    if pipeline_arg_idx is not None:
-        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
-        if current_pipeline != expected_pipeline:
-            logger.warning(
-                "ВНИМАНИЕ! Запущен RAG-скрипт, но передано pipeline_name=%s. "
-                "Принудительно переопределяем на '%s' для предотвращения сбоя конфигов Hydra.",
-                current_pipeline,
-                expected_pipeline,
-            )
-            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
-    else:
-        sys.argv.append(f"pipeline_name={expected_pipeline}")
-
+    enforce_pipeline("rag_pipeline")
     infer()

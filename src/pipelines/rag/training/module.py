@@ -84,7 +84,6 @@ class RAGLightningModule(OptimizerMixin, pl.LightningModule):
                 "has_negative", torch.ones(len(q_emb), dtype=torch.bool)
             )
             if has_negative.any():
-                # Прогоняем только те примеры, у которых есть негатив
                 neg_ids = batch["neg_input_ids"][has_negative]
                 neg_mask = batch["neg_attention_mask"][has_negative]
                 n_emb = self(neg_ids, neg_mask)
@@ -101,7 +100,6 @@ class RAGLightningModule(OptimizerMixin, pl.LightningModule):
                 batch_idx,
                 loss.item(),
             )
-            # None → Lightning пропускает шаг оптимизатора без backward()
             return None
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)

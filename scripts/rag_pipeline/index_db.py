@@ -1,4 +1,4 @@
-import inspect
+# scripts/rag/index_db.py
 import json
 import logging
 import sys
@@ -11,7 +11,8 @@ from omegaconf import DictConfig, OmegaConf
 
 from src.pipelines.base.core.data.builder import DataModule
 from src.pipelines.rag.indexing.indexer import KnowledgeBaseIndexer
-from src.pipelines.rag.inference.embedder import RAGInferenceEmbedder
+from src.pipelines.rag.inference.builder import build_inference_encoder
+from src.pipelines.rag.inference.embedder_factory import build_embedder
 from src.tools.storage.resolver import ArtifactResolver
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
@@ -30,18 +31,12 @@ def index_database(cfg: DictConfig) -> None:
             Используется после смены модели или полного обновления корпуса.
         incremental=true — инкрементальное обновление: загружаем существующую БД,
             добавляем только новые документы (дубли пропускаются через doc_id).
+
+    Авто-логика: если БД уже есть в манифесте, при incremental=false (дефолт)
+    переключаемся в инкрементальный режим автоматически. Для принудительной
+    полной переиндексации — удалите vector_db_uri из манифеста вручную.
     """
     cfg = setup_config(cfg)
-
-    # Флаг incremental=false в схеме — дефолт означает "первый запуск".
-    # Но если БД уже существует в манифесте, глупо требовать явного флага
-    # при каждом обновлении корпуса. Поэтому:
-    #   - incremental=true  → инкрементальный (явная просьба пользователя)
-    #   - incremental=false → смотрим в манифест: есть vector_db_uri → авто-инкрементальный,
-    #                         нет → полная переиндексация
-    # Принудительная полная переиндексация: передать incremental=false
-    # когда БД уже есть — это не поддерживается авто-логикой намеренно,
-    # для этого нужно вручную удалить vector_db_uri из манифеста.
     user_requested_incremental: bool = cfg.get("incremental", False)
 
     # 1. Инициализация хранилища и роутера
@@ -50,9 +45,7 @@ def index_database(cfg: DictConfig) -> None:
     uri_prefix = cfg.storage.uri_prefix
     manifest_uri = cfg.manifest.uri
 
-    # 2. Единый резолвинг манифеста — читаем один раз, используем для энкодера и БД.
-    #    resolve_and_patch патчит cfg.rag_pipeline.model.builder.model_name_or_path
-    #    и возвращает (db_dir, lora_path).
+    # 2. Резолвинг манифеста: патчит model_name_or_path, возвращает (db_dir, lora_path)
     cache_base = Path(cfg.paths.model_dir) / "rag_cache"
     resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
 
@@ -64,8 +57,7 @@ def index_database(cfg: DictConfig) -> None:
         logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов энкодера: %s", e)
         sys.exit(1)
 
-    # Авто-определение режима: если пользователь не просил инкрементальный явно,
-    # но БД уже есть в манифесте (db_dir не None) — переключаемся автоматически.
+    # Авто-определение режима
     if user_requested_incremental:
         incremental = True
     elif db_dir is not None:
@@ -83,43 +75,12 @@ def index_database(cfg: DictConfig) -> None:
         "инкрементальный" if incremental else "полная переиндексация",
     )
 
-    # 3. Сборка энкодера
-    tokenizer = hydra.utils.instantiate(cfg.rag_pipeline.model.tokenizer).build()
+    # 3. Сборка энкодера и эмбеддера
+    base_model, pooler, tokenizer = build_inference_encoder(cfg, lora_path)
+    embedder = build_embedder(cfg, base_model, pooler, tokenizer)
 
-    # Отключаем модификаторы — при инференсе не нужны
-    OmegaConf.update(cfg, "rag_pipeline.model.builder.modifiers", None, force_add=True)
-
-    builder = hydra.utils.instantiate(cfg.rag_pipeline.model.builder)
-    base_model = builder.build(tokenizer=tokenizer)
-
-    # Навешиваем адаптер явно если lora-режим
-    if lora_path:
-        from peft import PeftModel
-
-        logger.info("LoRA: загрузка адаптера из '%s'", lora_path)
-        base_model = PeftModel.from_pretrained(base_model, str(lora_path), is_trainable=False)
-
-    pooler = hydra.utils.instantiate(cfg.rag_pipeline.model.pooling)
-
-    # test_query/top_k живут в embedder.yaml для infer.py, но не являются
-    # параметрами __init__ — фильтруем конфиг через сигнатуру чтобы не падать.
-    _valid_keys = frozenset(inspect.signature(RAGInferenceEmbedder.__init__).parameters) | {
-        "_target_"
-    }
-    embedder_cfg = OmegaConf.masked_copy(
-        cfg.rag_pipeline.inference,
-        [k for k in cfg.rag_pipeline.inference if k in _valid_keys],
-    )
-    embedder = hydra.utils.instantiate(
-        embedder_cfg,
-        model=base_model,
-        pooler=pooler,
-        tokenizer=tokenizer,
-    )
-
-    # 4. Инициализация векторной БД в зависимости от режима
+    # 4. Инициализация векторной БД
     if incremental:
-        # Инкрементальный режим — загружаем существующую БД чтобы переиспользовать doc_ids
         if not db_dir:
             logger.critical(
                 "Инкрементальный режим запрошен, но манифест не содержит 'vector_db_uri'. "
@@ -130,9 +91,7 @@ def index_database(cfg: DictConfig) -> None:
         vector_db = hydra.utils.instantiate(cfg.vector_db.loader, directory=db_dir)
         logger.info("БД загружена. Документов в индексе: %d.", vector_db.ntotal)
     else:
-        # Полная переиндексация — новая пустая БД.
-        # Фильтруем loader из конфига: Hydra не должен его инстанцировать,
-        # т.к. directory ещё не существует.
+        # Фильтруем loader: directory ещё не существует, Hydra не должен его трогать
         logger.info("Создание новой пустой БД...")
         vector_db_cfg = OmegaConf.create(
             {
@@ -147,14 +106,13 @@ def index_database(cfg: DictConfig) -> None:
     datamodule = DataModule(data_cfg=cfg.rag_pipeline.data, tokenizer=tokenizer)
     datamodule.prepare_data()
     datamodule.setup(stage="fit")
-    dataloader = datamodule.train_dataloader()
 
     indexer = KnowledgeBaseIndexer(
         embedder=embedder,
         store=vector_db,
         push_batch_size=cfg.rag_pipeline.indexing.push_batch_size,
     )
-    indexer.index_dataloader(dataloader, text_column="text")
+    indexer.index_dataloader(datamodule.train_dataloader(), text_column="text")
 
     # 6. Сохранение локально и выгрузка в Storage
     local_db_dir = Path(cfg.paths.db_dir)
@@ -165,9 +123,7 @@ def index_database(cfg: DictConfig) -> None:
     logger.info("Выгрузка Векторной БД в Storage: %s", remote_db_dir)
     storage_client.upload(local_dir=local_db_dir, remote_path=remote_db_dir)
 
-    # 7. Безопасное обновление манифеста.
-    #    Скачиваем актуальный манифест чтобы не затереть ключи энкодера
-    #    (model_uri / lora_uri / load_type). Обновляем только vector_db_uri.
+    # 7. Безопасное обновление манифеста (только vector_db_uri — не трогаем model_uri/lora_uri)
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
 
@@ -187,10 +143,7 @@ def index_database(cfg: DictConfig) -> None:
 
         storage_client.upload(local_dir=tmp_dir, remote_path="manifests")
 
-    # Патчим cfg — сигнализируем что БД теперь существует.
-    # Полезно если что-то downstream в том же процессе читает этот флаг.
     OmegaConf.update(cfg, "incremental", True, merge=True)
-
     logger.info(
         "Индексация завершена. Манифест обновлён. vector_db_uri: %s%s",
         uri_prefix,
@@ -199,27 +152,7 @@ def index_database(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
-    expected_pipeline = "rag_pipeline"
+    from src.utils.cli import enforce_pipeline
 
-    pipeline_arg_idx = next(
-        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
-    )
-
-    if pipeline_arg_idx is not None:
-        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
-        if current_pipeline != expected_pipeline:
-            logger.warning(
-                "ВНИМАНИЕ! Передано pipeline_name=%s. Принудительно меняем на '%s'.",
-                current_pipeline,
-                expected_pipeline,
-            )
-            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
-    else:
-        sys.argv.append(f"pipeline_name={expected_pipeline}")
-
-    override_data = f"{expected_pipeline}/data=indexing"
-    if not any(arg.startswith(f"{expected_pipeline}/data=") for arg in sys.argv):
-        logger.info("Устанавливаем %s для корректной индексации.", override_data)
-        sys.argv.append(override_data)
-
+    enforce_pipeline("rag_pipeline", "rag_pipeline/data=indexing")
     index_database()

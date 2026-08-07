@@ -1,6 +1,5 @@
 version: '3.8'
 
-# Общие volumes для шаринга моделей между контейнером-загрузчиком и API
 volumes:
   grafana_data:
   models_cache:
@@ -12,12 +11,13 @@ services:
   # 0. Init Container (Загрузчик моделей)
   # ----------------------------------------------------
   artifact_downloader:
-    image: my-company/nlp_template:latest
+    # Загрузчику могут понадобиться клиенты БД и MLflow, поэтому даем ему api и rag
+    image: my-company/nlp_template:rag-api
     build: 
       context: .
       dockerfile: Dockerfile
       args:
-        INSTALL_EXTRAS: "api"
+        INSTALL_EXTRAS: "api,rag"
     container_name: nlp_template_downloader
     command: ["python", "-m", "scripts.download_artifacts"]
     environment:
@@ -25,11 +25,11 @@ services:
     env_file:
       - .env
     volumes:
-      - ./configs:/app/configs # Для локальной разработки, если меняем конфиги на лету
+      - ./configs:/app/configs
       - models_cache:/app/models
       - vector_db_cache:/app/vector_db
-      - ./prod_storage:/app/prod_storage # Если используем LocalStorage как source
-    restart: "no" # Отрабатывает один раз и выключается
+      - ./prod_storage:/app/prod_storage
+    restart: "no"
 
   # ----------------------------------------------------
   # 1. LLM API (Инференс генератора через vLLM)
@@ -63,7 +63,12 @@ services:
   # 2. RAG API (Векторный поиск и Энкодер)
   # ----------------------------------------------------
   rag_api:
-    image: my-company/nlp_template:latest
+    # Уникальный тег для RAG
+    image: my-company/nlp_template:rag-api
+    build: 
+      context: .
+      args:
+        INSTALL_EXTRAS: "api,rag"
     container_name: nlp_template_rag_api
     ports:
       - "8001:8001"
@@ -93,7 +98,12 @@ services:
   # 3. API Gateway (Оркестратор)
   # ----------------------------------------------------
   api_gateway:
-    image: my-company/nlp_template:latest
+    # Легковесный образ только с FastAPI
+    image: my-company/nlp_template:api
+    build: 
+      context: .
+      args:
+        INSTALL_EXTRAS: "api"
     container_name: nlp_template_api_gateway
     ports:
       - "${GATEWAY_PORT:-8000}:8000"
@@ -118,7 +128,12 @@ services:
   # Инфраструктура MLOps
   # ----------------------------------------------------
   mlflow:
-    image: my-company/nlp_template:latest
+    # MLflow находится в группе training
+    image: my-company/nlp_template:training
+    build: 
+      context: .
+      args:
+        INSTALL_EXTRAS: "training"
     container_name: nlp_template_mlflow
     ports:
       - "${MLFLOW_PORT:-5000}:5000"
@@ -136,14 +151,15 @@ services:
       - mlflow
 
   # ----------------------------------------------------
-  # Training сервисы — добавить volume mlflow и MLFLOW_TRACKING_URI
+  # Training сервисы
   # ----------------------------------------------------
   train_decoder:
-    image: my-company/nlp_template:latest
+    image: my-company/nlp_template:training
     build:
       context: .
       args:
-        INSTALL_EXTRAS: "training"
+        # Для обучения берем либы для ML (training) и DVC/датасеты (data)
+        INSTALL_EXTRAS: "training,data"
     container_name: nlp_template_train_decoder
     profiles:
       - training
@@ -156,7 +172,7 @@ services:
     volumes:
       - ./configs:/app/configs
       - ~/.cache/huggingface:/root/.cache/huggingface
-      - mlflow_data:/mlflow  # <- шарим volume
+      - mlflow_data:/mlflow
     deploy:
       resources:
         reservations:
@@ -168,7 +184,12 @@ services:
       - mlflow
 
   train_rag:                                    
-    image: my-company/nlp_template:latest
+    # Обучению RAG нужен еще и сам RAG фреймворк
+    image: my-company/nlp_template:training-rag
+    build:
+      context: .
+      args:
+        INSTALL_EXTRAS: "training,data,rag"
     container_name: nlp_template_train_rag
     profiles:
       - training

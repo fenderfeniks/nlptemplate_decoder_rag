@@ -1,4 +1,6 @@
-# scripts/eval.py
+# scripts/decoder/eval.py
+"""Оценка качества декодер-модели на тестовой выборке."""
+
 import json
 import logging
 import sys
@@ -7,26 +9,35 @@ from typing import Any
 
 import hydra
 from dotenv import load_dotenv
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 
 load_dotenv()
-from src.pipelines.base.core.data.builder import DataModule  # noqa
-from src.pipelines.decoder.training.module import CausalLMLightningModule  # noqa
-from src.utils.checkpoint_utils import load_checkpoint  # noqa
-from src.utils.hydra_utils import setup_config  # noqa
-from src.utils.logger import setup_logging  # noqa
-from src.utils.torch_utils import register_safe_globals  # noqa
-from src.tools.storage.resolver import ArtifactResolver  # noqa
+
+from src.pipelines.base.core.data.builder import DataModule  # noqa: E402
+from src.pipelines.decoder.inference.builder import build_decoder_model  # noqa: E402
+from src.pipelines.decoder.training.module import CausalLMLightningModule  # noqa: E402
+from src.tools.storage.resolver import ArtifactResolver  # noqa: E402
+from src.utils.checkpoint_utils import load_checkpoint  # noqa: E402
+from src.utils.hydra_utils import setup_config  # noqa: E402
+from src.utils.logger import setup_logging  # noqa: E402
+from src.utils.torch_utils import register_safe_globals  # noqa: E402
+
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 
 def _check_drift(
-    metrics: dict[str, Any], drift_threshold: float, metric_key: str = "test_perplexity"
+    metrics: dict[str, Any],
+    drift_threshold: float,
+    metric_key: str = "test_perplexity",
 ) -> None:
-    # (Функция остается без изменений, она отлично написана)
+    """Проверить метрику на деградацию относительно порога.
+
+    Завершает процесс с кодом 1 если метрика хуже порога.
+    is_lower_better=True для loss/perplexity, False для accuracy/f1.
+    """
     primary_metric = metrics.get(metric_key)
 
     if primary_metric is None:
@@ -34,7 +45,7 @@ def _check_drift(
         return
 
     logger.info("Метрика %s: %.4f, порог дрифта: %s", metric_key, primary_metric, drift_threshold)
-    is_lower_better = metric_key in ["test_loss", "test_perplexity"]
+    is_lower_better = metric_key in ("test_loss", "test_perplexity")
 
     if (is_lower_better and primary_metric > drift_threshold) or (
         not is_lower_better and primary_metric < drift_threshold
@@ -45,40 +56,27 @@ def _check_drift(
 
 @hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
 def evaluate(cfg: DictConfig) -> None:
+    """Оценка декодер-модели: trainer.test() + экспорт метрик + drift-check."""
     cfg = setup_config(cfg)
-
     logger.info("Инициализация компонентов для оценки...")
-    # 1. Резолвинг артефактов (Энкодер + БД)
+
+    # 1. Резолвинг артефактов
     router = hydra.utils.instantiate(cfg.storage_router)
     cache_base = Path(cfg.paths.model_dir) / "decoder_cache"
     resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
 
-    manifest_uri = cfg.manifest.uri
-
     try:
         _, lora_path = resolver.resolve_and_patch(
-            cfg, manifest_uri, pipeline_name="decoder_pipeline"
+            cfg, cfg.manifest.uri, pipeline_name="decoder_pipeline"
         )
     except Exception as e:
-        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов RAG: %s", e)
+        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов: %s", e)
         sys.exit(1)
 
-    # 2. Сборка Энкодера (с уже пропатченными локальными путями)
-    tokenizer = hydra.utils.instantiate(cfg.decoder_pipeline.model.tokenizer).build()
+    # 2. Сборка модели
+    base_model, tokenizer = build_decoder_model(cfg, lora_path)
 
-    # Отключаем модификаторы — при инференсе не нужны
-    OmegaConf.update(cfg, "decoder_pipeline.model.builder.modifiers", None, force_add=True)
-
-    builder = hydra.utils.instantiate(cfg.decoder_pipeline.model.builder)
-    base_model = builder.build(tokenizer=tokenizer)
-
-    # Навешиваем адаптер явно если lora-режим
-    if lora_path:
-        from peft import PeftModel
-
-        logger.info("LoRA: загрузка адаптера из '%s'", lora_path)
-        base_model = PeftModel.from_pretrained(base_model, str(lora_path), is_trainable=False)
-
+    # 3. LightningModule, DataModule, Trainer
     model_module = CausalLMLightningModule(
         model=base_model,
         optimizer_cfg=hydra.utils.instantiate(cfg.decoder_pipeline.optimizer),
@@ -87,8 +85,11 @@ def evaluate(cfg: DictConfig) -> None:
         else None,
     )
     datamodule = DataModule(data_cfg=cfg.decoder_pipeline.data, tokenizer=tokenizer)
-    training = hydra.utils.instantiate(cfg.decoder_pipeline.training)
+    trainer = hydra.utils.instantiate(cfg.decoder_pipeline.training)
 
+    # 4. Опциональная загрузка кастомного чекпоинта
+    # ckpt_path=None → trainer.test() использует best_model_path из ModelCheckpoint.
+    # ckpt_path задан → грузим веса вручную, передаём ckpt_path=None в test().
     ckpt_path = cfg.get("ckpt_path")
     if ckpt_path:
         logger.info("Загрузка кастомного Lightning-чекпоинта из: %s", ckpt_path)
@@ -96,11 +97,12 @@ def evaluate(cfg: DictConfig) -> None:
         model_module.model = load_checkpoint(model_module.model, ckpt_path, device="cpu")
         ckpt_path = None
 
+    # 5. Тест и экспорт метрик
     logger.info("Старт процесса оценки...")
-    results = training.test(model=model_module, datamodule=datamodule, ckpt_path=ckpt_path)
+    results = trainer.test(model=model_module, datamodule=datamodule, ckpt_path=ckpt_path)
 
     if not results:
-        logger.warning("training.test() вернул пустые результаты.")
+        logger.warning("trainer.test() вернул пустые результаты.")
         return
 
     metrics = results[0]
@@ -110,6 +112,7 @@ def evaluate(cfg: DictConfig) -> None:
         json.dump(metrics, f, indent=4, ensure_ascii=False)
     logger.info("Метрики успешно экспортированы в %s", metrics_file)
 
+    # 6. Drift-check (опционально — только если задан порог)
     drift_threshold = cfg.get("drift_threshold")
     if drift_threshold is not None:
         _check_drift(
@@ -120,26 +123,7 @@ def evaluate(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
-    expected_pipeline = "decoder_pipeline"
+    from src.utils.cli import enforce_pipeline
 
-    # Ищем, передал ли пользователь аргумент pipeline_name=...
-    pipeline_arg_idx = next(
-        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
-    )
-
-    if pipeline_arg_idx is not None:
-        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
-        if current_pipeline != expected_pipeline:
-            logger.warning(
-                "ВНИМАНИЕ! Запущен RAG-скрипт, но передано pipeline_name=%s. "
-                "Принудительно переопределяем на '%s' для предотвращения сбоя конфигов Hydra.",
-                current_pipeline,
-                expected_pipeline,
-            )
-            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
-    else:
-        # Если аргумент не передан CLI, Hydra возьмет дефолт из main.yaml.
-        # Защищаемся от неправильного дефолта, добавляя аргумент явно:
-        sys.argv.append(f"pipeline_name={expected_pipeline}")
-
+    enforce_pipeline("decoder_pipeline")
     evaluate()

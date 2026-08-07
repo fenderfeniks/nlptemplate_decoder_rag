@@ -1,15 +1,18 @@
+# scripts/decoder/infer.py
+"""Smoke-тест и пакетный инференс декодер-пайплайна."""
+
 import asyncio
 import gc
 import json
 import logging
-import sys
 import time
 from pathlib import Path
 
 import hydra
 import torch
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
+from src.pipelines.decoder.inference.builder import build_decoder_model
 from src.pipelines.decoder.inference.generator import HFTextGenerator
 from src.pipelines.decoder.inference.inference import LLMGenerationClient
 from src.tools.storage.resolver import ArtifactResolver
@@ -26,36 +29,23 @@ def infer(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
     logger.info("Инициализация decoder-пайплайна...")
 
-    # 1. Резолвинг артефактов (Энкодер + БД)
+    # 1. Резолвинг артефактов
     router = hydra.utils.instantiate(cfg.storage_router)
     cache_base = Path(cfg.paths.model_dir) / "decoder_cache"
     resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
 
-    manifest_uri = cfg.manifest.uri
-
     try:
         _, lora_path = resolver.resolve_and_patch(
-            cfg, manifest_uri, pipeline_name="decoder_pipeline"
+            cfg, cfg.manifest.uri, pipeline_name="decoder_pipeline"
         )
     except Exception as e:
-        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов RAG: %s", e)
+        import sys
+
+        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов: %s", e)
         sys.exit(1)
 
-    # 2. Сборка Энкодера (с уже пропатченными локальными путями)
-    tokenizer = hydra.utils.instantiate(cfg.decoder_pipeline.model.tokenizer).build()
-
-    # Отключаем модификаторы — при инференсе не нужны
-    OmegaConf.update(cfg, "decoder_pipeline.model.builder.modifiers", None, force_add=True)
-
-    builder = hydra.utils.instantiate(cfg.decoder_pipeline.model.builder)
-    base_model = builder.build(tokenizer=tokenizer)
-
-    # Навешиваем адаптер явно если lora-режим
-    if lora_path:
-        from peft import PeftModel
-
-        logger.info("LoRA: загрузка адаптера из '%s'", lora_path)
-        base_model = PeftModel.from_pretrained(base_model, str(lora_path), is_trainable=False)
+    # 2. Сборка модели
+    base_model, tokenizer = build_decoder_model(cfg, lora_path)
 
     # 3. Сборка генератора
     generator = hydra.utils.instantiate(
@@ -67,8 +57,9 @@ def infer(cfg: DictConfig) -> None:
     _free_memory()
 
     # 4. Пакетная или одиночная генерация
-    input_file = cfg.decoder_pipeline.inference.get("input_file")
-    output_file = cfg.decoder_pipeline.inference.get("output_file", "predictions.jsonl")
+    inference_cfg = cfg.decoder_pipeline.inference
+    input_file = inference_cfg.get("input_file")
+    output_file = inference_cfg.get("output_file", "predictions.jsonl")
     query = str(cfg.get("text", "Объясни, что такое Retrieval-Augmented Generation (RAG)."))
 
     if input_file and Path(input_file).exists():
@@ -130,7 +121,7 @@ def _run_batch(generator, tokenizer, input_file: str, output_file: str) -> None:
     with open(output_file, "w", encoding="utf-8") as f:
         f.writelines(
             json.dumps({"prompt": q, "generated": gen}, ensure_ascii=False) + "\n"
-            for q, gen in zip(queries, generated_texts)  # noqa
+            for q, gen in zip(queries, generated_texts)  # noqa: B905
         )
     logger.info("Результаты сохранены в %s", output_file)
 
@@ -157,26 +148,7 @@ def _run_single(generator, tokenizer, query: str) -> None:
 
 
 if __name__ == "__main__":
-    expected_pipeline = "decoder_pipeline"
+    from src.utils.cli import enforce_pipeline
 
-    # Ищем, передал ли пользователь аргумент pipeline_name=...
-    pipeline_arg_idx = next(
-        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
-    )
-
-    if pipeline_arg_idx is not None:
-        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
-        if current_pipeline != expected_pipeline:
-            logger.warning(
-                "ВНИМАНИЕ! Запущен RAG-скрипт, но передано pipeline_name=%s. "
-                "Принудительно переопределяем на '%s' для предотвращения сбоя конфигов Hydra.",
-                current_pipeline,
-                expected_pipeline,
-            )
-            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
-    else:
-        # Если аргумент не передан CLI, Hydra возьмет дефолт из main.yaml.
-        # Защищаемся от неправильного дефолта, добавляя аргумент явно:
-        sys.argv.append(f"pipeline_name={expected_pipeline}")
-
+    enforce_pipeline("decoder_pipeline")
     infer()

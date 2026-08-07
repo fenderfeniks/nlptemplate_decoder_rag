@@ -1,23 +1,55 @@
 import logging
 
+import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from omegaconf import DictConfig, OmegaConf
 
 from src.vector_store.base import BaseVectorStore
-from src.vector_store.faiss_store import FAISSVectorStore
 
 
 logger = logging.getLogger(__name__)
 
 
 class RetrievalEvaluationCallback(pl.Callback):
-    """Callback для оценки качества ретривала в конце каждой валидационной эпохи."""
+    """Callback для оценки качества ретривала в конце каждой валидационной эпохи.
 
-    def __init__(self, top_k: int = 10) -> None:
+    Создаёт эфемерную векторную БД на каждую val-эпоху: построили индекс,
+    посчитали метрики, при следующей эпохе — reset(). Манифест не трогает:
+    это задача index_database(), а не eval-колбэка.
+
+    Args:
+        vector_db_cfg: DictConfig секции vector_db из основного конфига.
+            Ключ ``loader`` фильтруется автоматически — БД всегда создаётся
+            пустой, загрузка существующей при eval не нужна.
+        top_k: Глубина ранжирования для MRR / Recall / NDCG.
+    """
+
+    def __init__(self, vector_db_cfg: DictConfig, top_k: int = 10) -> None:
         super().__init__()
         self.top_k = top_k
+        # Фильтруем loader: directory ещё не существует, да и не нужен —
+        # eval-БД всегда создаётся пустой заново.
+        self._vector_db_cfg: DictConfig = OmegaConf.create(
+            {
+                k: v
+                for k, v in OmegaConf.to_container(vector_db_cfg, resolve=True).items()
+                if k != "loader"
+            }
+        )
         self.vector_db: BaseVectorStore | None = None
+
+    # ------------------------------------------------------------------
+    # Приватные методы
+    # ------------------------------------------------------------------
+
+    def _build_vector_db(self, embedding_dim: int) -> BaseVectorStore:
+        """Инстанцирует новую пустую БД через Hydra по конфигу из трейнера."""
+        # embedding_dim может меняться если модель пересоздаётся между запусками.
+        # Передаём его явно — это единственный параметр, которого нет в cfg,
+        # потому что он известен только после первого прогона forward.
+        return hydra.utils.instantiate(self._vector_db_cfg, embedding_dim=embedding_dim)
 
     @torch.inference_mode()
     def _extract_embeddings(
@@ -51,7 +83,7 @@ class RetrievalEvaluationCallback(pl.Callback):
 
         # Явная очистка GPU-кэша после прогона всего val датасета.
         # inference_mode() не освобождает кэш автоматически — делаем это руками
-        # чтобы не держать фрагментированную VRAM пока строится FAISS-индекс.
+        # чтобы не держать фрагментированную VRAM пока строится индекс.
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -59,6 +91,28 @@ class RetrievalEvaluationCallback(pl.Callback):
             np.concatenate(query_embs, axis=0),
             np.concatenate(doc_embs, axis=0),
         )
+
+    def _prepare_vector_db(self, embedding_dim: int) -> None:
+        """Создаёт БД при первом вызове или пересоздаёт при смене embedding_dim.
+
+        При совпадающем embedding_dim просто сбрасывает индекс через reset() —
+        это дешевле чем пересоздавать объект каждую эпоху.
+        """
+        if self.vector_db is None:
+            self.vector_db = self._build_vector_db(embedding_dim)
+        elif self.vector_db.embedding_dim != embedding_dim:
+            logger.warning(
+                "RetrievalEval: embedding_dim изменился (%d → %d) — пересоздаём индекс.",
+                self.vector_db.embedding_dim,
+                embedding_dim,
+            )
+            self.vector_db = self._build_vector_db(embedding_dim)
+        else:
+            self.vector_db.reset()
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         if trainer.sanity_checking:
@@ -75,7 +129,7 @@ class RetrievalEvaluationCallback(pl.Callback):
         n_queries = len(query_embs)
 
         # Предупреждение о потенциальном OOM: храним 2×N эмбеддингов в numpy
-        # плюс FAISS дублирует doc_embs в _metadata. Для больших val-сетов
+        # плюс БД дублирует doc_embs в метаданных. Для больших val-сетов
         # рассмотрите уменьшение val_size или переход на Qdrant-бэкенд.
         emb_mb = (query_embs.nbytes + doc_embs.nbytes) / 1024**2
         if emb_mb > 512:
@@ -84,23 +138,9 @@ class RetrievalEvaluationCallback(pl.Callback):
                 "При OOM уменьшите val_size или top_k.",
                 emb_mb,
             )
-        embedding_dim = doc_embs.shape[1]
 
-        if self.vector_db is None or self.vector_db.embedding_dim != embedding_dim:
-            if self.vector_db is not None:
-                logger.warning(
-                    "RetrievalEval: embedding_dim изменился (%d → %d) — пересоздаём индекс.",
-                    self.vector_db.embedding_dim,
-                    embedding_dim,
-                )
-            # Инстанцируем конкретную реализацию FAISSVectorStore
-            self.vector_db = FAISSVectorStore(
-                embedding_dim=embedding_dim,
-                index_type="flat",
-                normalize_embeddings=True,
-            )
-        else:
-            self.vector_db.reset()
+        embedding_dim = doc_embs.shape[1]
+        self._prepare_vector_db(embedding_dim)
 
         metadata = [{"doc_id": i} for i in range(n_queries)]
         self.vector_db.insert(doc_embs, metadata)

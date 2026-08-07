@@ -4,7 +4,6 @@
 import gc
 import logging
 import sys
-from pathlib import Path
 
 import hydra
 import pytorch_lightning as pl
@@ -17,105 +16,17 @@ from peft import PeftModel
 load_dotenv()
 
 from src.pipelines.base.core.data.builder import DataModule  # noqa: E402
-from src.pipelines.rag.training.module import RAGLightningModule  # noqa: E402
+from src.pipelines.rag.training.builder import build_rag_module  # noqa: E402
+from src.pipelines.rag.training.evaluate import run_post_training_evaluation  # noqa: E402
 from src.utils.hydra_utils import setup_config  # noqa: E402
 from src.utils.logger import setup_logging  # noqa: E402
-from src.utils.mlflow import log_lora_to_mlflow, resolve_lora_resume_path  # noqa: E402
+from src.utils.mlflow import extract_mlflow_run_id, log_lora_to_mlflow  # noqa: E402
 from src.utils.torch_utils import register_safe_globals  # noqa: E402
+from src.utils.training_utils import resolve_resume_path  # noqa: E402
 
 
 setup_logging()
 logger = logging.getLogger(__name__)
-
-
-def _extract_mlflow_run_id(training: pl.Trainer) -> str | None:
-    """Извлекает MLflow run_id из логгера тренера или активного run.
-
-    Пробует несколько способов — разные версии Lightning-MLflow интеграции
-    хранят run_id под разными атрибутами.
-    """
-    if not training.logger:
-        return None
-
-    for attr in ("run_id", "_run_id", "runid"):
-        val = getattr(training.logger, attr, None)
-        if val:
-            return val
-
-    try:
-        import mlflow
-
-        active = mlflow.active_run()
-        if active:
-            return active.info.run_id
-    except Exception:
-        pass
-
-    return None
-
-
-def _run_post_training_evaluation(
-    training: pl.Trainer,
-    model_module: RAGLightningModule,
-    datamodule: pl.LightningDataModule,
-) -> float | None:
-    """Прогоняет валидацию на лучшем чекпоинте и возвращает MRR как best_score.
-
-    Отличие от декодера: RAG не имеет test_step с метрикой потерь.
-    Качество меряется через RetrievalEvaluationCallback (MRR@K, Recall@K, NDCG@K),
-    который вызывается в on_validation_epoch_end. Поэтому запускаем
-    training.validate() на лучшем чекпоинте и читаем val_mrr из logged metrics.
-
-    Args:
-        training: Обученный training с checkpoint_callback.
-        model_module: Текущий LightningModule.
-        datamodule: DataModule для валидации.
-
-    Returns:
-        val_mrr как float, или None если чекпоинт/метрика не найдены.
-    """
-    best_ckpt_path = training.checkpoint_callback.best_model_path
-
-    if not best_ckpt_path:
-        logger.warning("Лучший чекпоинт не найден — оцениваем на текущих весах (last state)...")
-        training.validate(model=model_module, datamodule=datamodule)
-    else:
-        register_safe_globals()
-        logger.info("Загрузка лучших весов из '%s'...", best_ckpt_path)
-
-        checkpoint = torch.load(
-            best_ckpt_path,
-            map_location=model_module.device,
-            weights_only=False,
-        )
-        # Загружаем только LoRA-веса — базовая модель остаётся замороженной
-        lora_state_dict = {k: v for k, v in checkpoint["state_dict"].items() if "lora_" in k}
-        model_module.load_state_dict(lora_state_dict, strict=False)
-        logger.info("LoRA-веса загружены (%d тензоров).", len(lora_state_dict))
-
-        logger.info("Оценка на валидационной выборке (best model)...")
-        training.validate(model=model_module, datamodule=datamodule)
-
-    # Извлекаем val_mrr из logged_metrics — RetrievalEvaluationCallback
-    # пишет его через pl_module.log("val_mrr", ...) в on_validation_epoch_end.
-    logged = training.logged_metrics
-    mrr = logged.get("val_mrr")
-    if mrr is not None:
-        score = float(mrr)
-        logger.info("Best model val_mrr = %.4f", score)
-        return score
-
-    # Fallback: берём best_model_score из checkpoint_callback
-    # (если мониторим val_mrr через ModelCheckpoint)
-    ckpt_score = training.checkpoint_callback.best_model_score
-    if ckpt_score is not None:
-        return float(ckpt_score)
-
-    logger.warning(
-        "val_mrr не найден в logged_metrics и checkpoint_callback. "
-        "Проверьте, что RetrievalEvaluationCallback добавлен в training callbacks."
-    )
-    return None
 
 
 @hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
@@ -125,11 +36,12 @@ def train(cfg: DictConfig) -> None:
     Ожидает конфиг с ``rag_pipeline.data.task='contrastive'``.
 
     Полный цикл:
-    1. Сборка токенизатора, энкодера, пулера, loss.
-    2. DataModule в режиме contrastive.
-    3. training.fit() с auto-resume из last.ckpt.
-    4. Post-training evaluation на лучшем чекпоинте.
-    5. Сохранение LoRA-адаптера в MLflow (если PEFT).
+        1. Сборка модуля (токенизатор → энкодер → пулер → loss → LightningModule).
+        2. DataModule в режиме contrastive.
+        3. Trainer из конфига.
+        4. Trainer.fit() с auto-resume из last.ckpt.
+        5. Post-training evaluation на лучшем чекпоинте (через val + RetrievalEvaluationCallback).
+        6. Сохранение LoRA-адаптера в MLflow (если PEFT).
     """
     cfg = setup_config(cfg)
     logger.info("Старт обучения RAG-энкодера...")
@@ -142,63 +54,24 @@ def train(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.seed, workers=True)
 
-    # ── 1. Токенизатор ───────────────────────────────────────────────────────
-    logger.info(
-        "Загрузка токенизатора: %s",
-        cfg.rag_pipeline.model.builder.model_name_or_path,
-    )
-    tokenizer = hydra.utils.instantiate(cfg.rag_pipeline.model.tokenizer).build()
+    # ── 1. Модуль ────────────────────────────────────────────────────────────
+    model_module, base_model, tokenizer = build_rag_module(cfg)
 
-    # ── 2. Энкодер ───────────────────────────────────────────────────────────
-    lora_resume_path = resolve_lora_resume_path(cfg.rag_pipeline.model.get("lora_resume", {}))
-
-    logger.info("Сборка энкодера...")
-    builder = hydra.utils.instantiate(cfg.rag_pipeline.model.builder)
-    builder.lora_resume_path = lora_resume_path
-    base_model = builder.build(tokenizer=tokenizer)
-
-    # ── 3. Пулер и Loss ──────────────────────────────────────────────────────
-    pooler = hydra.utils.instantiate(cfg.rag_pipeline.model.pooling)
-    loss_fn = hydra.utils.instantiate(cfg.rag_pipeline.loss)
-
-    # ── 4. DataModule (режим contrastive) ────────────────────────────────────
+    # ── 2. DataModule ────────────────────────────────────────────────────────
     logger.info("Инициализация DataModule...")
     datamodule = DataModule(data_cfg=cfg.rag_pipeline.data, tokenizer=tokenizer)
 
-    # ── 5. LightningModule ───────────────────────────────────────────────────
-    model_module = RAGLightningModule(
-        model=base_model,
-        pooler=pooler,
-        loss_fn=loss_fn,
-        optimizer_cfg=hydra.utils.instantiate(cfg.rag_pipeline.optimizer),
-        scheduler_cfg=hydra.utils.instantiate(cfg.rag_pipeline.scheduler)
-        if "scheduler" in cfg.rag_pipeline
-        else None,
-    )
+    # ── 3. Trainer ───────────────────────────────────────────────────────────
+    logger.info("Инициализация Trainer...")
+    trainer = hydra.utils.instantiate(cfg.rag_pipeline.training)
 
-    if cfg.rag_pipeline.model.get("compile", False):
-        logger.info("torch.compile: компиляция графа энкодера...")
-        model_module.model = torch.compile(model_module.model)
-
-    # ── 6. training ───────────────────────────────────────────────────────────
-    logger.info("Инициализация training...")
-    training = hydra.utils.instantiate(cfg.rag_pipeline.training)
-
-    # ── 7. Auto-resume ───────────────────────────────────────────────────────
-    resume_path = None
-    if cfg.get("resume_training", False):
-        last_ckpt = Path(cfg.paths.log_dir) / "checkpoints" / "last.ckpt"
-        if last_ckpt.exists():
-            resume_path = str(last_ckpt)
-            logger.info("Resume: найден чекпоинт '%s'", resume_path)
-        else:
-            logger.warning("resume_training=True, но last.ckpt не найден — старт с нуля.")
-
-    # ── 8. Обучение ──────────────────────────────────────────────────────────
+    # ── 4. Обучение с auto-resume ────────────────────────────────────────────
     register_safe_globals()
+    resume_path = resolve_resume_path(cfg)
     best_score = None
+
     try:
-        training.fit(model=model_module, datamodule=datamodule, ckpt_path=resume_path)
+        trainer.fit(model=model_module, datamodule=datamodule, ckpt_path=resume_path)
         logger.info("Обучение завершено.")
     except KeyboardInterrupt:
         logger.warning("Прервано (Ctrl+C) — переход к сохранению артефактов...")
@@ -206,21 +79,21 @@ def train(cfg: DictConfig) -> None:
         logger.exception("Критическая ошибка во время обучения:")
         raise
     finally:
-        mlflow_run_id = _extract_mlflow_run_id(training)
+        mlflow_run_id = extract_mlflow_run_id(trainer)
         logger.info("MLflow run_id: %s", mlflow_run_id)
 
-        # Post-training evaluation на лучшем чекпоинте
-        best_score = _run_post_training_evaluation(training, model_module, datamodule)
+        # ── 5. Post-training evaluation ──────────────────────────────────────
+        best_score = run_post_training_evaluation(trainer, model_module, datamodule)
 
         # Освобождаем VRAM до MLflow-логирования
         logger.info("Очистка памяти GPU...")
-        del training
+        del trainer
         del datamodule
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        # Сохранение LoRA-адаптера в MLflow
+        # ── 6. MLflow: сохранение LoRA-адаптера ─────────────────────────────
         is_peft = isinstance(base_model, PeftModel)
         if is_peft and best_score is not None and mlflow_run_id is not None:
             log_lora_to_mlflow(
@@ -242,26 +115,7 @@ def train(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
-    expected_pipeline = "rag_pipeline"
+    from src.utils.cli import enforce_pipeline
 
-    # Ищем, передал ли пользователь аргумент pipeline_name=...
-    pipeline_arg_idx = next(
-        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
-    )
-
-    if pipeline_arg_idx is not None:
-        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
-        if current_pipeline != expected_pipeline:
-            logger.warning(
-                "ВНИМАНИЕ! Запущен RAG-скрипт, но передано pipeline_name=%s. "
-                "Принудительно переопределяем на '%s' для предотвращения сбоя конфигов Hydra.",
-                current_pipeline,
-                expected_pipeline,
-            )
-            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
-    else:
-        # Если аргумент не передан CLI, Hydra возьмет дефолт из main.yaml.
-        # Защищаемся от неправильного дефолта, добавляя аргумент явно:
-        sys.argv.append(f"pipeline_name={expected_pipeline}")
-
+    enforce_pipeline("rag_pipeline")
     train()

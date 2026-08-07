@@ -61,7 +61,7 @@ storage_router:
 
 seed: 42
 max_length: 2048
-pipeline_name: "nli_pipeline"
+pipeline_name: "rag_pipeline"
 project_name: "industrial_nlp_template"
 
 system:

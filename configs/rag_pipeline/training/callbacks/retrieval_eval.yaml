@@ -1,2 +1,4 @@
 _target_: src.pipelines.rag.training.callbacks.RetrievalEvaluationCallback
+_recursive_: false
+vector_db_cfg: ${vector_db}
 top_k: 10

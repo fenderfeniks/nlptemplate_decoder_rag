@@ -31,12 +31,16 @@ dependencies = [
     "hydra-core>=1.3.2",
     "pydantic>=2.6.0",
     "python-dotenv>=1.0.0",
+    "omegaconf>=2.3.1",
     # Логирование и инфраструктура
     "python-json-logger>=2.0.0",
     "tomli>=2.0.0; python_version < '3.11'",
-    "sacrebleu>=2.6.0",
-    "faiss-cpu>=1.14.3",
     "boto3>=1.43.64",
+    "jinja2>=3.1.6",
+    "tqdm>=4.69.1",
+    "absl-py>=2.5.0",
+    "rouge-score>=0.1.2",
+    "sacrebleu>=2.6.0",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +56,16 @@ inference-core = [
 ]
 
 # ==========================================
+# НОВАЯ ГРУППА: RAG
+# Векторные базы данных и LlamaIndex (выделено из ядра)
+# ==========================================
+rag = [
+    "faiss-cpu>=1.14.3",
+    "qdrant-client>=1.19.0",
+    "llama-index>=0.14.23",
+]
+
+# ==========================================
 # ГРУППА 1: DATA
 # Подготовка и версионирование датасетов.
 # ==========================================
@@ -59,8 +73,7 @@ data = [
     "datasets>=2.17.0",
     "datasketch>=2.0.0",      # MinHash-дедупликация корпусов
     "dvc[gdrive]>=3.67.1",    # Версионирование данных
-    "pyopenssl>=26.2.0",      # OAuth для dvc[gdrive]
-    "cryptography>=48.0.1",   # OAuth для dvc[gdrive]
+    "kaggle>=1.6.0",
 ]
 
 # ==========================================
@@ -75,10 +88,7 @@ training = [
     "peft>=0.8.2",                      # LoRA / адаптеры
     "bitsandbytes>=0.46.1",             # Квантизация (QLoRA)
     "evaluate>=0.4.0",
-    "nltk>=3.10.0",                     # NLP-метрики
-    "rouge-score>=0.1.2",               # ROUGE для seq2seq
-    "absl-py>=2.5.0",                   # Зависимость rouge-score
-    "kaggle>=1.6.0",
+    #"flash-attn>=2.5.0",                # Внимание (из отчета deptry)
 ]
 
 # ==========================================
@@ -86,8 +96,8 @@ training = [
 # ==========================================
 api = [
     "fastapi>=0.110.0",
-    "uvicorn[standard]>=0.27.0",
     "starlette>=0.36.0",
+    "uvicorn[standard]>=0.27.0",
     "aiogram>=3.4.0",
     "aiohttp>=3.9.3",
     "redis>=8.0.1",
@@ -128,14 +138,6 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.8.0",
     "decoder-template[experimentation]",
-]
-
-# ==========================================
-# ГРУППА 7: HPO (Подбор гиперпараметров)
-# ==========================================
-tune = [
-    "optuna>=3.6.0",
-    "optuna-integration>=3.6.0",
 ]
 
 # ==========================================
@@ -195,7 +197,7 @@ ignore = [
 unfixable = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["src"]
+known-first-party = ["src", "pipelines"]
 lines-after-imports = 2
 
 [tool.ruff.format]
@@ -205,3 +207,24 @@ skip-magic-trailing-comma = false
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+# ==========================================
+# НАСТРОЙКИ DEPTRY
+# ==========================================
+[tool.deptry]
+known_first_party = ["src", "pipelines"]
+
+[tool.deptry.per_rule_ignores]
+# Игнорируем tomllib, так как это встроенная библиотека в Python 3.11+
+DEP001 = ["tomllib"]
+
+# Игнорируем утилиты, ноутбуки, ссылки на сам проект и неявные вызовы
+DEP002 = [
+    "dvc", "uvicorn", "apache-airflow", "apache-airflow-providers-cncf-kubernetes", 
+    "apache-airflow-providers-slack", "pendulum", "streamlit",
+    "torchmetrics", "accelerate", "bitsandbytes", 
+    "scikit-learn", "matplotlib", "seaborn",
+    "aiohttp", "requests", "redis",
+    # Новые исключения для dev-тулзов и самого проекта:
+    "jupyterlab", "pytest", "pytest-asyncio", "ruff", "mypy", "decoder-template"
+]

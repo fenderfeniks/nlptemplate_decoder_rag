@@ -1,9 +1,8 @@
-# scripts/train.py
+# scripts/decoder/train.py
 """Оркестратор обучения Causal LM."""
 
 import gc
 import logging
-import sys
 from pathlib import Path
 
 import hydra
@@ -17,10 +16,14 @@ from peft import PeftModel
 load_dotenv()
 
 from src.pipelines.base.core.data.builder import DataModule  # noqa: E402
-from src.pipelines.decoder.training.module import CausalLMLightningModule  # noqa: E402
+from src.pipelines.decoder.training.builder import build_decoder_module  # noqa: E402
+from src.pipelines.decoder.training.evaluate import (  # noqa: E402
+    extract_mlflow_run_id,
+    run_post_training_evaluation,
+)
 from src.utils.hydra_utils import setup_config  # noqa: E402
 from src.utils.logger import setup_logging  # noqa: E402
-from src.utils.mlflow import log_lora_to_mlflow, resolve_lora_resume_path  # noqa: E402
+from src.utils.mlflow import log_lora_to_mlflow  # noqa: E402
 from src.utils.torch_utils import register_safe_globals  # noqa: E402
 
 
@@ -28,60 +31,18 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
-def _extract_mlflow_run_id(training: pl.Trainer) -> str | None:
-    if not training.logger:
-        return None
-
-    for attr in ("run_id", "_run_id", "runid"):
-        val = getattr(training.logger, attr, None)
-        if val:
-            return val
-
-    try:
-        import mlflow
-
-        active = mlflow.active_run()
-        if active:
-            return active.info.run_id
-    except Exception:
-        pass
-
-    return None
-
-
-def _run_post_training_evaluation(
-    training: pl.Trainer,
-    model_module: CausalLMLightningModule,
-    datamodule: pl.LightningDataModule,
-) -> float | None:
-    best_ckpt_path = training.checkpoint_callback.best_model_path
-
-    if not best_ckpt_path:
-        logger.warning("Лучший чекпоинт не найден. Запускаем тест на текущих весах (last state)...")
-        training.test(model=model_module, datamodule=datamodule)
-        return None
-
-    register_safe_globals()
-    logger.info("Загрузка лучших весов из %s...", best_ckpt_path)
-
-    checkpoint = torch.load(best_ckpt_path, map_location=model_module.device, weights_only=False)
-    lora_state_dict = {k: v for k, v in checkpoint["state_dict"].items() if "lora_" in k}
-    logger.info(
-        "LoRA тензоров найдено: %d. Ключи: %s",
-        len(lora_state_dict),
-        list(lora_state_dict.keys())[:5],
-    )
-    model_module.load_state_dict(lora_state_dict, strict=False)
-
-    logger.info("Тестирование на отложенной выборке (best model)...")
-    training.test(model=model_module, datamodule=datamodule)
-
-    score = training.checkpoint_callback.best_model_score
-    return float(score) if score is not None else None
-
-
 @hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
 def train(cfg: DictConfig) -> None:
+    """Обучение Causal LM (SFT / CPT).
+
+    Полный цикл:
+        1. Сборка модуля (токенизатор → модель → LightningModule).
+        2. DataModule.
+        3. Trainer из конфига.
+        4. Trainer.fit() с auto-resume из last.ckpt.
+        5. Post-training evaluation на лучшем чекпоинте.
+        6. Сохранение LoRA-адаптера в MLflow (если PEFT).
+    """
     cfg = setup_config(cfg)
     logger.info("Старт обучения...")
 
@@ -93,58 +54,18 @@ def train(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.seed, workers=True)
 
-    # ── 1. Токенизатор ───────────────────────────────────────────────────────
-    logger.info(
-        "Загрузка токенизатора: %s", cfg.decoder_pipeline.model.architecture.model_name_or_path
-    )
-    tokenizer = hydra.utils.instantiate(cfg.decoder_pipeline.model.tokenizer).build()
+    # ── 1. Модуль ────────────────────────────────────────────────────────────
+    model_module, base_model, tokenizer = build_decoder_module(cfg)
 
-    # ── 2. Модель ────────────────────────────────────────────────────────────
-    lora_resume_path = resolve_lora_resume_path(cfg.decoder_pipeline.model.get("lora_resume", {}))
-
-    logger.info("Сборка модели...")
-    builder = hydra.utils.instantiate(cfg.decoder_pipeline.model.builder)
-    builder.lora_resume_path = lora_resume_path
-    base_model = builder.build(tokenizer=tokenizer)
-
-    # ── 3. DataModule ─────────────────────────────────────────────────────────
+    # ── 2. DataModule ────────────────────────────────────────────────────────
     logger.info("Инициализация DataModule...")
     datamodule = DataModule(data_cfg=cfg.decoder_pipeline.data, tokenizer=tokenizer)
 
-    # ── 4. LightningModule (с определением task_mode) ─────────────────────────
-    data_cfg = cfg.decoder_pipeline.data
-    task_val = (
-        data_cfg.get("task") if isinstance(data_cfg, dict) else getattr(data_cfg, "task", None)
-    )
+    # ── 3. Trainer ───────────────────────────────────────────────────────────
+    logger.info("Инициализация Trainer...")
+    trainer = hydra.utils.instantiate(cfg.decoder_pipeline.training)
 
-    if task_val in ["sft", "cpt"]:
-        task_mode = task_val
-    else:
-        has_prompt = (
-            bool(data_cfg.get("prompt_column"))
-            if isinstance(data_cfg, dict)
-            else bool(getattr(data_cfg, "prompt_column", None))
-        )
-        task_mode = "sft" if has_prompt else "cpt"
-
-    model_module = CausalLMLightningModule(
-        model=base_model,
-        optimizer_cfg=hydra.utils.instantiate(cfg.decoder_pipeline.optimizer),
-        scheduler_cfg=hydra.utils.instantiate(cfg.decoder_pipeline.scheduler)
-        if "scheduler" in cfg.decoder_pipeline
-        else None,
-        task_mode=task_mode,
-    )
-
-    if cfg.decoder_pipeline.model.get("compile", False):
-        logger.info("torch.compile включён — компиляция графа вычислений...")
-        model_module.model = torch.compile(model_module.model)
-
-    # ── 5. training ────────────────────────────────────────────────────────────
-    logger.info("Инициализация training...")
-    training = hydra.utils.instantiate(cfg.decoder_pipeline.training)
-
-    # ── 6. Auto-resume ────────────────────────────────────────────────────────
+    # ── 4. Auto-resume ────────────────────────────────────────────────────────
     resume_path = None
     if cfg.get("resume_training", False):
         last_ckpt = Path(cfg.paths.log_dir) / "checkpoints" / "last.ckpt"
@@ -154,11 +75,12 @@ def train(cfg: DictConfig) -> None:
         else:
             logger.warning("resume_training=True, но last.ckpt не найден — старт с нуля.")
 
-    # ── 7. Обучение ───────────────────────────────────────────────────────────
+    # ── 5. Обучение ───────────────────────────────────────────────────────────
     register_safe_globals()
     best_score = None
+
     try:
-        training.fit(model=model_module, datamodule=datamodule, ckpt_path=resume_path)
+        trainer.fit(model=model_module, datamodule=datamodule, ckpt_path=resume_path)
         logger.info("Обучение завершено.")
     except KeyboardInterrupt:
         logger.warning("Прервано (Ctrl+C) — переход к сохранению артефактов...")
@@ -166,19 +88,20 @@ def train(cfg: DictConfig) -> None:
         logger.exception("Критическая ошибка во время обучения:")
         raise
     finally:
-        mlflow_run_id = _extract_mlflow_run_id(training)
+        mlflow_run_id = extract_mlflow_run_id(trainer)
         logger.info("MLflow run_id: %s", mlflow_run_id)
 
-        if not getattr(training, "tested", False):
-            best_score = _run_post_training_evaluation(training, model_module, datamodule)
+        if not getattr(trainer, "tested", False):
+            best_score = run_post_training_evaluation(trainer, model_module, datamodule)
 
         logger.info("Очистка памяти GPU...")
-        del training
+        del trainer
         del datamodule
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+        # ── 6. MLflow: сохранение LoRA-адаптера ─────────────────────────────
         is_peft = isinstance(base_model, PeftModel)
         if is_peft and best_score is not None and mlflow_run_id is not None:
             log_lora_to_mlflow(
@@ -200,26 +123,7 @@ def train(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
-    expected_pipeline = "decoder_pipeline"
+    from src.utils.cli import enforce_pipeline
 
-    # Ищем, передал ли пользователь аргумент pipeline_name=...
-    pipeline_arg_idx = next(
-        (i for i, arg in enumerate(sys.argv) if arg.startswith("pipeline_name=")), None
-    )
-
-    if pipeline_arg_idx is not None:
-        current_pipeline = sys.argv[pipeline_arg_idx].split("=")[1]
-        if current_pipeline != expected_pipeline:
-            logger.warning(
-                "ВНИМАНИЕ! Запущен RAG-скрипт, но передано pipeline_name=%s. "
-                "Принудительно переопределяем на '%s' для предотвращения сбоя конфигов Hydra.",
-                current_pipeline,
-                expected_pipeline,
-            )
-            sys.argv[pipeline_arg_idx] = f"pipeline_name={expected_pipeline}"
-    else:
-        # Если аргумент не передан CLI, Hydra возьмет дефолт из main.yaml.
-        # Защищаемся от неправильного дефолта, добавляя аргумент явно:
-        sys.argv.append(f"pipeline_name={expected_pipeline}")
-
+    enforce_pipeline("decoder_pipeline")
     train()
