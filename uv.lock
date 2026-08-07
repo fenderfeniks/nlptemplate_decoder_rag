@@ -1347,6 +1347,7 @@ source = { editable = "." }
 dependencies = [
     { name = "absl-py" },
     { name = "boto3" },
+    { name = "faiss-cpu" },
     { name = "huggingface-hub" },
     { name = "hydra-core" },
     { name = "jinja2" },
@@ -1459,6 +1460,7 @@ requires-dist = [
     { name = "decoder-template", extras = ["experimentation"], marker = "extra == 'dev'" },
     { name = "dvc", extras = ["gdrive"], marker = "extra == 'data'", specifier = ">=3.67.1" },
     { name = "evaluate", marker = "extra == 'training'", specifier = ">=0.4.0" },
+    { name = "faiss-cpu", specifier = ">=1.15.0" },
     { name = "faiss-cpu", marker = "extra == 'rag'", specifier = ">=1.14.3" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.110.0" },
     { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27.0" },
