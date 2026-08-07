@@ -3,7 +3,6 @@
 
 import gc
 import logging
-import sys
 
 import hydra
 import pytorch_lightning as pl
