@@ -27,7 +27,7 @@ help:
 # MLflow UI
 # ==========================================
 mlflow:
-	@echo Запуск MLflow UI...
+	@echo "Запуск MLflow UI..."
 	@python scripts/mlflow_ui.py
 
 install:
@@ -52,9 +52,8 @@ api_rag:
 
 clean:
 	@echo "🧹 Очистка временных файлов и кэша..."
-	find . -type d -name "__pycache__" -exec rm -rf {} +
-	find . -type d -name ".pytest_cache" -exec rm -rf {} +
-	rm -rf .ruff_cache/
+	@python -c "import pathlib, shutil; dirs=['__pycache__', '.pytest_cache', '.ruff_cache']; [shutil.rmtree(p, ignore_errors=True) for d in dirs for p in pathlib.Path('.').rglob(d)]"
+	@echo "✨ Очистка завершена!"
 
 # --- Docker команды ---
 
