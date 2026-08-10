@@ -1,7 +1,5 @@
 from unittest.mock import patch
 
-import pytest
-
 from src.utils.mlflow.dependencies import (
     _strip_version_specifier,
     get_inference_pip_requirements,

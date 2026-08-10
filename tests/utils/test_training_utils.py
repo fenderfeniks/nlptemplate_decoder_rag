@@ -1,7 +1,5 @@
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from omegaconf import OmegaConf
 
 from src.utils.training_utils import resolve_resume_path

@@ -8,10 +8,8 @@ qdrant_client не устанавливается — мокируем цели�
 from __future__ import annotations
 
 import sys
-import uuid
 from types import ModuleType
-from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -107,7 +105,6 @@ class TestInit:
 
     def test_collection_created_when_not_exists(self, qdrant_mocks):
         _, mock_client, _ = qdrant_mocks
-        store = make_store(*qdrant_mocks)
         mock_client.create_collection.assert_called_once()
 
     def test_collection_not_recreated_when_exists(self, qdrant_mocks):
@@ -116,8 +113,6 @@ class TestInit:
         existing = MagicMock()
         existing.name = "knowledge_base"
         mock_client.get_collections.return_value.collections = [existing]
-
-        store = make_store(*qdrant_mocks)
         mock_client.create_collection.assert_not_called()
 
     def test_invalid_distance_raises(self, qdrant_mocks):

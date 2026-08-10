@@ -1,7 +1,5 @@
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.utils.mlflow.runner import extract_mlflow_run_id
 
 

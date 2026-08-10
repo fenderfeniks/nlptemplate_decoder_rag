@@ -1,8 +1,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.tools.storage.hf_hub import HFHubStorage
 
 

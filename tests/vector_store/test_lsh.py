@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import pickle
 import warnings
-from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -21,7 +20,7 @@ import pytest
 # тесты реального LSH всё равно упадут.
 datasketch = pytest.importorskip("datasketch", reason="datasketch не установлен")
 
-from src.vector_store.lsh import LSHIndex
+from src.vector_store.lsh import LSHIndex  # noqa
 
 
 # ---------------------------------------------------------------------------

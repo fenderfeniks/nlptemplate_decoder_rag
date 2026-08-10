@@ -1,9 +1,6 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-from omegaconf import OmegaConf
 
 
 # Импортируем функцию, если она была бы разбита, но так как вся логика в main(),
@@ -40,7 +37,7 @@ class TestMergeLoraManifest:
                 json.dump(manifest, f)
 
             # Проверки
-            with open(manifest_file, "r") as f:
+            with open(manifest_file) as f:
                 new_manifest = json.load(f)
 
             assert new_manifest["load_type"] == "full_model"

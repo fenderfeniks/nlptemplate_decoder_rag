@@ -2,7 +2,6 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
 
 from src.utils.torch_utils import (
     BASE_SAFE_GLOBALS,

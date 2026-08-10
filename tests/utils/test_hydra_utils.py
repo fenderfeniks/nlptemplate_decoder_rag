@@ -6,7 +6,7 @@
 """
 
 import logging
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from omegaconf import DictConfig, ListConfig, OmegaConf
@@ -179,14 +179,11 @@ class TestSetupConfig:
     @patch("src.utils.hydra_utils.OmegaConf.merge")
     def test_setup_config_sets_root_dir(self, mock_merge, mock_structured, mock_utf8):
         """setup_config выставляет paths.root_dir до резолва."""
-        from src.utils.hydra_utils import setup_config
 
         cfg = self._make_minimal_cfg()
         mock_structured.return_value = OmegaConf.create({})
         # merge возвращает тот же cfg (с уже выставленным root_dir)
         mock_merge.return_value = cfg
-
-        result = setup_config(cfg)
 
         # paths.root_dir должен быть выставлен
         assert cfg.paths.root_dir != ""

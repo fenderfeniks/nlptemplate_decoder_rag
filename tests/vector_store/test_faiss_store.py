@@ -8,10 +8,8 @@ faiss и numpy — реальные зависимости (они нужны в
 
 from __future__ import annotations
 
-import json
 import pickle
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -19,7 +17,7 @@ import pytest
 
 faiss = pytest.importorskip("faiss", reason="faiss не установлен")
 
-from src.vector_store.faiss_store import FAISSVectorStore
+from src.vector_store.faiss_store import FAISSVectorStore  # noqa
 
 
 DIM = 4

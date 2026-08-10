@@ -1,8 +1,6 @@
 import sys
 from unittest.mock import patch
 
-import pytest
-
 from src.utils.cli import enforce_pipeline
 
 
@@ -104,7 +102,6 @@ class TestEnforcePipeline:
         """При добавлении нового оверрайда логируется info."""
         with patch("src.utils.cli.logger") as mock_logger:
             run_enforce([], "rag_pipeline", "trainer=fast")
-            info_messages = [call.args[0] for call in mock_logger.info.call_args_list]
             assert any("trainer=fast" in str(call.args) for call in mock_logger.info.call_args_list)
 
     # ---------------------------------------------------------------------------

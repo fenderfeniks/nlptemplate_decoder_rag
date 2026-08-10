@@ -12,8 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from src.vector_store.base import BaseVectorStore
 
 
@@ -127,7 +125,6 @@ class TestBaseVectorStoreProtocol:
 
     def test_protocol_is_runtime_checkable(self):
         """Сам протокол помечен @runtime_checkable."""
-        import typing
 
         # hasattr проверяет, что протокол помечен runtime_checkable
         assert hasattr(BaseVectorStore, "__protocol_attrs__") or (

@@ -1,8 +1,6 @@
 import logging
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.utils.logger import NOISY_LOGGERS, setup_logging
 
 
