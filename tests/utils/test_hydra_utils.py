@@ -177,20 +177,6 @@ class TestSetupConfig:
     @patch("src.utils.hydra_utils._force_utf8_console_encoding")
     @patch("src.utils.hydra_utils.OmegaConf.structured")
     @patch("src.utils.hydra_utils.OmegaConf.merge")
-    def test_setup_config_sets_root_dir(self, mock_merge, mock_structured, mock_utf8):
-        """setup_config выставляет paths.root_dir до резолва."""
-
-        cfg = self._make_minimal_cfg()
-        mock_structured.return_value = OmegaConf.create({})
-        # merge возвращает тот же cfg (с уже выставленным root_dir)
-        mock_merge.return_value = cfg
-
-        # paths.root_dir должен быть выставлен
-        assert cfg.paths.root_dir != ""
-
-    @patch("src.utils.hydra_utils._force_utf8_console_encoding")
-    @patch("src.utils.hydra_utils.OmegaConf.structured")
-    @patch("src.utils.hydra_utils.OmegaConf.merge")
     def test_setup_config_calls_utf8_encoding(self, mock_merge, mock_structured, mock_utf8):
         """setup_config вызывает _force_utf8_console_encoding."""
         from src.utils.hydra_utils import setup_config

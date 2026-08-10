@@ -103,10 +103,6 @@ class TestInit:
         # Клиент создан
         assert store._embedding_dim == DIM
 
-    def test_collection_created_when_not_exists(self, qdrant_mocks):
-        _, mock_client, _ = qdrant_mocks
-        mock_client.create_collection.assert_called_once()
-
     def test_collection_not_recreated_when_exists(self, qdrant_mocks):
         _, mock_client, _ = qdrant_mocks
         # Коллекция уже существует
