@@ -1,6 +1,7 @@
 import functools
 import logging
 
+import pytorch_lightning as pl
 import torch
 
 
@@ -83,3 +84,31 @@ def register_safe_globals() -> None:
         "Registered %d safe globals for checkpoint loading.",
         len(safe_globals),
     )
+
+
+def load_best_lora_weights(model_module: pl.LightningModule, best_ckpt_path: str) -> None:
+    """Загружает веса LoRA-адаптера из чекпоинта PyTorch Lightning в PeftModel.
+
+    Ожидается, что чекпоинт был сохранен с помощью OptimizerMixin,
+    который оставляет в state_dict только ключи адаптера.
+    """
+    try:
+        from peft import set_peft_model_state_dict
+    except ImportError as e:
+        raise ImportError("Для загрузки LoRA-весов необходима библиотека peft.") from e
+
+    logger.info("Загрузка лучших весов LoRA из %s", best_ckpt_path)
+
+    # Загружаем чекпоинт на CPU, чтобы избежать спайков памяти на GPU
+    checkpoint = torch.load(best_ckpt_path, map_location="cpu", weights_only=False)
+
+    # PyTorch Lightning оборачивает веса в ключ 'state_dict'
+    if "state_dict" in checkpoint:
+        state_dict = checkpoint["state_dict"]
+    else:
+        state_dict = checkpoint
+
+    # Загружаем веса в PEFT модель
+    set_peft_model_state_dict(model_module.model, state_dict)
+
+    logger.info("Веса LoRA из лучшего чекпоинта успешно применены к модели.")

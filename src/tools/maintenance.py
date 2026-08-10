@@ -38,25 +38,24 @@ def cleanup_mlruns(days: int) -> None:
     for item_path in sorted(target_dir.rglob("*"), reverse=True):
         try:
             if not item_path.exists():
-                # Уже удалено (например, вместе с родительской папкой)
-                continue
-
-            mtime = item_path.stat().st_mtime
-            if mtime >= cutoff_time:
                 continue
 
             if item_path.is_file():
-                item_path.unlink()
-                deleted_files += 1
-                logger.debug("Удалён файл: %s", item_path)
+                mtime = item_path.stat().st_mtime
+                if mtime < cutoff_time:
+                    item_path.unlink()
+                    deleted_files += 1
+                    logger.debug("Удалён файл: %s", item_path)
             elif item_path.is_dir():
-                # Удаляем директорию только если она пуста после чистки файлов
+                # Директорию пытаемся удалить без проверки её mtime:
+                # на Windows/Linux mtime папки меняется при удалении файлов внутри неё.
+                # rmdir() успешно удалит папку, только если она стала абсолютно пустой.
                 try:
-                    item_path.rmdir()  # Упадёт, если внутри ещё есть свежие файлы
+                    item_path.rmdir()
                     deleted_dirs += 1
                     logger.debug("Удалена папка: %s", item_path)
                 except OSError:
-                    pass  # Папка не пуста — пропускаем
+                    pass  # Внутри остались свежие файлы — пропускаем
 
         except Exception as e:
             logger.error("Ошибка при обработке %s: %s", item_path, e)

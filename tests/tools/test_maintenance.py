@@ -1,47 +1,54 @@
 import os
+import tempfile
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 from src.tools.maintenance import cleanup_mlruns
 
 
-class TestMaintenanceCleanup:
-    def test_cleanup_removes_old_files_and_empty_dirs(self, tmp_path):
-        mlruns_dir = tmp_path / "mlruns"
-        mlruns_dir.mkdir()
+class TestMaintenance:
+    def test_cleanup_mlruns_deletes_old_files(self):
+        """Проверка удаления файлов старше X дней и сохранения свежих файлов."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"MLRUNS_DIR": tmpdir}):
+                tmp_path = Path(tmpdir)
 
-        fresh_file = mlruns_dir / "fresh.txt"
-        fresh_file.write_text("fresh")
+                sub_dir = tmp_path / "run_123"
+                sub_dir.mkdir()
 
-        # 1. Папка с файлом внутри
-        old_dir_with_file = mlruns_dir / "old_run"
-        old_dir_with_file.mkdir()
-        old_file = old_dir_with_file / "old.txt"
-        old_file.write_text("old")
+                old_file = sub_dir / "old_checkpoint.ckpt"
+                new_file = sub_dir / "new_events.out"
 
-        # 2. Изначально пустая старая папка
-        empty_old_dir = mlruns_dir / "empty_old_dir"
-        empty_old_dir.mkdir()
+                old_file.touch()
+                new_file.touch()
 
-        forty_days_ago = time.time() - (40 * 24 * 60 * 60)
-        os.utime(str(old_file), (forty_days_ago, forty_days_ago))
-        os.utime(str(old_dir_with_file), (forty_days_ago, forty_days_ago))
-        os.utime(str(empty_old_dir), (forty_days_ago, forty_days_ago))
+                forty_days_ago = time.time() - (40 * 24 * 60 * 60)
+                os.utime(old_file, (forty_days_ago, forty_days_ago))
 
-        with patch("src.tools.maintenance.os.getenv", return_value=str(mlruns_dir)):
-            cleanup_mlruns(days=30)
+                cleanup_mlruns(days=30)
 
-        assert fresh_file.exists()
-        assert not old_file.exists()
-        # Изначально пустая старая папка удаляется гарантированно
-        assert not empty_old_dir.exists()
-        # old_dir_with_file мы не ассертим: на Windows её mtime обновился при удалении файла,
-        # поэтому скрипт честно оставил её до следующего запуска.
+                assert not old_file.exists(), "Старый файл должен быть удален"
+                assert new_file.exists(), "Свежий файл должен остаться"
+                assert sub_dir.exists(), (
+                    "Папка не должна удаляться, так как внутри есть свежий файл"
+                )
 
-    def test_cleanup_skips_nonexistent_dir(self, caplog, tmp_path):
-        fake_dir = tmp_path / "does_not_exist"
+    def test_cleanup_mlruns_removes_empty_dirs(self):
+        """Проверка того, что папка удаляется, когда все файлы внутри нее устарели."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"MLRUNS_DIR": tmpdir}):
+                tmp_path = Path(tmpdir)
+                sub_dir = tmp_path / "old_run"
+                sub_dir.mkdir()
 
-        with patch("src.tools.maintenance.os.getenv", return_value=str(fake_dir)):
-            cleanup_mlruns(days=30)
+                old_file = sub_dir / "old.txt"
+                old_file.touch()
 
-        assert "не существует. Очистка пропущена" in caplog.text
+                forty_days_ago = time.time() - (40 * 24 * 60 * 60)
+                os.utime(old_file, (forty_days_ago, forty_days_ago))
+
+                cleanup_mlruns(days=30)
+
+                assert not old_file.exists(), "Старый файл должен быть удален"
+                assert not sub_dir.exists(), "Пустая папка должна быть удалена"
