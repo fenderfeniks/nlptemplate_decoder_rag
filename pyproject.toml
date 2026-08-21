@@ -46,6 +46,7 @@ dependencies = [
     "fastembed>=0.8.0",
     "autoawq>=0.2.9",
     "grep>=0.3.2",
+    "pybreak>=0.1.0",
 ]
 
 [project.optional-dependencies]

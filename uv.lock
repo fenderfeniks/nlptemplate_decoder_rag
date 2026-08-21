@@ -1390,6 +1390,7 @@ dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "omegaconf" },
     { name = "openai" },
+    { name = "pybreak" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "python-json-logger" },
@@ -1521,6 +1522,7 @@ requires-dist = [
     { name = "pendulum", marker = "extra == 'orchestration'", specifier = ">=3.0.0" },
     { name = "prometheus-client", marker = "extra == 'api'", specifier = ">=0.20.0" },
     { name = "prometheus-fastapi-instrumentator", marker = "extra == 'api'", specifier = ">=6.1.0" },
+    { name = "pybreak", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.6.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
@@ -5170,6 +5172,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e9/e6/78ebbb10a8c8e4b61a59249394a4a594c1a7af95593dc933a349c8d00964/pyasn1_modules-0.4.2.tar.gz", hash = "sha256:677091de870a80aae844b1ca6134f54652fa2c8c5a52aa396440ac3106e941e6", size = 307892, upload-time = "2025-03-28T02:41:22.17Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/47/8d/d529b5d697919ba8c11ad626e835d4039be708a35b0d22de83a269a6682c/pyasn1_modules-0.4.2-py3-none-any.whl", hash = "sha256:29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a", size = 181259, upload-time = "2025-03-28T02:41:19.028Z" },
+]
+
+[[package]]
+name = "pybreak"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "prompt-toolkit" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/da/22/4d1fe9868445604f58741890fb56cc2d9a0b820e2a88c11eb5ae73926b48/pybreak-0.1.0.tar.gz", hash = "sha256:46fad780b45db36ffda5ac2b8d1690bf562279c115dfc7239e15c39c2369db2a", size = 2458, upload-time = "2020-02-02T15:03:26.715Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/25/8a/9b9e248c435873ba4ec079d80bc84719fdc0ed2ebeae3c478923b0015662/pybreak-0.1.0-py3-none-any.whl", hash = "sha256:57ef616a4ff918b79e2669b1b22859c7fc7f47f150313386d8e6f74bf2ff0e82", size = 3406, upload-time = "2020-02-02T15:03:24.345Z" },
 ]
 
 [[package]]
