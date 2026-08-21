@@ -1,2 +1,0 @@
-_target_: src.pipelines.base.core.models.modifiers.FullFinetuningModifier
-gradient_checkpointing: true

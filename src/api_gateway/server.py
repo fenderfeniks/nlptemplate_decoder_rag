@@ -1,56 +1,56 @@
 # src/api_gateway/server.py
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-
-import hydra
+import yaml
 from fastapi import FastAPI
-from omegaconf import OmegaConf
 
 from src.api_gateway.endpoints import chat
 from src.api_gateway.middlewares import setup_gateway_middlewares
+from src.application.orchestrator import RAGOrchestrator
 from src.pipelines.decoder.core.prompts.manager import PromptManager
 from src.pipelines.decoder.inference.inference import LLMGenerationClient
-
+from prometheus_fastapi_instrumentator import Instrumentator
 
 logger = logging.getLogger(__name__)
 
 
 def create_gateway_app() -> FastAPI:
-    config_dir = Path(__file__).resolve().parents[2] / "configs"
-
-    with hydra.initialize_config_dir(config_dir=str(config_dir), version_base="1.3"):
-        cfg = hydra.compose(config_name="main")
-        OmegaConf.resolve(cfg)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         logger.info("Инициализация API Gateway...")
 
-        # 1. Менеджер промптов
-        prompt_manager = PromptManager(templates=cfg.get("prompts", {}))
+        # Читаем model_name из манифеста
+        storage_root = Path(os.getenv("STORAGE_ROOT", "prod_storage"))
+        manifest = json.loads((storage_root / "manifest.json").read_text(encoding="utf-8"))
+        model_name = manifest["decoder_pipeline"]["mlflow_model_name"]
 
-        # 2. Клиент к vLLM — URL берётся из Hydra-конфига
-        llm_api_url = os.getenv("LLM_API_URL", "http://localhost:8000/v1")
-        llm_client = LLMGenerationClient(api_base=llm_api_url)
+        llm_client = LLMGenerationClient(
+            api_base=os.getenv("LLM_API_URL", "http://localhost:8081/v1"),
+            model_name=model_name,
+        )
 
-        # 3. Оркестратор — все параметры из конфига
-        rag_api_url = os.getenv("RAG_API_URL", "http://localhost:8001")
-        orchestrator = hydra.utils.instantiate(
-            cfg.application.orchestrator,
-            rag_api_url=rag_api_url,
+        rag_qa_path = Path("configs/evaluation/prompts/rag_qa.yaml")
+        rag_qa_config = yaml.safe_load(rag_qa_path.read_text(encoding="utf-8"))
+        prompt_manager = PromptManager(templates=rag_qa_config["templates"])
+
+        orchestrator = RAGOrchestrator(
+            rag_api_url=os.getenv("RAG_API_URL", "http://localhost:8001"),
             llm_client=llm_client,
             prompt_manager=prompt_manager,
-            http_timeout=cfg.get("http_timeout", 10.0),
+            http_timeout=float(os.getenv("HTTP_TIMEOUT", "10.0")),
         )
+
         app.state.orchestrator = orchestrator
-        logger.info("API Gateway готов принимать запросы.")
+        logger.info("API Gateway готов. model=%s", model_name)
 
         yield
 
-        logger.info("Остановка API Gateway...")
         await orchestrator.close()
+        logger.info("API Gateway остановлен.")
 
     app = FastAPI(
         title="NLP API Gateway",
@@ -58,10 +58,12 @@ def create_gateway_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Middleware (CORS + логирование + метрики)
-    cors_origins: list[str] = list(cfg.get("cors_origins", ["*"]))
+    cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
     setup_gateway_middlewares(app, cors_origins)
-
     app.include_router(chat.router)
+    Instrumentator(
+        should_group_status_codes=False,
+        should_ignore_untemplated=True,
+    ).instrument(app).expose(app, include_in_schema=False, endpoint="/metrics")
 
     return app

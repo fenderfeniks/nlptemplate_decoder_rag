@@ -19,8 +19,8 @@ class BaseModelModifier(ABC):
     Добавляя новый модификатор — укажи нужные маркеры, и builder передаст kwargs сам.
 
     Маркеры:
-    - ``_needs_tokenizer = True``   → builder передаёт ``tokenizer=<tokenizer>``
-    - ``_needs_lora_path = True``   → builder передаёт ``lora_resume_path=<path|None>``
+    - ``_needs_tokenizer = True``   -> builder передаёт ``tokenizer=<tokenizer>``
+    - ``_needs_lora_path = True``   -> builder передаёт ``lora_resume_path=<path|None>``
     """
 
     _needs_tokenizer: bool = False
@@ -59,7 +59,7 @@ class EmbeddingResizeModifier(BaseModelModifier):
             return model
 
         logger.warning(
-            "Изменение размера матрицы эмбеддингов: %d → %d. Увеличение потребления VRAM.",
+            "Изменение размера матрицы эмбеддингов: %d -> %d. Увеличение потребления VRAM.",
             old_vocab_size,
             vocab_size,
         )
@@ -102,41 +102,32 @@ class PEFTModifier(BaseModelModifier):
         peft_config: Any,
         lora_resume_path: str | None = None,
         gradient_checkpointing: bool = True,
-        is_quantized: bool = True,
+        is_quantized: Any = None,  # было bool, стало Any
+        is_trainable: bool = True,
     ) -> None:
-        """
-        Args:
-            ...
-            skip_peft: Если True — модификатор пропускает навешивание адаптера.
-                Используется при full_model инференсе/мердже: веса уже слиты,
-                LoRA поверх монолита не нужна. При обучении всегда False.
-                Устанавливается через resolver.resolve_and_patch() → caller
-                прокидывает через OmegaConf.update перед instantiate().
-        """
         self.peft_config = peft_config
         self.lora_resume_path = lora_resume_path
         self.gradient_checkpointing = gradient_checkpointing
-        self.is_quantized = is_quantized
+        # is_quantized: True/False (явный bool) или dict/DictConfig (quantization_config) или None
+        self.is_quantized = bool(is_quantized) if is_quantized is not None else False
+        self.is_trainable = is_trainable
 
     def __call__(self, model: PreTrainedModel) -> PreTrainedModel:
         from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 
-        if self.is_quantized:
-            # prepare_model_for_kbit_training замораживает базовые веса,
-            # кастит LayerNorm в fp32 и включает checkpointing если нужно
-            model = prepare_model_for_kbit_training(
-                model,
-                use_gradient_checkpointing=self.gradient_checkpointing,
-            )
-        elif self.gradient_checkpointing:
-            # use_reentrant=False обязателен с PyTorch >= 2.1 + PEFT:
-            # reentrant-режим несовместим с LoRA hooks и даёт некорректные градиенты
-            # для modules_to_save.
-            model.gradient_checkpointing_enable({"use_reentrant": False})
+        # Подготовка kbit_training и checkpointing нужна ТОЛЬКО если мы обучаем модель
+        if self.is_trainable:
+            if self.is_quantized:
+                model = prepare_model_for_kbit_training(
+                    model,
+                    use_gradient_checkpointing=self.gradient_checkpointing,
+                )
+            elif self.gradient_checkpointing:
+                model.gradient_checkpointing_enable({"use_reentrant": False})
 
         if self.lora_resume_path is not None:
-            logger.info("PEFT: загрузка адаптера из '%s'", self.lora_resume_path)
-            model = PeftModel.from_pretrained(model, self.lora_resume_path, is_trainable=True)
+            logger.info("PEFT: загрузка адаптера из '%s' (is_trainable=%s)", self.lora_resume_path, self.is_trainable)
+            model = PeftModel.from_pretrained(model, self.lora_resume_path, is_trainable=self.is_trainable)
         else:
             logger.info("PEFT: инициализация нового LoRA-адаптера.")
             if isinstance(self.peft_config, LoraConfig):
@@ -148,16 +139,16 @@ class PEFTModifier(BaseModelModifier):
                     else dict(self.peft_config)
                 )
                 lora_config = LoraConfig(**peft_dict)
-
             model = get_peft_model(model, lora_config)
 
-        trainable, all_param = model.get_nb_trainable_parameters()
-        logger.info(
-            "LoRA: %d обучаемых из %d параметров (%.4f%%)",
-            trainable,
-            all_param,
-            100 * trainable / all_param,
-        )
+        if self.is_trainable:
+            trainable, all_param = model.get_nb_trainable_parameters()
+            logger.info(
+                "LoRA: %d обучаемых из %d параметров (%.4f%%)",
+                trainable,
+                all_param,
+                100 * trainable / all_param,
+            )
         return model
 
 

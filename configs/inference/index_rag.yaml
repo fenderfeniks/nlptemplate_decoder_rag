@@ -1,0 +1,5 @@
+# configs/inference/rag_index.yaml
+defaults:
+  - embedder: embedder
+  - indexer/lsh@lsh
+  - indexer/default@indexing

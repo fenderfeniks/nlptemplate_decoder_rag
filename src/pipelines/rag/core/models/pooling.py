@@ -110,7 +110,7 @@ class Pooler(nn.Module):
         концентрируется в последнем токене, а не в первом.
         """
         # Находим индекс последнего реального токена (не padding)
-        # attention_mask: [B, L], sum по dim=1 даёт длины, -1 → индекс последнего
+        # attention_mask: [B, L], sum по dim=1 даёт длины, -1 -> индекс последнего
         last_token_indices = attention_mask.sum(dim=1) - 1  # [B]
         batch_size = token_embeddings.shape[0]
         batch_indices = torch.arange(batch_size, device=token_embeddings.device)

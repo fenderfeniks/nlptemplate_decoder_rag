@@ -1,0 +1,8 @@
+# training/callbacks/shared/early_stopping.yaml
+_target_: pytorch_lightning.callbacks.EarlyStopping
+monitor: ${training.primary_metric}
+mode: ${training.primary_metric_mode}
+patience: 5                    # количество val_check_interval без улучшения
+min_delta: 0.0001
+check_on_train_epoch_end: false  # false = проверяем после val, не после эпохи (для step-based)
+verbose: true

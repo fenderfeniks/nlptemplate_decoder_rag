@@ -18,13 +18,13 @@ def fetch_data(cfg: DictConfig) -> None:
     """Универсальный скрипт для сбора новых данных из внешних источников."""
     cfg = setup_config(cfg)
     pipeline_name = cfg.pipeline_name
-    pipeline_cfg = getattr(cfg, pipeline_name)
+    pipeline_cfg = cfg
 
     logger.info("Старт сбора данных для пайплайна: %s", pipeline_name)
 
     # Директория, куда мы будем складывать сырые дампы (json/csv/parquet)
     # RAGDataModule потом прочитает их отсюда на этапе prepare_data()
-    raw_data_dir = Path(pipeline_cfg.data.paths.raw_data_dir)
+    raw_data_dir = Path(pipeline_cfg.system.paths.raw_data_dir)
     raw_data_dir.mkdir(parents=True, exist_ok=True)
 
     # =========================================================================

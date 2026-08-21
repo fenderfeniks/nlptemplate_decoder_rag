@@ -10,94 +10,72 @@ logger = logging.getLogger(__name__)
 
 
 class LLMGenerationClient:
-    """Легковесный клиент для асинхронного общения с LLM-сервером (vLLM / TGI).
+    """HTTP-клиент для асинхронного общения с LLM-сервером (vLLM / llama.cpp).
 
-    Использует OpenAI-совместимый API — работает с любым сервером,
-    поддерживающим ``/v1/completions`` (vLLM, TGI, llama.cpp server).
+    Оба сервера поднимают OpenAI-совместимый API, поэтому клиент один.
+    Разница только в LLM_API_URL из env:
+        llama.cpp:  http://localhost:8080/v1
+        vLLM:       http://vllm-service:8000/v1
     """
 
     def __init__(
         self,
-        api_base: str = "http://localhost:8000/v1",
+        api_base: str,
+        model_name: str,
         api_key: str = "EMPTY",
-        model_name: str = "my-decoder-model",
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        max_concurrent_requests: int = 20,
     ) -> None:
-        """
-        Args:
-            api_base: Базовый URL сервера (без trailing slash).
-            api_key: API-ключ — для локальных серверов обычно ``'EMPTY'``.
-            model_name: Имя модели как оно зарегистрировано на сервере.
-            temperature: Температура сэмплирования по умолчанию.
-            max_tokens: Максимальное число генерируемых токенов по умолчанию.
-        """
-        logger.info("Инициализация клиента LLM (подключение к %s)", api_base)
-        self.client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+        # api_base сохраняем как атрибут — health.py читает его для connectivity check
+        self.api_base = api_base
         self.model_name = model_name
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-    async def generate(
-        self,
-        texts: str | list[str],
-        max_tokens: int | None = None,
-        temperature: float | None = None,
-    ) -> list[str]:
-        """Параллельная батч-генерация через ``asyncio.gather``.
+        self.client = AsyncOpenAI(api_key=api_key, base_url=api_base)
 
-        Все запросы из батча отправляются одновременно — latency определяется
-        самым медленным из них, а не суммой.
+        # Семафор создаём сразу — __init__ вызывается внутри lifespan (async контекст),
+        # поэтому event loop уже запущен и семафор привязан к правильному loop.
+        self._semaphore = asyncio.Semaphore(max_concurrent_requests)
 
-        Args:
-            texts: Один промпт или список промптов.
-            max_tokens: Переопределяет ``self.max_tokens`` для этого вызова.
-            temperature: Переопределяет ``self.temperature`` для этого вызова.
+        logger.info("LLMGenerationClient инициализирован (api_base=%s, model=%s)", api_base, model_name)
 
-        Returns:
-            Список сгенерированных строк в том же порядке что и входные тексты.
+    async def generate(self, prompt: str, **kwargs) -> object:
+        """Полная генерация — возвращает полный ответ после завершения.
+
+        Семафор держится только на время HTTP round-trip, не на чтение ответа.
         """
-        if isinstance(texts, str):
-            texts = [texts]
+        gen_kwargs = {
+            "model": kwargs.pop("model", self.model_name),
+            "max_tokens": kwargs.pop("max_tokens", self.max_tokens),
+            "temperature": kwargs.pop("temperature", self.temperature),
+        }
+        gen_kwargs.update(kwargs)
 
-        _max_tokens = max_tokens if max_tokens is not None else self.max_tokens
-        _temperature = temperature if temperature is not None else self.temperature
-
-        tasks = [
-            self.client.completions.create(
-                model=self.model_name,
+        async with self._semaphore:
+            response = await self.client.completions.create(
                 prompt=prompt,
-                max_tokens=_max_tokens,
-                temperature=_temperature,
+                **gen_kwargs,
             )
-            for prompt in texts
-        ]
-        responses = await asyncio.gather(*tasks)
-        return [resp.choices[0].text for resp in responses]
 
-    async def generate_stream(
-        self,
-        text: str,
-        max_tokens: int | None = None,
-        temperature: float | None = None,
-    ) -> AsyncGenerator[str, None]:
-        """Асинхронный стриминг токенов напрямую из vLLM.
+        # Возвращаем сырой объект OpenAI — response_adapter разбирает его.
+        return response
 
-        Args:
-            text: Одиночный промпт (стриминг не поддерживает батчи).
-            max_tokens: Переопределяет ``self.max_tokens`` для этого вызова.
-            temperature: Переопределяет ``self.temperature`` для этого вызова.
+    async def generate_stream(self, prompt: str, **kwargs) -> AsyncGenerator[str, None]:
+        gen_kwargs = {
+            "model": kwargs.pop("model", self.model_name),
+            "max_tokens": kwargs.pop("max_tokens", self.max_tokens),
+            "temperature": kwargs.pop("temperature", self.temperature),
+            "stream": True,
+        }
+        gen_kwargs.update(kwargs)
 
-        Yields:
-            Строковые фрагменты по мере генерации.
-        """
-        response = await self.client.completions.create(
-            model=self.model_name,
-            prompt=text,
-            max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-            temperature=temperature if temperature is not None else self.temperature,
-            stream=True,
-        )
+        async with self._semaphore:
+            response = await self.client.completions.create(
+                prompt=prompt,
+                **gen_kwargs,
+            )
 
         async for chunk in response:
             if chunk.choices and chunk.choices[0].text:

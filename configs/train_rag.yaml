@@ -1,0 +1,17 @@
+defaults:
+  - system: default
+  - data: train_rag
+  - model: train_rag
+  - training: train_rag
+  - vector_db: qdrant
+  - _self_
+  - environments: local 
+
+project_name: "nlp_project"
+pipeline_name: "rag_pipeline"
+seed: ${system.seed}
+
+system:
+  logger:
+    experiment_logger:
+      experiment_name: ${project_name}_rag

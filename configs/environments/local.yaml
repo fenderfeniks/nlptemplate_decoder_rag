@@ -1,0 +1,34 @@
+# @package _global_
+# configs/environments/local.yaml
+system:
+  device: cpu
+  accelerator: cpu
+  devices: 1
+  num_proc: 2
+  batch_size: 2
+  dataloader_num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  prefetch_factor: null
+  seed: 42
+
+data:
+  max_samples: 100
+
+training:
+  max_steps: 10
+  val_check_interval: 1.0
+  log_every_n_steps: 1
+  accumulate_grad_batches: 1
+
+model:
+  architecture:
+    embedding_dim: 32
+    max_position_embeddings: 128
+
+api:
+  rate_limit:
+    enabled: false
+  server:
+    cors_origins:
+      - "*"

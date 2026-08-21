@@ -1,0 +1,9 @@
+defaults:
+  - builder: default
+  - architecture: decoder/test
+  - quantization: none
+  - tokenizer: default
+  - modifiers/finetuning: just_freeze
+  - _self_
+
+use_manifest: true

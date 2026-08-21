@@ -15,7 +15,7 @@ class MetadataInjectorTransform(BaseDatasetTransform):
     Пример результата при шаблоне по умолчанию::
 
         {'title': 'Transformer', 'date': '2017'} + 'Текст статьи...'
-        →
+        ->
         'Title: Transformer\\nDate: 2017\\n\\nТекст статьи...'
 
     Записи с пустыми или отсутствующими метаданными возвращаются без изменений.

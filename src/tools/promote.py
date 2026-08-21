@@ -6,156 +6,117 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import hydra
-import mlflow
-from mlflow.exceptions import MlflowException
-from mlflow.tracking import MlflowClient
 from omegaconf import DictConfig, OmegaConf
 
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
-from src.utils.mlflow import resolve_lora_resume_path
-
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 
-class PromoteError(RuntimeError):
-    """Ошибка при попытке продвижения модели в Production."""
-
-
-def _promote(tracking_uri: str, reg_model_name: str) -> None:
-    """Продвигает модель из Staging в Production, если она лучше текущей."""
-    mlflow.set_tracking_uri(tracking_uri)
-    client = MlflowClient()
-
-    logger.info("MLFLOW_TRACKING_URI: %s", tracking_uri)
-    logger.info("Модель в Registry: %s", reg_model_name)
-
-    try:
-        staging_mv = client.get_model_version_by_alias(reg_model_name, "Staging")
-    except MlflowException as e:
-        raise PromoteError(f"Алиас 'Staging' не найден для модели '{reg_model_name}'.") from e
-
-    staging_version = staging_mv.version
-    staging_score_str = staging_mv.tags.get("val_loss")
-
-    if staging_score_str is None:
-        raise PromoteError("У Staging модели нет тега 'val_loss'. Невозможно оценить качество.")
-
-    staging_score = float(staging_score_str)
-
-    try:
-        current_prod = client.get_model_version_by_alias(reg_model_name, "Production")
-        if current_prod.version == staging_version:
-            logger.warning("Версия %s уже является Production. Промоут пропущен.", staging_version)
-            return
-
-        prod_score_str = current_prod.tags.get("val_loss")
-        prod_score = float(prod_score_str) if prod_score_str else float("inf")
-        logger.info(
-            "Текущий Production: версия %s (val_loss=%.4f)", current_prod.version, prod_score
-        )
-    except MlflowException:
-        logger.info("Production алиаса ещё нет — первый промоут.")
-        prod_score = float("inf")
-
-    logger.info("Сравнение: Staging (%.4f) vs Production (%.4f)", staging_score, prod_score)
-
-    if staging_score < prod_score:
-        client.set_registered_model_alias(reg_model_name, "Production", staging_version)
-        logger.info(
-            "УСПЕХ! Версия %s (val_loss=%.4f) стала новой Production моделью.",
-            staging_version,
-            staging_score,
-        )
-    else:
-        logger.warning(
-            "ОТКАЗ: Модель в Staging (%.4f) хуже или равна текущей Production (%.4f). "
-            "Промоут отменён.",
-            staging_score,
-            prod_score,
-        )
-
-
-@hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
+@hydra.main(config_path="../../configs", config_name="promote", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
-    pipeline_cfg = getattr(cfg, cfg.pipeline_name)
-    tracking_uri = cfg.logger.pylightning.tracking_uri
-    mlflow_model_name = pipeline_cfg.model.architecture.mlflow_model_name
-    reg_model_name = f"{mlflow_model_name}_LoRA"
 
-    # 1. Продвигаем модель в MLflow (сравниваем валидационный лосс)
+    # Инициализация абстрактного логгера через Hydra
+    experiment_logger = hydra.utils.instantiate(cfg.system.logger.experiment_logger)
+
+    mlflow_model_name = cfg.model.architecture.get("mlflow_model_name")
+    if not mlflow_model_name:
+        raise ValueError(
+            f"mlflow_model_name не задан в model.architecture для пайплайна '{cfg.pipeline_name}'"
+        )
+    reg_model_name = f"{mlflow_model_name}_LoRA"
+    pipeline_name = cfg.pipeline_name
+
+    # 1. Продвигаем модель через логгер
     try:
-        _promote(tracking_uri=tracking_uri, reg_model_name=reg_model_name)
-    except PromoteError as e:
-        logger.error("%s", e)
+        experiment_logger.promote_model(
+            reg_model_name=reg_model_name,
+            staging_alias="Staging",
+            production_alias="Production",
+            metric_tag="val_loss"
+        )
+    except Exception as e:
+        logger.error("Ошибка при продвижении модели: %s", e)
         sys.exit(1)
 
     # 2. Инициализируем хранилище и роутер
-    storage_client = hydra.utils.instantiate(cfg.storage)
-    router = hydra.utils.instantiate(cfg.storage_router)
-    uri_prefix = cfg.storage.uri_prefix
-    manifest_uri = cfg.manifest.uri
+    storage_client = hydra.utils.instantiate(cfg.system.storage)
+    router = hydra.utils.instantiate(cfg.system.storage_router)
+    uri_prefix = cfg.system.storage.uri_prefix
+    manifest_uri = cfg.system.manifest.uri
 
-    # 3. Достаем Production-адаптер из MLflow
-    lora_cfg = OmegaConf.create(
-        {
-            "enabled": True,
-            "model_name": reg_model_name,
-            "alias": "Production",
-            "artifact_path": cfg.logger.registry.artifact_path,
-        }
-    )
-    lora_local_path = resolve_lora_resume_path(lora_cfg, tracking_uri=tracking_uri)
-    if not lora_local_path:
-        logger.error("Не удалось скачать Production LoRA адаптер из MLflow.")
-        sys.exit(1)
-
-    # 4. Загружаем адаптер в Production Storage (S3 / Local)
-    remote_adapter_dir = f"adapters/{mlflow_model_name}_prod"
-    logger.info("Загрузка адаптера в хранилище: %s", remote_adapter_dir)
-    storage_client.upload(local_dir=lora_local_path, remote_path=remote_adapter_dir)
-
-    # 5. Получаем URI базовой модели из конфигов
-    model_name_or_path = pipeline_cfg.model.architecture.model_name_or_path
-    base_model_uri = pipeline_cfg.model.architecture.get(
-        "base_model_uri",
-        f"hf://{model_name_or_path}"
-        if not model_name_or_path.startswith("hf://")
-        else model_name_or_path,
-    )
-
-    # 6. Безопасное обновление Манифеста
+    # 3. Загружаем текущий манифест — он источник истины о базовой модели,
+    # а не yaml конфиг который служит только для экспериментов
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
+        old_manifest_dir = tmp_path / "old_manifest"
 
         try:
-            manifest = router.download_manifest(manifest_uri, cache_dir=tmp_path / "old_manifest")
-            logger.info("Найден существующий манифест. Обновляем ключи модели.")
+            manifest = router.download_manifest(manifest_uri, cache_dir=old_manifest_dir)
+            logger.info("Найден существующий манифест. Обновляем секцию '%s'.", pipeline_name)
         except Exception:
             logger.warning("Существующий манифест не найден. Будет создан новый.")
             manifest = {}
 
-        manifest["load_type"] = "lora"
-        manifest["base_model_uri"] = base_model_uri
-        manifest["lora_uri"] = f"{uri_prefix}adapters/{mlflow_model_name}_prod"
-        manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+        # 4. Определяем base_model_uri из манифеста, не из конфига
+        # Манифест фиксирует откуда реально грузилась базовая модель при обучении
+        current = manifest.get(pipeline_name, {})
+        base_model_uri = (
+            current.get("base_model_uri")       # уже была lora — берём оттуда
+            or current.get("model_uri")          # был full_model — это и есть база
+            or cfg.model.architecture.get(       # крайний fallback — конфиг
+                "base_model_uri",
+                f"hf://{cfg.model.architecture.model_name_or_path}"
+            )
+        )
+        logger.info("base_model_uri для манифеста: %s", base_model_uri)
 
-        # Удаляем ключи от монолитной сборки, если они были
-        manifest.pop("model_uri", None)
+        # 5. Достаем Production-адаптер через логгер
+        lora_cfg = OmegaConf.create(
+            {
+                "enabled": True,
+                "model_name": reg_model_name,
+                "alias": "Production",
+                "artifact_path": cfg.system.logger.registry.artifact_path,
+            }
+        )
+        lora_local_path = experiment_logger.load_adapter(lora_cfg)
+        if not lora_local_path:
+            logger.error("Не удалось скачать Production LoRA адаптер.")
+            sys.exit(1)
 
-        manifest_file = tmp_path / f"{cfg.pipeline_name}_manifest.json"
+        # 6. Загружаем адаптер в Production Storage (S3 / Local)
+        remote_adapter_dir = f"adapters/{mlflow_model_name}_prod"
+        logger.info("Загрузка адаптера в хранилище: %s", remote_adapter_dir)
+        storage_client.upload(local_dir=lora_local_path, remote_path=remote_adapter_dir)
+
+        # 7. Обновляем секцию пайплайна в манифесте
+        if pipeline_name not in manifest:
+            manifest[pipeline_name] = {}
+
+        manifest[pipeline_name].update({
+            "load_type": "lora",
+            "base_model_uri": base_model_uri,
+            "lora_uri": f"{uri_prefix}adapters/{mlflow_model_name}_prod",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+        # Удаляем ключи от монолитной сборки если были
+        manifest[pipeline_name].pop("model_uri", None)
+
+        # 8. upload_file — точечная замена одного файла, не трогает остальное в storage
+        manifest_file = tmp_path / "manifest.json"
         with open(manifest_file, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=4, ensure_ascii=False)
 
-        storage_client.upload(local_dir=tmp_dir, remote_path="manifests")
+        storage_client.upload_file(local_path=manifest_file, remote_path="manifest.json")
 
     logger.info(
-        "Манифест обновлен. Инференс будет использовать LoRA загрузку. Путь: %s/%s",
-        uri_prefix,
-        f"manifests/{cfg.pipeline_name}_manifest.json",
+        "Манифест обновлен для пайплайна '%s'. Инференс будет использовать LoRA.",
+        pipeline_name,
     )
 
 

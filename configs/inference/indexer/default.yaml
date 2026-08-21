@@ -1,0 +1,5 @@
+# inference/indexer/default.yaml
+# KnowledgeBaseIndexer — embedder и store инжектируются программно
+_target_: src.pipelines.rag.indexing.indexer.KnowledgeBaseIndexer
+push_batch_size: 10000   # сколько эмбеддингов накапливать перед вставкой в store
+text_column: ${data.text_column} # имя колонки с текстом документа

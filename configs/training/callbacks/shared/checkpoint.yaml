@@ -1,0 +1,10 @@
+# training/callbacks/shared/checkpoint.yaml
+# monitor и mode тянутся из training/train_*.yaml — единственный источник правды о метрике
+_target_: pytorch_lightning.callbacks.ModelCheckpoint
+monitor: ${training.primary_metric}
+mode: ${training.primary_metric_mode}
+dirpath: ${system.paths.log_dir}/checkpoints
+save_top_k: 1
+save_last: true
+filename: "epoch={epoch}-metric={${training.primary_metric}:.4f}"
+verbose: true

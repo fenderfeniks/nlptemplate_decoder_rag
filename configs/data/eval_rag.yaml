@@ -1,0 +1,25 @@
+defaults:
+  - source: hf_rag
+  - collator: rag_contrastive
+  - _self_
+
+dataset_name: rag_eval
+max_samples: null
+force_reprocess: false
+
+# --- Топ-левел переменные ---
+# Указываем именно те колонки, которые лежат в твоем benchmark.jsonl
+prompt_column: "question"
+target_column: "answer"
+
+# Трансформации намеренно отсутствуют:
+# builder.py сам возьмет трансформации из основного train_rag.yaml 
+# и токенизирует тестовый датасет, чтобы RAG смог получить эмбеддинги.
+
+dataloader:
+  # Можно сделать батч-сайз побольше, так как градиенты на тесте не считаются
+  batch_size: 64
+  num_workers: ${system.dataloader_num_workers}
+  pin_memory: ${system.pin_memory}
+  persistent_workers: ${system.persistent_workers}
+  prefetch_factor: ${system.prefetch_factor}

@@ -1,0 +1,3 @@
+_target_: src.pipelines.base.core.models.modifiers.EmbeddingResizeModifier
+# tokenizer пробрасывается автоматически через маркер _needs_tokenizer=True в builder
+pad_to_multiple_of: 8   # выравнивание до кратного 8 для Tensor Core ускорения

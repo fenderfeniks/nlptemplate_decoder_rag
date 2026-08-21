@@ -42,6 +42,10 @@ dependencies = [
     "rouge-score>=0.1.2",
     "sacrebleu>=2.6.0",
     "faiss-cpu>=1.15.0",
+    "qdrant-client>=1.19.0",
+    "fastembed>=0.8.0",
+    "autoawq>=0.2.9",
+    "grep>=0.3.2",
 ]
 
 [project.optional-dependencies]
@@ -156,6 +160,11 @@ asyncio_default_fixture_loop_scope = "session"
 filterwarnings = [
     "ignore::pytest.PytestUnraisableExceptionWarning",
     "ignore::DeprecationWarning"
+]
+
+[tool.uv]
+override-dependencies = [
+    "triton ; sys_platform != 'win32'",
 ]
 
 # ==========================================

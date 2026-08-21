@@ -1,6 +1,26 @@
-# @package system
-# configs/system/default.yaml
-# Системные ресурсы. Переопределяются через environment/*.yaml.
-num_proc: 4       # CPU для datasets.map — не больше числа физических ядер
-num_workers: 4    # DataLoader workers — 0 на Windows/отладке, 2-8 на Linux
-pin_memory: true  # true только при num_workers > 0, иначе нет смысла
+# system/default.yaml
+# Системные параметры — единственный источник правды для всего что зависит от железа и окружения.
+# Все блоки проекта интерполируют отсюда через ${system.*}
+defaults:
+  - logger: mlflow
+  - paths: default
+  - storage: source/local
+  - storage/router@storage_router
+  - manifest: default
+  - _self_
+
+
+
+# Вычислительные ресурсы
+device: cpu                    # cuda | cpu | mps — тянется в embedder, nli_judge и т.д.
+num_proc: 4                     # число процессов для HF datasets transforms
+persistent_workers: true         # для DataLoader
+prefetch_factor: 2              # для DataLoader
+pin_memory: true                
+seed: 42
+accelerator: "cpu"
+devices: 1
+# Параметры даталоадера — тянутся во все data-блоки через ${system.*}
+batch_size: 16                  # train/val batch size
+dataloader_num_workers: 0
+writer_batch_size: 100

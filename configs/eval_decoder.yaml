@@ -1,0 +1,17 @@
+defaults:
+  - system: default
+  - evaluation: eval_decoder
+  - data: eval_decoder
+  - model: eval_decoder
+  - inference: decoder
+  - _self_
+  - environments: local
+
+project_name: "nlp_project"
+pipeline_name: "decoder_pipeline"
+seed: ${system.seed}
+
+system:
+  logger:
+    pylightning:
+      experiment_name: ${project_name}_decoder_eval

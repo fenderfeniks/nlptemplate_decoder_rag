@@ -1,2 +1,0 @@
-_target_: src.pipelines.base.core.models.modifiers.EmbeddingResizeModifier
-pad_to_multiple_of: 8

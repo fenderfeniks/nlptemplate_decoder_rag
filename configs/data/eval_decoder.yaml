@@ -1,0 +1,31 @@
+defaults:
+  - source: hf
+  - collator: decoder
+  - transforms/prompt_formatting: decoder
+  - _self_
+
+dataset_name: decoder_eval
+max_samples: null
+force_reprocess: false
+
+# --- Топ-левел переменные ---
+max_length: 2048
+prompt_column: prompt
+target_column: response
+retrieve_column: context
+messages_column: null
+separator: " "
+response_template: "### Ответ:"
+task: sft
+
+# Токенизация намеренно отсутствует:
+# eval_decoder используется только для подготовки test_dataset_raw
+# (сырые тексты для генерации). Токенизация для теста не нужна —
+# генератор принимает текст напрямую, loss на тесте не считается.
+
+dataloader:
+  batch_size: 16
+  num_workers: ${system.dataloader_num_workers}
+  pin_memory: ${system.pin_memory}
+  persistent_workers: ${system.persistent_workers}
+  prefetch_factor: ${system.prefetch_factor}

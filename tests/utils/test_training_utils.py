@@ -19,12 +19,12 @@ class TestResumeResumePath:
     # ------------------------------------------------------------------
 
     def test_returns_none_when_resume_false(self):
-        """resume_training=False → None, чекпоинт не ищется."""
+        """resume_training=False -> None, чекпоинт не ищется."""
         cfg = make_cfg(resume_training=False)
         assert resolve_resume_path(cfg) is None
 
     def test_returns_none_when_resume_absent(self):
-        """Ключ resume_training отсутствует → None."""
+        """Ключ resume_training отсутствует -> None."""
         cfg = make_cfg()  # resume_training не задан
         assert resolve_resume_path(cfg) is None
 
@@ -33,7 +33,7 @@ class TestResumeResumePath:
     # ------------------------------------------------------------------
 
     def test_returns_path_when_ckpt_exists(self, tmp_path):
-        """resume_training=True и last.ckpt существует → возвращаем путь."""
+        """resume_training=True и last.ckpt существует -> возвращаем путь."""
         ckpt_dir = tmp_path / "checkpoints"
         ckpt_dir.mkdir(parents=True)
         last_ckpt = ckpt_dir / "last.ckpt"
@@ -59,7 +59,7 @@ class TestResumeResumePath:
     # ------------------------------------------------------------------
 
     def test_returns_none_when_ckpt_missing(self, tmp_path):
-        """resume_training=True, но last.ckpt нет → None (старт с нуля)."""
+        """resume_training=True, но last.ckpt нет -> None (старт с нуля)."""
         cfg = make_cfg(resume_training=True, log_dir=str(tmp_path))
         result = resolve_resume_path(cfg)
         assert result is None

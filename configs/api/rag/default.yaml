@@ -1,0 +1,21 @@
+# @package _global_
+defaults:
+  - system: default
+  - model: eval_rag
+  - vector_db: qdrant
+  - inference/embedder: embedder
+  - inference/retriever: default
+  - inference/reranker: default@rag_pipeline.reranker
+  - api/shared/server: default@api.server
+  - api/shared/rate_limit: default@api.rate_limit
+  - _self_
+  - environments: prod_rag
+
+project_name: "nlp_project"
+pipeline_name: "rag_pipeline"
+
+api:
+  service_name: "rag_api"
+  server:
+    title: "RAG Retrieval API"
+    description: "Векторный поиск по базе знаний."

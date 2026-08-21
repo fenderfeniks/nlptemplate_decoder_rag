@@ -1,0 +1,57 @@
+# configs/evaluation/prompts/rag_qa.yaml
+#
+# Шаблоны для RAG QA пайплайна.
+# Переменная ``context`` всегда передаётся из PromptFormattingTransform;
+# пустой контекст (None) приходит для записей без RAG-контекста.
+#
+# Два шаблона:
+#   rag_qa_with_context    — для записей, где context есть
+#   rag_qa_without_context — для записей, где context отсутствует (mixed dataset)
+#   rag_qa_generation      — УНИВЕРСАЛЬНЫЙ: один шаблон для обоих случаев
+#                            через Jinja2 {% if context %}
+
+default_order: ["role", "context", "task", "constraints", "output_format"]
+
+templates:
+  # --- Универсальный шаблон для mixed датасетов ---
+  # Используется когда часть записей имеет контекст, часть — нет.
+  # PromptFormattingTransform передаёт context=None если колонка пустая.
+  rag_qa_generation:
+    __order__: ["role", "task", "constraints", "context", "output_format"]
+
+    role: "You are a helpful question-answering assistant."
+
+    task: |
+      Your task is to answer the question below.
+      Question: {{ instruction }}
+
+    constraints: |
+      - If a text chunk is provided, base your answer ONLY on that chunk.
+      - If no text chunk is provided and you don't know the answer, respond with exactly: "I don't know."
+      - Do not use any external knowledge beyond what is given.
+
+    # Блок рендерится только если context передан (не None и не пустая строка).
+    # При context=None Jinja2 вычисляет {% if context %} как False → блок пропускается.
+    context: |
+      {% if context %}
+      TEXT CHUNK:
+      {{ context }}
+      {% endif %}
+
+    output_format: "Answer:"
+
+  # --- Шаблон только для записей С контекстом (строгий RAG) ---
+  rag_qa_strict:
+    __order__: ["role", "task", "constraints", "context", "output_format"]
+
+    role: "You are a QA dataset creator."
+
+    task: "Generate one question-answer pair from the given text chunk."
+
+    constraints: |
+      - The question must be answerable ONLY from the chunk.
+      - No external knowledge required.
+
+    context: "TEXT CHUNK:\n{{ context }}"
+
+    output_format: 'Respond ONLY with a JSON object, no markdown:\n{"question": "<question>", "answer": "<answer>"}'

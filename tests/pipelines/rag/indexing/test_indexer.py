@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from src.pipelines.rag.indexing.indexer import KnowledgeBaseIndexer
+from src.pipelines.rag.inference.indexer import KnowledgeBaseIndexer
 
 
 @pytest.fixture

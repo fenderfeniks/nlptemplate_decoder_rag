@@ -1,0 +1,27 @@
+# @package _global_
+# configs/environments/prod_decoder.yaml
+system:
+  device: cuda
+  accelerator: gpu
+  devices: 1
+  num_proc: 8
+  batch_size: 32
+  dataloader_num_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+  seed: 42
+
+data:
+  max_samples: null
+
+training:
+  max_steps: 5000
+  val_check_interval: 500
+  log_every_n_steps: 10
+  accumulate_grad_batches: 4
+
+model:
+  architecture:
+    embedding_dim: 32        # декодеру embedding_dim не нужен — но пусть будет для консистентности
+    max_position_embeddings: 8192

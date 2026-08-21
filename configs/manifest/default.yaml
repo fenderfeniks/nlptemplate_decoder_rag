@@ -1,6 +1,0 @@
-# configs/manifest/default.yaml
-_target_: builtins.dict  # не инстанцируется, просто данные
-
-# URI манифеста строится из uri_prefix хранилища и pipeline_name
-# Переопределяй при деплое: manifest.uri=s3://bucket/manifests/rag_pipeline_manifest.json
-uri: "${storage.uri_prefix}manifests/${pipeline_name}_manifest.json"

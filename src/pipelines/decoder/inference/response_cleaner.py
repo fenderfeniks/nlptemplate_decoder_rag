@@ -26,7 +26,7 @@ _LLAMA_HEADER_RE = re.compile(r"<\|start_header_id\|>.*?<\|end_header_id\|>", re
 # Прочие системные токены: <|eot_id|>, <|im_end|>, </s>, <s> и т.п.
 _SPECIAL_TOKENS_RE = re.compile(r"<\|.*?\|>|</s>|<s>")
 
-# Множественные пробелы (не переносы строк) → один пробел
+# Множественные пробелы (не переносы строк) -> один пробел
 _EXTRA_SPACES_RE = re.compile(r" +")
 
 

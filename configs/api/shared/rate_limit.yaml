@@ -1,0 +1,4 @@
+default_limit: "20/minute"
+enabled: true
+# В environments/local.yaml переопределить:
+# api.rate_limit.enabled: false

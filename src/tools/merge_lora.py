@@ -7,52 +7,50 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import hydra
-import mlflow
 import torch
 from dotenv import load_dotenv
-from mlflow.exceptions import MlflowException
-from mlflow.tracking import MlflowClient
 from omegaconf import DictConfig, OmegaConf
 from peft import PeftModel
 
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
-from src.utils.mlflow import resolve_lora_resume_path
-
+from src.tools.storage.resolver import ArtifactResolver
 
 load_dotenv()
 setup_logging()
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
+@hydra.main(config_path="../../configs", config_name="promote", version_base="1.3")
 def merge_and_export(cfg: DictConfig) -> None:
     """Сливает LoRA адаптер с базовой моделью и экспортирует монолит в хранилище."""
     cfg = setup_config(cfg)
-    pipeline_cfg = getattr(cfg, cfg.pipeline_name)
-    tracking_uri = cfg.logger.pylightning.tracking_uri
+    
+    # Инициализация абстрактного логгера через Hydra
+    experiment_logger = hydra.utils.instantiate(cfg.system.logger.experiment_logger)
 
     # Инициализируем хранилище и роутер
-    storage_client = hydra.utils.instantiate(cfg.storage)
-    router = hydra.utils.instantiate(cfg.storage_router)
-    uri_prefix = cfg.storage.uri_prefix.rstrip("/")
-    uri_prefix = cfg.storage.uri_prefix
-    manifest_uri = cfg.manifest.uri
+    storage_client = hydra.utils.instantiate(cfg.system.storage)
+    router = hydra.utils.instantiate(cfg.system.storage_router)
+    uri_prefix = cfg.system.storage.uri_prefix
+    manifest_uri = cfg.system.manifest.uri
 
-    mlflow_model_name = pipeline_cfg.model.architecture.mlflow_model_name
+    mlflow_model_name = cfg.model.architecture.get("mlflow_model_name")
+    if not mlflow_model_name:
+        raise ValueError(
+            f"mlflow_model_name не задан в model.architecture для пайплайна '{cfg.pipeline_name}'"
+        )
     reg_model_name = f"{mlflow_model_name}_LoRA"
 
-    # 1. Получаем версию текущей Production модели из MLflow
-    mlflow.set_tracking_uri(tracking_uri)
-    client = MlflowClient()
-
+    # 1. Получаем версию текущей Production модели через логгер
     try:
-        prod_mv = client.get_model_version_by_alias(reg_model_name, "Production")
-        prod_version = prod_mv.version
+        prod_version = experiment_logger.get_production_version(reg_model_name, "Production")
         logger.info("Текущая Production модель: %s (версия %s)", reg_model_name, prod_version)
-    except MlflowException:
+    except Exception as e:
         logger.error(
-            "Алиас 'Production' не найден для модели '%s'. Слияние отменено.", reg_model_name
+            "Алиас 'Production' не найден для модели '%s' или произошла ошибка: %s. Слияние отменено.", 
+            reg_model_name, 
+            e
         )
         sys.exit(1)
 
@@ -69,29 +67,34 @@ def merge_and_export(cfg: DictConfig) -> None:
     else:
         logger.info("Монолит версии v%s не найден. Начинаем сборку и слияние...", prod_version)
 
-        # 3.1 Токенизатор и Базовая модель
-        tokenizer = hydra.utils.instantiate(pipeline_cfg.model.tokenizer).build()
-        OmegaConf.update(cfg, f"{cfg.pipeline_name}.model.builder.modifiers", None, force_add=True)
-        builder = hydra.utils.instantiate(pipeline_cfg.model.builder)
+        # 3.1 Резолвинг базовой модели и адаптера из storage через манифест
+        cache_base = Path(cfg.system.paths.model_dir) / f"{cfg.pipeline_name}_cache"
+        resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
+        try:
+            _, lora_path, _ = resolver.resolve_and_patch(
+                cfg, manifest_uri, pipeline_name=cfg.pipeline_name, is_training=False
+            )
+        except Exception as e:
+            logger.critical("Сбой резолвинга артефактов: %s", e)
+            sys.exit(1)
+
+        # 3.2 Токенизатор и Базовая модель (пути уже пропатчены резолвером)
+        tokenizer = hydra.utils.instantiate(cfg.model.tokenizer).build()
+
+        # Модификаторы отключаем — нужна чистая базовая модель без LoRA для merge
+        OmegaConf.update(cfg, "model.builder.modifiers", None, force_add=True)
+        builder = hydra.utils.instantiate(cfg.model.builder)
         base_model = builder.build(tokenizer=tokenizer)
 
-        # 3.2 Подготовка конфига для поиска адаптера
-        lora_cfg = OmegaConf.create(
-            {
-                "enabled": True,
-                "model_name": reg_model_name,
-                "alias": "Production",
-                "artifact_path": cfg.logger.registry.artifact_path,
-            }
-        )
-
-        lora_path = resolve_lora_resume_path(lora_cfg, tracking_uri=tracking_uri)
+        # 3.3 Адаптер уже скачан резолвером из storage — используем его напрямую
+        # MLflow здесь не нужен, адаптер берётся из prod_storage/adapters/
         if not lora_path:
             raise FileNotFoundError(
-                f"Не найден LoRA адаптер (Production) для {lora_cfg.model_name}"
+                f"Резолвер не вернул lora_path — проверь 'lora_uri' в манифесте для '{cfg.pipeline_name}'"
             )
+        logger.info("LoRA адаптер из storage: %s", lora_path)
 
-        # 3.3 Навешивание и слияние
+        # 3.4 Навешивание и слияние
         logger.info("Слияние весов (Merge and Unload)...")
         model = PeftModel.from_pretrained(base_model, lora_path)
         merged_model = model.merge_and_unload()
@@ -103,81 +106,64 @@ def merge_and_export(cfg: DictConfig) -> None:
                 tokenizer.pad_token_id or tokenizer.eos_token_id
             )
 
-        # 3.4 Сохранение локально перед выгрузкой
-        output_path = Path(cfg.paths.model_dir) / f"merged_{mlflow_model_name}_v{prod_version}"
+        # 3.5 Сохранение локально перед выгрузкой
+        output_path = Path(cfg.system.paths.model_dir) / f"merged_{mlflow_model_name}_v{prod_version}"
         output_path.mkdir(parents=True, exist_ok=True)
 
         logger.info("Локальное сохранение монолитной модели в: %s", output_path)
         merged_model.save_pretrained(output_path)
         tokenizer.save_pretrained(output_path)
 
-        # 3.5 Загрузка монолита в Storage
+        # 3.6 Загрузка монолита в Storage
         logger.info("Выгрузка монолита в Storage: %s", remote_merged_dir)
         storage_client.upload(local_dir=output_path, remote_path=remote_merged_dir)
 
-        # 3.6 Очистка памяти GPU
+        # 3.7 Очистка памяти GPU
         del model, merged_model, base_model
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    # 4. Безопасное обновление Манифеста (выполняется всегда, чтобы гарантировать консистентность)
+    # 4. Безопасное обновление Манифеста
+    pipeline_name = cfg.pipeline_name
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
+        # old_manifest — только для чтения, не попадает в upload
+        old_manifest_dir = tmp_path / "old_manifest"
 
         try:
-            manifest = router.download_manifest(manifest_uri, cache_dir=tmp_path / "old_manifest")
-            logger.info("Найден существующий манифест. Обновляем ключи модели.")
+            manifest = router.download_manifest(manifest_uri, cache_dir=old_manifest_dir)
+            logger.info("Найден существующий манифест. Обновляем секцию '%s'.", pipeline_name)
         except Exception:
             logger.warning("Существующий манифест не найден. Будет создан новый.")
             manifest = {}
 
-        manifest["load_type"] = "full_model"
-        manifest["model_uri"] = (
-            f"{uri_prefix}merged_models/{mlflow_model_name}_prod_v{prod_version}"
-        )
-        manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+        # Обновляем только секцию нужного пайплайна, не корень
+        if pipeline_name not in manifest:
+            manifest[pipeline_name] = {}
 
-        # Удаляем ключи от раздельной сборки
-        manifest.pop("base_model_uri", None)
-        manifest.pop("lora_uri", None)
+        manifest[pipeline_name].update({
+            "load_type": "full_model",
+            "model_uri": f"{uri_prefix}merged_models/{mlflow_model_name}_prod_v{prod_version}",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
 
-        manifest_file = tmp_path / f"{cfg.pipeline_name}_manifest.json"
+        # Удаляем ключи от раздельной сборки если были
+        manifest[pipeline_name].pop("base_model_uri", None)
+        manifest[pipeline_name].pop("lora_uri", None)
+
+        # upload_file — точечная замена одного файла, не трогает остальное в storage
+        manifest_file = tmp_path / "manifest.json"
         with open(manifest_file, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=4, ensure_ascii=False)
 
-        storage_client.upload(local_dir=tmp_dir, remote_path="manifests")
+        storage_client.upload_file(local_path=manifest_file, remote_path="manifest.json")
 
     logger.info(
-        "Манифест обновлен. Инференс будет использовать полную модель. Путь: %s/%s",
-        uri_prefix,
-        f"manifests/{cfg.pipeline_name}_manifest.json",
+        "Манифест обновлен для пайплайна '%s'. Инференс будет использовать полную модель.",
+        pipeline_name,
     )
 
 
 if __name__ == "__main__":
-    import re
-    from pathlib import Path
-
-    # 1. Пробуем взять из CLI
-    pipeline_name = next(
-        (arg.split("=")[1] for arg in sys.argv if arg.startswith("pipeline_name=")),
-        None,
-    )
-
-    # 2. Если не передан — читаем дефолт из main.yaml напрямую
-    if pipeline_name is None:
-        main_yaml = Path(__file__).parents[2] / "configs" / "main.yaml"
-        match = re.search(r"^pipeline_name:\s*['\"]?(\w+)['\"]?", main_yaml.read_text(), re.M)
-        if match:
-            pipeline_name = match.group(1)
-        else:
-            raise RuntimeError("Не удалось определить pipeline_name из main.yaml")
-        sys.argv.append(f"pipeline_name={pipeline_name}")
-
-    # 3. Переопределяем finetuning на full для найденного пайплайна
-    finetuning_key = f"{pipeline_name}/model/modifiers/finetuning="
-    if not any(arg.startswith(finetuning_key) for arg in sys.argv):
-        sys.argv.append(f"{finetuning_key}full")
-
     merge_and_export()

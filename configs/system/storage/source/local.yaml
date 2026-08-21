@@ -1,0 +1,4 @@
+# configs/storage/source/local.yaml
+_target_: src.tools.storage.local.LocalStorage
+base_dir: "${oc.env:PROJECT_ROOT}/prod_storage"
+uri_prefix: "local://"

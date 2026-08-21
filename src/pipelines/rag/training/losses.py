@@ -8,7 +8,7 @@ class MultipleNegativesRankingLoss(nn.Module):
 
     Работает как с 2 колонками (только in-batch negatives), так и с 3 колонками
     (добавляет явные hard negatives). Опционально поддерживает симметризацию лосса
-    (query→doc + doc→query), что улучшает качество эмбеддингов на небольших датасетах.
+    (query->doc + doc->query), что улучшает качество эмбеддингов на небольших датасетах.
 
     .. warning:: Утечка меток при hard negatives.
         При конкатенации ``[pos_scores | neg_scores]`` и ``labels = arange(B)``
@@ -23,9 +23,9 @@ class MultipleNegativesRankingLoss(nn.Module):
         """
         Args:
             scale: Температурный коэффициент (обратная температура τ = 1/scale).
-                Типичные значения: 20–50. Слишком высокий → нестабильное обучение;
-                слишком низкий → слабая дискриминация.
-            symmetric: Если True — считает лосс в обе стороны (q→d и d→q)
+                Типичные значения: 20–50. Слишком высокий -> нестабильное обучение;
+                слишком низкий -> слабая дискриминация.
+            symmetric: Если True — считает лосс в обе стороны (q->d и d->q)
                 и усредняет. Полезно при малых датасетах: удваивает эффективный
                 размер батча без дополнительных вычислений.
         """
@@ -54,7 +54,7 @@ class MultipleNegativesRankingLoss(nn.Module):
         scores = torch.matmul(query_embeddings, pos_embeddings.T) * self.scale
 
         if neg_embeddings is not None:
-            # Добавляем hard negatives: [B, B] → [B, 2B]
+            # Добавляем hard negatives: [B, B] -> [B, 2B]
             # Каждый запрос получает B in-batch negatives + B hard negatives
             neg_scores = torch.matmul(query_embeddings, neg_embeddings.T) * self.scale
             scores = torch.cat([scores, neg_scores], dim=1)

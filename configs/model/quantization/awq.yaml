@@ -1,0 +1,5 @@
+quantization_config:
+  _target_: transformers.AwqConfig   # ← по этому ключу builder понимает тип
+  bits: 4
+  fuse_max_seq_len: 2048
+  do_fuse: true

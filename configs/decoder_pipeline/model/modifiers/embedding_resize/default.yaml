@@ -1,3 +1,0 @@
-_target_: src.pipelines.base.core.models.modifiers.EmbeddingResizeModifier
-tokenizer: ${decoder_pipeline.model.tokenizer}
-pad_to_multiple_of: 8

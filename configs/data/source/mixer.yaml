@@ -1,0 +1,16 @@
+_target_: src.pipelines.base.core.data.mixers.InterleavedDataFetcher
+seed: 42
+stopping_strategy: first_exhausted  # first_exhausted | all_exhausted
+imbalance_warning_ratio: 10.0
+probabilities: ???   # обязательно: [0.7, 0.3] — должны суммироваться в 1.0
+fetchers: ???        # обязательно: список инстансов RawDataFetcher
+# Пример переопределения в корневом конфиге:
+# fetchers:
+#   - _target_: src.pipelines.base.core.data.fetcher.RawDataFetcher
+#     source_type: hf
+#     raw_dir: ${system.paths.raw_data_dir}
+#     dataset_name: org/dataset-a
+#   - _target_: src.pipelines.base.core.data.fetcher.RawDataFetcher
+#     source_type: local
+#     raw_dir: ${system.paths.raw_data_dir}
+#     file_name: extra.jsonl

@@ -1,0 +1,4 @@
+_target_: src.pipelines.rag.core.data.collators.ContrastiveDataCollator
+#query_column: ${data.query_column}
+#positive_column: ${data.positive_column}
+#negative_column: ${data.negative_column}

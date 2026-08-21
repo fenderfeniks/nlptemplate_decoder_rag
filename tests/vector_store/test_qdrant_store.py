@@ -32,17 +32,17 @@ def _make_qdrant_mocks():
     mock_client = MagicMock()
     mock_client_cls = MagicMock(return_value=mock_client)
 
-    # get_collections → пустой список по умолчанию
+    # get_collections -> пустой список по умолчанию
     mock_collections_response = MagicMock()
     mock_collections_response.collections = []
     mock_client.get_collections.return_value = mock_collections_response
 
-    # count → 0 по умолчанию
+    # count -> 0 по умолчанию
     mock_count_response = MagicMock()
     mock_count_response.count = 0
     mock_client.count.return_value = mock_count_response
 
-    # scroll → пустой по умолчанию
+    # scroll -> пустой по умолчанию
     mock_client.scroll.return_value = ([], None)
 
     mock_qdrant_module = MagicMock()
@@ -220,7 +220,7 @@ class TestInsert:
             store.insert(emb, [{}])
 
     def test_insert_batching(self, qdrant_mocks):
-        """Вставка батчами: 5 векторов с batch_size=2 → 3 вызова upsert."""
+        """Вставка батчами: 5 векторов с batch_size=2 -> 3 вызова upsert."""
         _, mock_client, _ = qdrant_mocks
         from src.vector_store.qdrant_store import QdrantVectorStore
 

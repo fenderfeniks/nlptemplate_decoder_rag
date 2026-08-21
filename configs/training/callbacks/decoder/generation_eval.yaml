@@ -1,0 +1,31 @@
+# training/callbacks/decoder/generation_eval.yaml
+# GenerationEvaluationCallback — генерирует текст и считает ROUGE/BLEU на val/test
+# model_name тянется из блока model — не дублируем путь к модели
+_target_: src.pipelines.decoder.training.callbacks.GenerationEvaluationCallback
+_recursive_: false
+model_name: ${model.architecture.model_name_or_path}
+num_random: 5                  # сколько случайных примеров логировать
+generation_batch_size: 2       # батч для генерации (отдельно от train batch_size)
+generation_kwargs:
+  max_new_tokens: 256
+  temperature: 0.7
+  do_sample: true
+  top_p: 0.9
+  repetition_penalty: 1.1
+fixed_samples: []              # список dict{prompt, response} для фиксированных примеров
+
+metrics_cfg:
+  _target_: src.evaluation.metrics.generator.GeneratorMetricsPipeline
+  metrics:
+    # Базовые статистические метрики (ROUGE, BLEU)
+    - _target_: src.evaluation.metrics.generator.StatisticalMetrics
+      use_rouge: true
+      use_bleu: true
+    
+    # Метрики качества текста (diversity, repetition)
+    - _target_: src.evaluation.metrics.generator.TextQualityMetrics
+      repetition_ngram_n: 3
+      
+    # Метрики скорости и токенов (latency, throughput)
+    - _target_: src.evaluation.metrics.generator.GenerationSpeedMetrics
+      warn_empty_rate: 0.05

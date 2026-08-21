@@ -1,0 +1,4 @@
+# training/scheduler/linear.yaml
+_target_: transformers.get_linear_schedule_with_warmup
+_partial_: true
+num_warmup_steps: ${training.warmup_steps}

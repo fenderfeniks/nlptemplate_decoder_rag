@@ -1,0 +1,41 @@
+# configs/build_benchmark_rag.yaml
+# Запуск:
+#   python -m scripts.rag_pipeline.build_benchmark
+#   python -m scripts.rag_pipeline.build_benchmark benchmark.generator_type=api
+#   python -m scripts.rag_pipeline.build_benchmark benchmark.benchmark_size=20
+
+defaults:
+  - system: default
+  - data: benchmark_rag                         # те же чанки что идут в индекс — chunk_id совпадёт
+  - evaluation/benchmark/generator: local  # local | api — переключается через CLI
+  - evaluation/prompts: rag_qa
+  - _self_
+
+project_name: "nlp_project"
+pipeline_name: "rag_pipeline"
+seed: ${system.seed}
+
+# Модели грузятся из единого манифеста (system.manifest.uri):
+#   manifest["decoder_pipeline"] -> LocalQAGenerator (генерация QA)
+#   manifest["nli_pipeline"]     -> NLIJudge (фильтрация галлюцинаций)
+# DataModule не используется — нужны сырые тексты, а не токенизированные input_ids.
+# Данные берутся через fetcher + splitter напрямую из data-конфига.
+
+benchmark:
+  # --- Целевой размер ---
+  benchmark_size: 100                     # сколько принятых QA-пар собрать итого
+
+  # --- Генератор ---
+  generator_type: local                   # local | api
+
+  # --- NLI-фильтрация ---
+  nli_threshold: 0.65
+
+  # --- Параметры чанков ---
+  text_column: "text"
+  id_column: "chunk_id"
+  min_chunk_length: 150
+  max_samples_per_chunk: 1
+
+  # --- Storage ---
+  remote_dir: "rag_pipeline/benchmark"

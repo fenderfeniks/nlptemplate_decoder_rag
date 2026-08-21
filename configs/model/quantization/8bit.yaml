@@ -1,0 +1,2 @@
+quantization_config:
+  load_in_8bit: true

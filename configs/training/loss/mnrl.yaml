@@ -1,0 +1,6 @@
+# training/loss/mnrl.yaml
+# Multiple Negatives Ranking Loss (InfoNCE / NTXent)
+# Работает с 2 колонками (in-batch negatives) и с 3 (+ hard negatives)
+_target_: src.pipelines.rag.training.losses.MultipleNegativesRankingLoss
+scale: 20.0        # Температурный коэффициент (1/τ). Типичный диапазон: 20–50
+symmetric: false   # true -> лосс в обе стороны (q->d + d->q), удваивает эффективный батч

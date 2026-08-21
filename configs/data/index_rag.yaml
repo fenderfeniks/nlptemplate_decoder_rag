@@ -1,0 +1,44 @@
+# configs/data/index_rag.yaml
+defaults:
+  - source: hf_corpus
+  - cleaner: default
+  - collator: rag_indexing
+  - transforms/cleaning: default
+  - transforms/chunking: default
+  - transforms/metadata: injector
+  - transforms/deduplication: exact
+  - transforms/validation: rag
+  - transforms/tokenization: rag
+  - transforms/filtering: length
+  - _self_
+
+dataset_name: rag_corpus
+max_samples: 200
+force_reprocess: true
+
+# --- Топ-левел переменные ---
+max_length: 512
+text_column: "text"
+query_column: null
+positive_column: null
+negative_column: null
+mode: "indexing"
+chunk_size: 500
+chunk_overlap: 50
+
+transforms:
+  cleaning:
+    columns_to_clean:
+      - "${data.text_column}"
+  deduplication:
+    target_columns:
+      - "${data.text_column}"
+  filtering:
+    column: "input_ids"
+
+dataloader:
+  batch_size: 64
+  num_workers: ${system.dataloader_num_workers}
+  pin_memory: ${system.pin_memory}
+  persistent_workers: ${system.persistent_workers}
+  prefetch_factor: ${system.prefetch_factor}

@@ -1,7 +1,0 @@
-_target_: src.pipelines.rag.core.data.transforms.chunking.OverlappingChunkingTransform
-text_column: ${rag_pipeline.data.text_column}
-chunk_size: ${rag_pipeline.data.chunk_size}
-chunk_overlap: ${rag_pipeline.data.chunk_overlap}
-separator: " "
-num_proc: ${rag_pipeline.data.num_proc}
-batch_size: ${rag_pipeline.data.batch_size}

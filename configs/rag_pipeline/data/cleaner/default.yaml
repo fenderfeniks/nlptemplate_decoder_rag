@@ -1,8 +1,0 @@
-_target_: src.pipelines.base.core.data.cleaners.TextCleaningPipeline
-cleaners:
-  - _target_: src.pipelines.base.core.data.cleaners.RegexCleaner
-    pattern: 'https?://\S+|www\.\S+'
-    replacement: ''
-  - _target_: src.pipelines.base.core.data.cleaners.RegexCleaner
-    pattern: '<.*?>'
-    replacement: ''

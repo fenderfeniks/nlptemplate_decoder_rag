@@ -1,0 +1,3 @@
+# Без квантизации — HFModelBuilder получит quantization_config: null
+# и пропустит BitsAndBytesConfig
+#quantization_config: null

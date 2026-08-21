@@ -1,0 +1,14 @@
+# configs/evaluation/benchmark/generator/local.yaml
+# LocalQAGenerator — грузит модель сам через HF, независимо от model.* пайплайна
+
+# @package benchmark.generator_cfg
+_target_: src.tools.benchmark.generator.LocalQAGenerator
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+max_new_tokens: 256
+temperature: 0.3
+do_sample: true
+device_map: auto
+torch_dtype: bfloat16
+trust_remote_code: true
+system_prompt: null                      # null = дефолт из кода (_SYSTEM_PROMPT)
+user_template: null                      # null = дефолт из кода (_USER_TMPL)

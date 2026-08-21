@@ -84,12 +84,12 @@ class TestIsDuplicateAndRegister:
         assert lsh.is_duplicate(LONG_TEXT) is True
 
     def test_near_duplicate_detected(self, lsh):
-        """Близкий текст с Jaccard > threshold → дубль."""
+        """Близкий текст с Jaccard > threshold -> дубль."""
         lsh.register("doc_1", LONG_TEXT)
         assert lsh.is_duplicate(NEAR_DUP) is True
 
     def test_different_text_not_duplicate(self, lsh):
-        """Сильно отличающийся текст → не дубль."""
+        """Сильно отличающийся текст -> не дубль."""
         lsh.register("doc_1", LONG_TEXT)
         assert lsh.is_duplicate(DIFFERENT) is False
 

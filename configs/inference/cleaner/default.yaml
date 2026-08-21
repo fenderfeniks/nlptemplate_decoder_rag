@@ -1,0 +1,8 @@
+# inference/cleaner/default.yaml
+# ResponseCleaner — постпроцессор сырого вывода LLM
+_target_: src.pipelines.decoder.inference.response_cleaner.ResponseCleaner
+strip_prompt: true               # срезать эхо-промпт из начала ответа
+remove_special_tokens: true      # удалять <|...|>, </s>, <s> и т.п.
+remove_markdown_blocks: true     # удалять ```lang ... ``` блоки
+remove_extra_spaces: true        # схлопывать множественные пробелы
+trim_incomplete_sentence: true   # обрезать после последнего [.!?]

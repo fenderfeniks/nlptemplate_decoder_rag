@@ -1,0 +1,9 @@
+model_name_or_path: "hf-internal-testing/tiny-random-BertModel"
+mlflow_model_name: "tiny-random-BertModel"
+auto_model_class: "transformers.AutoModel"
+torch_dtype: "bfloat16"
+attn_implementation: "sdpa"
+trust_remote_code: false
+base_model_uri: "hf://hf-internal-testing/tiny-random-BertModel"
+embedding_dim: 1024
+max_position_embeddings: 512

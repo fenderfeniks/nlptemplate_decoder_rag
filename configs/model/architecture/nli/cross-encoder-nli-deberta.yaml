@@ -1,0 +1,14 @@
+# configs/model/architecture/nli/cross-encoder-nli-deberta.yaml
+_target_: src.pipelines.base.core.models.builder.HFModelBuilder
+model_name_or_path: cross-encoder/nli-deberta-v3-small
+auto_model_class: transformers.AutoModelForSequenceClassification
+cache_dir: ${system.paths.hf_cache_dir}
+trust_remote_code: false
+torch_dtype: bfloat16
+attn_implementation: sdpa
+device_map: auto_cuda
+rope_scaling: null
+quantization_config: ${model.quantization.quantization_config}
+modifiers: ${model.modifiers}
+mlflow_model_name: "cross-encoder-nli-deberta-v3-small"
+base_model_uri: "hf://cross-encoder/nli-deberta-v3-small"

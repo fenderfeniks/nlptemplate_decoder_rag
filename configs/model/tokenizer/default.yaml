@@ -1,0 +1,9 @@
+_target_: src.pipelines.base.core.models.tokenization.HFTokenizerBuilder
+# model_name переопределяется из architecture — интерполируем оттуда
+tokenizer_name: ${model.architecture.model_name_or_path}
+use_fast: true
+padding_side: right     # decoder train: right | batched generation: left
+add_eos_token: false
+chat_template: null     # null = шаблон из конфига токенизатора
+trust_remote_code: true
+cache_dir: ${system.paths.hf_cache_dir}

@@ -1,0 +1,16 @@
+# configs/data/transforms/validation/decoder.yaml
+_target_: src.pipelines.decoder.core.data.transforms.validation.DecoderValidationTransform
+
+# Имена колонок берутся из секции data — единый источник истины.
+# Если в data.yaml задано prompt_column: instruction, здесь автоматически
+# будет instruction. Хардкодить имена колонок здесь НЕЛЬЗЯ.
+prompt_column: "${data.prompt_column}"
+target_column: "${data.target_column}"
+
+# context_column: опциональный. null → трансформ работает как обычный SFT-валидатор.
+# При RAG указывает на колонку с контекстом, которая может быть пустой строкой
+# (записи без контекста валидны — модель учится отвечать "не знаю").
+context_column: "${data.retrieve_column}"
+
+num_proc: ${system.num_proc}
+batch_size: ${system.batch_size}

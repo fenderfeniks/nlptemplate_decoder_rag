@@ -13,7 +13,7 @@ class HFTokenizerBuilder:
     """Фабрика для безопасной загрузки и настройки HuggingFace токенизаторов.
 
     Решает типичные production-проблемы:
-    - Отсутствующий ``pad_token`` у Llama / Mistral / Falcon → фикс через ``eos_token``.
+    - Отсутствующий ``pad_token`` у Llama / Mistral / Falcon -> фикс через ``eos_token``.
     - Явное задание ``padding_side`` (важно для batched generation vs training).
     - Поддержка кастомных chat-template для instruction fine-tuning.
     - Контроль ``cache_dir`` и ``trust_remote_code`` для production-окружений.
@@ -97,7 +97,7 @@ class HFTokenizerBuilder:
         # лейблы для padding позиций маскируются через -100 в коллаторе.
         if tokenizer.pad_token is None:
             logger.warning(
-                "Токенизатор '%s' не имеет pad_token → устанавливаем pad_token = eos_token ('%s').",
+                "Токенизатор '%s' не имеет pad_token -> устанавливаем pad_token = eos_token ('%s').",
                 self.tokenizer_name,
                 tokenizer.eos_token,
             )

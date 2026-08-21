@@ -17,7 +17,7 @@ class RAGOrchestrator:
         rag_api_url: str,
         llm_client: LLMGenerationClient,
         prompt_manager: PromptManager,
-        default_template: str = "rag_qa",
+        default_template: str = "rag_qa_generation",
         default_top_k: int = 5,
         max_history_msgs: int = 10,
         http_timeout: float = 10.0,

@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
 
+
 class BaseValidationTransform(BaseDatasetTransform, ABC):
     """Базовый класс для Pydantic-валидации датасетов."""
 
@@ -46,7 +47,7 @@ class BaseValidationTransform(BaseDatasetTransform, ABC):
 
         required_columns = self._get_required_columns()
         missing_columns = [col for col in required_columns if col not in dataset.column_names]
-        
+
         if missing_columns:
             logger.warning(
                 "Колонки %s не найдены в датасете — валидация пропущена. "
@@ -63,21 +64,28 @@ class BaseValidationTransform(BaseDatasetTransform, ABC):
             num_proc=self.num_proc,
             desc=f"Validating {self.mode} records",
         )
-        
+
+        # ВАЖНО: именованная функция вместо lambda — lambda не сериализуется
+        # через dill на Windows при num_proc > 1 (SpawnPoolWorker), что приводит
+        # к тихому падению и возврату пустого датасета.
         filter_col = self._get_filter_column()
+
+        def _keep_valid_row(example: dict) -> bool:
+            return bool(example[filter_col])
+
         dataset = dataset.filter(
-            lambda x: bool(x[filter_col]),
+            _keep_valid_row,
             num_proc=self.num_proc,
         )
 
         logger.info(
-            "Валидация завершена: %d → %d записей (отброшено %d)",
+            "Валидация завершена: %d -> %d записей (отброшено %d)",
             initial_count,
             len(dataset),
             initial_count - len(dataset),
         )
         return dataset
-    
+
 
 class CleaningTransform(BaseDatasetTransform):
     """Трансформация для очистки текста через кастомные клинеры.
@@ -94,16 +102,7 @@ class CleaningTransform(BaseDatasetTransform):
         num_proc: int = 4,
         batch_size: int = 1000,
     ) -> None:
-        """
-        Args:
-            pipeline: Инстанс ``TextCleaningPipeline`` с набором клинеров.
-            columns_to_clean: Список имён колонок для очистки. Значения ``None``
-                (например, от Hydra-интерполяции null-полей) игнорируются.
-            num_proc: Число процессов для параллельного map.
-            batch_size: Размер батча для map.
-        """
         self.pipeline = pipeline
-        # Убираем None сразу при инициализации — нет смысла проверять их каждый раз
         self.columns_to_clean: list[str] = [c for c in columns_to_clean if c is not None]
         self.num_proc = num_proc
         self.batch_size = batch_size

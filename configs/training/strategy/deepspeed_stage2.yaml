@@ -1,0 +1,6 @@
+# training/strategy/deepspeed_stage2.yaml
+_target_: pytorch_lightning.strategies.DeepSpeedStrategy
+stage: 2
+offload_optimizer: false   # true -> CPU offload, экономит GPU RAM но медленнее
+allgather_bucket_size: 5.0e8
+reduce_bucket_size: 5.0e8

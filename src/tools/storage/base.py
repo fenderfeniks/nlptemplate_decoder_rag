@@ -32,6 +32,19 @@ class BaseStorage(ABC):
         pass
 
     @abstractmethod
+    def download_file(self, remote_path: str, local_path: Path | str) -> Path:
+        """Скачивает один файл из хранилища.
+        
+        Args:
+            remote_path: Путь к файлу в хранилище.
+            local_path:  Локальный путь куда сохранить файл.
+        
+        Returns:
+            Path к скачанному файлу.
+        """
+        pass
+
+    @abstractmethod
     def exists(self, remote_path: str) -> bool:
         """Проверяет, существует ли директория или файл в удаленном хранилище."""
         pass

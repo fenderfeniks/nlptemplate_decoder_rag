@@ -1,0 +1,10 @@
+_target_: src.pipelines.rag.core.data.transforms.tokenization.RAGTokenizationTransform
+mode: ${data.mode}
+text_column: ${data.text_column}
+query_column: ${data.query_column}
+positive_column: ${data.positive_column}
+negative_column: ${data.negative_column}
+max_length: ${data.max_length}
+empty_doc_placeholder: ""
+num_proc: ${system.num_proc}
+batch_size: ${system.batch_size}

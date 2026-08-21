@@ -1,0 +1,33 @@
+# training/train_rag.yaml
+# Единственный источник правды о том какая метрика главная для RAG-пайплайна.
+# checkpoint и early_stopping тянут отсюда через ${training.primary_metric}
+defaults:
+  - loss: mnrl
+  - optimizer: adamw
+  - scheduler: cosine_warmup
+  - callbacks/shared/checkpoint@callbacks.model_checkpoint
+  - callbacks/shared/early_stopping@callbacks.early_stopping
+  - callbacks/shared/lr_monitor@callbacks.lr_monitor
+  - callbacks/shared/rich_progress@callbacks.rich_progress
+  - callbacks/rag/retrieval_eval@callbacks.retrieval_eval
+  - _self_
+
+# Метрика — единственная точка для checkpoint + early_stopping
+primary_metric: val_mrr
+primary_metric_mode: max   # max для метрик качества, min для loss
+
+
+warmup_steps: 500
+_target_: pytorch_lightning.Trainer
+max_steps: 10000             # основной критерий остановки
+max_epochs: -1               # -1 = не ограничивать по эпохам
+accelerator: ${system.accelerator}
+devices: ${system.devices}
+precision: bf16-mixed        # bf16-mixed | 16-mixed | 32
+accumulate_grad_batches: 1
+gradient_clip_val: 1.0
+log_every_n_steps: 10
+logger: ${system.logger.pylightning}
+val_check_interval: 5     # валидация каждые N шагов
+num_sanity_val_steps: 2
+deterministic: false         # true -> воспроизводимость, но медленнее

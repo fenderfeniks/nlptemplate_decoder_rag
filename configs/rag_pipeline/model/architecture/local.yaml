@@ -1,7 +1,0 @@
-model_name_or_path: "${paths.data_dir}/weights/my_local_merged_model" # Заглушка
-mlflow_model_name: "LocalMerged_v1" # Имя без слэшей для Model Registry
-auto_model_class: "transformers.AutoModel"
-torch_dtype: "bfloat16"
-attn_implementation: "flash_attention_2"
-trust_remote_code: false
-base_model_uri: "local://my_local_merged_model"

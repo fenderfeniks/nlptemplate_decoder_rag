@@ -3,7 +3,7 @@ import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-
+from botocore.exceptions import ClientError
 import boto3
 from boto3.s3.transfer import TransferConfig
 
@@ -40,6 +40,30 @@ class S3Storage(BaseStorage):
             multipart_chunksize=1024 * 1024 * 25,
             use_threads=True,
         )
+        
+    def upload_file(self, local_path: str | Path, remote_path: str) -> None:
+        """Безопасная загрузка одного файла в S3-бакет без удаления других объектов."""
+        local_path = Path(local_path)
+        
+        if not local_path.exists():
+            raise FileNotFoundError(f"Локальный файл не найден: {local_path}")
+
+        # В S3 ключи обычно не должны начинаться со слеша
+        s3_key = remote_path.lstrip("/")
+        
+        logger.info("S3: загрузка файла %s -> s3://%s/%s", local_path, self.bucket_name, s3_key)
+        
+        try:
+            # Предполагается, что клиент инициализируется в __init__ 
+            # как self.client = boto3.client('s3', ...) 
+            self.client.upload_file(
+                Filename=str(local_path),
+                Bucket=self.bucket_name,
+                Key=s3_key
+            )
+        except ClientError as e:
+            logger.error("Сбой загрузки файла в S3: %s", e)
+            raise
 
     def upload(self, local_dir: Path | str, remote_path: str) -> None:
         local_path = Path(local_dir)
@@ -84,6 +108,20 @@ class S3Storage(BaseStorage):
     def download(self, remote_path: str, local_dir: Path | str) -> Path:
         target_path = Path(local_dir)
         remote_path = remote_path.strip("/")
+        
+        # --- ДОБАВЛЕННЫЙ БЛОК ---
+        # Проверяем, существует ли точный ключ файла
+        try:
+            self.s3_client.head_object(Bucket=self.bucket_name, Key=remote_path)
+            # Если не упало — это одиночный файл.
+            if target_path.suffix == "":
+                target_path = target_path / Path(remote_path).name
+            return self.download_file(remote_path, target_path)
+        except Exception:
+            # Объекта файла нет, идём скачивать как префикс (директорию)
+            pass
+        # ------------------------
+
         tmp_path = target_path.with_name(target_path.name + ".tmp")
 
         if tmp_path.exists():
@@ -140,11 +178,44 @@ class S3Storage(BaseStorage):
             logger.error("Критический сбой скачивания из S3. Временные файлы очищены.")
             raise e
 
+    def download_file(self, remote_path: str, local_path: Path | str) -> Path:
+        target = Path(local_path)
+        remote_path = remote_path.strip("/")
+        tmp = target.with_name(target.name + ".tmp")
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            logger.info("Скачивание файла из S3: s3://%s/%s", self.bucket_name, remote_path)
+            self.s3_client.download_file(
+                self.bucket_name,
+                remote_path,
+                str(tmp),
+                Config=self.transfer_config,
+            )
+            if target.exists():
+                target.unlink()
+            tmp.rename(target)
+
+            logger.info("Файл атомарно скачан из S3 в: %s", target)
+            return target
+
+        except Exception as e:
+            if tmp.exists():
+                tmp.unlink()
+            logger.error("Сбой скачивания файла из S3: %s", e)
+            raise
+
     def exists(self, remote_path: str) -> bool:
         try:
-            # В S3 нет директорий, проверяем наличие хотя бы одного объекта с нужным префиксом
-            # Если remote_path это конкретный файл, Prefix тоже сработает.
-
+            # Сначала проверяем, не является ли путь точным файлом
+            try:
+                self.s3_client.head_object(Bucket=self.bucket_name, Key=remote_path)
+                return True
+            except Exception:
+                pass # Не файл, проверяем префикс
+                
+            # Проверяем префикс (директорию)
             response = self.s3_client.list_objects_v2(
                 Bucket=self.bucket_name, Prefix=remote_path.rstrip("/") + "/", MaxKeys=1
             )

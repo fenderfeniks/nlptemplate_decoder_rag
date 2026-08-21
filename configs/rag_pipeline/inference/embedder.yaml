@@ -1,7 +1,0 @@
-_target_: src.pipelines.rag.inference.embedder.RAGInferenceEmbedder
-device: "cpu"
-precision: "fp32"
-max_length: ${max_length}
-
-test_query: "Какие существуют архитектурные паттерны для масштабирования RAG?"
-top_k: 5

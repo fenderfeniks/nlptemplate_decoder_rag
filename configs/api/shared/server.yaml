@@ -1,0 +1,4 @@
+model_load_timeout_sec: 120
+version: ${oc.env:APP_VERSION,0.1.0}
+cors_origins:
+  - "*"                             # в prod_rag.yaml -> конкретные домены

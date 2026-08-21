@@ -71,10 +71,10 @@ def setup_middlewares(app: FastAPI, cors_origins: list[str]) -> None:
         app: Экземпляр приложения FastAPI.
         cors_origins: Список разрешённых источников для CORS.
     """
-    # Логирование — внутренний слой (добавлен первым → выполняется последним снаружи)
+    # Логирование — внутренний слой (добавлен первым -> выполняется последним снаружи)
     app.add_middleware(RequestLoggingMiddleware)
 
-    # CORS — внешний слой (добавлен последним → выполняется первым)
+    # CORS — внешний слой (добавлен последним -> выполняется первым)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,

@@ -1,0 +1,21 @@
+# configs/index_rag.yaml
+defaults:
+  - system: default
+  - model: eval_rag
+  - data: index_rag
+  - inference: index_rag
+  - vector_db: qdrant
+  - _self_
+  - environments: local
+  
+
+# --- Общие параметры пайплайна ---
+project_name: "nlp_project"
+pipeline_name: rag_pipeline
+seed: ${system.seed}
+incremental: false
+  
+system:
+  logger:
+    pylightning:
+      experiment_name: ${project_name}_rag_eval

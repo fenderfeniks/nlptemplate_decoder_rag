@@ -1,8 +1,0 @@
-_target_: src.pipelines.base.core.data.transforms.validation.CleaningTransform
-pipeline: ${decoder_pipeline.data.cleaner}
-columns_to_clean:
-  - ${decoder_pipeline.data.text_column}
-  - ${decoder_pipeline.data.prompt_column}
-  - ${decoder_pipeline.data.target_column}
-num_proc: ${decoder_pipeline.data.num_proc}
-batch_size: ${decoder_pipeline.data.batch_size}

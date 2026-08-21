@@ -1,0 +1,7 @@
+# evaluation/metrics/retriever.yaml
+# RetrieverMetrics — src/evaluation/metrics/retriever.py
+_target_: src.evaluation.metrics.retriever.RetrieverMetrics
+retrieval_top_k: ${evaluation.retrieval_top_k}
+rerank_top_k: ${evaluation.rerank_top_k}        # глубина финальной выдачи — задаётся в корневом конфиге
+similarity_threshold: 0.0   # фильтрация по dense score; 0.0 = без фильтра
+ood_threshold: null         # null = OOD-детекция отключена; float = порог по top dense score

@@ -1,0 +1,30 @@
+# training/train_decoder.yaml
+defaults:
+  - optimizer: adamw
+  - scheduler: cosine_warmup
+  - callbacks/shared/checkpoint@callbacks.model_checkpoint
+  - callbacks/shared/early_stopping@callbacks.early_stopping
+  - callbacks/shared/lr_monitor@callbacks.lr_monitor
+  - callbacks/shared/rich_progress@callbacks.rich_progress
+  - callbacks/decoder/generation_eval@callbacks.generation_eval
+  - _self_
+
+# Метрика — единственная точка для checkpoint + early_stopping
+primary_metric: val_loss
+primary_metric_mode: min
+
+
+warmup_steps: 500
+_target_: pytorch_lightning.Trainer
+max_steps: 5000              # основной критерий остановки
+max_epochs: -1               # -1 = не ограничивать по эпохам
+accelerator: ${system.accelerator}
+devices: ${system.devices}
+precision: bf16-mixed
+accumulate_grad_batches: 4   # эффективный батч = batch_size × accumulate_grad_batches
+gradient_clip_val: 1.0
+log_every_n_steps: 10
+logger: ${system.logger.pylightning}
+val_check_interval: 500      # валидация каждые N шагов
+num_sanity_val_steps: 2
+deterministic: false

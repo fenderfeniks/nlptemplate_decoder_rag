@@ -1,19 +1,23 @@
 # src/tools/evaluation/judges/llm_judge.py
-"""LLM-as-a-Judge через OpenRouter (OpenAI-compatible API)."""
+"""LLM-as-a-Judge через OpenRouter (OpenAI-compatible API) и локальные модели."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 import time
+from pathlib import Path
 from string import Template
-
+from typing import Any
+import torch
 from openai import OpenAI
+from transformers import pipeline as hf_pipeline
 
 from src.tools.evaluation.judges.base import BaseJudge
+from src.tools.benchmark.generator import BaseQAGenerator
 from src.tools.evaluation.schema import EvalInput, EvalResult
-
 
 logger = logging.getLogger(__name__)
 
@@ -48,38 +52,51 @@ _REASONING_INSTR = "- `reasoning`: one sentence explaining your decision."
 _REFERENCE_BLOCK = "### Reference Answer\n$reference\n"
 
 
+def _parse_llm_json(raw: str, min_score: float, max_score: float) -> tuple[float | None, bool | None, str | None]:
+    """Парсит JSON-ответ от judge. Устойчив к markdown-обёрткам."""
+    cleaned = re.sub(r"```(?:json)?|```", "", raw).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        logger.warning("LLMJudge: не удалось распарсить JSON: %r", raw[:200])
+        return None, None, None
+
+    score = data.get("score")
+    verdict = data.get("verdict")
+    reasoning = data.get("reasoning")
+
+    # Нормализация score в [0, 1] относительно заданного диапазона
+    if score is not None:
+        try:
+            score = float(score)
+            score = (score - min_score) / (max_score - min_score)
+            score = max(0.0, min(1.0, score))
+        except (TypeError, ValueError):
+            score = None
+
+    if verdict is not None and not isinstance(verdict, bool):
+        verdict = str(verdict).lower() in ("true", "1", "yes", "pass")
+
+    return score, verdict, reasoning
+
+
 class LLMJudge(BaseJudge):
-    """Judge на базе LLM через OpenRouter.
-
-    Конфигурируется полностью через Hydra — см. configs/evaluation/judge/openrouter.yaml.
-
-    Что возвращает — управляется флагами:
-    - ``return_score=True``     → EvalResult.score
-    - ``return_reasoning=True`` → EvalResult.reasoning
-    - ``return_verdict=True``   → EvalResult.verdict
-
-    Параметры rate-limiting (``requests_per_minute``, ``retry_attempts``) защищают
-    от 429 при батчевой оценке.
-    """
+    """Judge на базе LLM через OpenRouter."""
 
     def __init__(
         self,
         model: str,
         api_key_env: str = "OPENROUTER_API_KEY",
         base_url: str = "https://openrouter.ai/api/v1",
-        # --- Что возвращать ---
         return_score: bool = True,
         return_reasoning: bool = False,
         return_verdict: bool = False,
         min_score: float = 1.0,
         max_score: float = 5.0,
-        # --- Промпт ---
         system_prompt: str = _DEFAULT_SYSTEM,
         user_prompt_template: str | None = None,
-        # --- Генерация ---
         temperature: float = 0.0,
         max_tokens: int = 256,
-        # --- Rate limiting ---
         requests_per_minute: int = 60,
         retry_attempts: int = 3,
         retry_delay: float = 5.0,
@@ -106,20 +123,7 @@ class LLMJudge(BaseJudge):
         self.retry_delay = retry_delay
         self._last_request_time: float = 0.0
 
-        logger.info(
-            "LLMJudge: model=%s, score=%s, reasoning=%s, verdict=%s",
-            model,
-            return_score,
-            return_reasoning,
-            return_verdict,
-        )
-
-    # ------------------------------------------------------------------
-    # Внутренние методы
-    # ------------------------------------------------------------------
-
     def _build_prompt(self, inp: EvalInput) -> str:
-        """Рендерит пользовательский промпт через string.Template."""
         reference_block = (
             Template(_REFERENCE_BLOCK).substitute(reference=inp.reference) if inp.reference else ""
         )
@@ -138,7 +142,6 @@ class LLMJudge(BaseJudge):
         )
 
     def _rate_limit(self) -> None:
-        """Простой rate limiter: выдерживает минимальный интервал между запросами."""
         elapsed = time.monotonic() - self._last_request_time
         wait = self.min_interval - elapsed
         if wait > 0:
@@ -146,7 +149,6 @@ class LLMJudge(BaseJudge):
         self._last_request_time = time.monotonic()
 
     def _call_api(self, user_prompt: str) -> str:
-        """Вызывает API с retry при ошибках."""
         for attempt in range(1, self.retry_attempts + 1):
             try:
                 self._rate_limit()
@@ -171,42 +173,7 @@ class LLMJudge(BaseJudge):
                     time.sleep(self.retry_delay * attempt)
                 else:
                     raise
-
-        return ""  # unreachable
-
-    def _parse_response(self, raw: str) -> tuple[float | None, bool | None, str | None]:
-        """Парсит JSON-ответ judge. Устойчив к markdown-обёрткам."""
-        import json
-
-        # Убираем ```json ... ``` если модель решила добавить
-        cleaned = re.sub(r"```(?:json)?|```", "", raw).strip()
-        try:
-            data = json.loads(cleaned)
-        except json.JSONDecodeError:
-            logger.warning("LLMJudge: не удалось распарсить JSON: %r", raw[:200])
-            return None, None, None
-
-        score = data.get("score")
-        verdict = data.get("verdict")
-        reasoning = data.get("reasoning")
-
-        # Нормализация score в [0, 1] относительно заданного диапазона
-        if score is not None:
-            try:
-                score = float(score)
-                score = (score - self.min_score) / (self.max_score - self.min_score)
-                score = max(0.0, min(1.0, score))
-            except (TypeError, ValueError):
-                score = None
-
-        if verdict is not None and not isinstance(verdict, bool):
-            verdict = str(verdict).lower() in ("true", "1", "yes", "pass")
-
-        return score, verdict, reasoning
-
-    # ------------------------------------------------------------------
-    # Публичный интерфейс
-    # ------------------------------------------------------------------
+        return ""
 
     def evaluate_batch(self, inputs: list[EvalInput]) -> list[EvalResult]:
         results = []
@@ -214,7 +181,7 @@ class LLMJudge(BaseJudge):
             user_prompt = self._build_prompt(inp)
             try:
                 raw = self._call_api(user_prompt)
-                score, verdict, reasoning = self._parse_response(raw)
+                score, verdict, reasoning = _parse_llm_json(raw, self.min_score, self.max_score)
             except Exception as e:
                 logger.error("LLMJudge: сбой для примера '%s...': %s", inp.prompt[:50], e)
                 raw = str(e)
@@ -230,3 +197,80 @@ class LLMJudge(BaseJudge):
                 )
             )
         return results
+
+
+_SYSTEM_PROMPT = (
+    "You are a helpful assistant that generates question-answer pairs "
+    "from provided text passages."
+)
+ 
+_USER_TMPL = (
+    "Generate one question and a concise answer based solely on the passage below.\n"
+    "Respond ONLY in JSON: {{\"question\": \"...\", \"answer\": \"...\"}}\n\n"
+    "Passage:\n{chunk_text}"
+)
+ 
+ 
+class LocalQAGenerator(BaseQAGenerator):
+    """Генератор QA-пар через локальную HF-модель (decoder/instruction-tuned).
+ 
+    Принимает готовый HF text-generation pipeline снаружи — модель загружается
+    через HFModelBuilder в вызывающем коде. Содержит только логику генерации
+    и парсинга ответа.
+ 
+    Пример инициализации в build_benchmark.py:
+        hf_pipe = _build_decoder_pipeline(cfg, router, cache_base)
+        generator = LocalQAGenerator(pipeline=hf_pipe)
+    """
+ 
+    def __init__(
+        self,
+        pipeline: Any,  # HF text-generation pipeline, готовый снаружи
+        max_new_tokens: int = 256,
+        temperature: float = 0.3,
+        do_sample: bool = True,
+        system_prompt: str = _SYSTEM_PROMPT,
+        user_template: str = _USER_TMPL,
+    ) -> None:
+        self._pipeline = pipeline
+        self.max_new_tokens = max_new_tokens
+        self.temperature = temperature
+        self.do_sample = do_sample
+        self.system_prompt = system_prompt
+        self.user_template = user_template
+        logger.info("LocalQAGenerator: готов.")
+ 
+    def _build_messages(self, chunk_text: str) -> list[dict[str, str]]:
+        return [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": self.user_template.format(chunk_text=chunk_text)},
+        ]
+ 
+    @staticmethod
+    def _parse(raw: str) -> tuple[str, str] | None:
+        cleaned = re.sub(r"```(?:json)?|```", "", raw).strip()
+        try:
+            data = json.loads(cleaned)
+            question = str(data.get("question", "")).strip()
+            answer = str(data.get("answer", "")).strip()
+            if question and answer:
+                return question, answer
+        except json.JSONDecodeError:
+            logger.warning("LocalQAGenerator: не удалось распарсить JSON: %r", raw[:200])
+        return None
+ 
+    def generate(self, chunk_text: str) -> tuple[str, str] | None:
+        messages = self._build_messages(chunk_text)
+        try:
+            outputs = self._pipeline(
+                messages,
+                max_new_tokens=self.max_new_tokens,
+                temperature=self.temperature,
+                do_sample=self.do_sample,
+                return_full_text=False,
+            )
+            raw = outputs[0]["generated_text"].strip()
+            return self._parse(raw)
+        except Exception as e:
+            logger.error("LocalQAGenerator: сбой генерации: %s", e)
+            return None

@@ -1,0 +1,20 @@
+# configs/data/transforms/prompt_formatting/decoder.yaml
+_target_: src.pipelines.base.core.data.transforms.prompt_formatting.PromptFormattingTransform
+
+template_name: "rag_qa_generation"
+
+# output_column: промпт пишется в ту же колонку, что ждёт токенизатор.
+# Берём из data.prompt_column — единый источник истины.
+output_column: "${data.prompt_column}"
+
+# retrieve_column: null если не RAG, иначе имя колонки с контекстом.
+# PromptFormattingTransform читает это значение и передаёт колонку
+# в шаблон под фиксированным именем ``context``.
+retrieve_column: "${data.retrieve_column}"
+
+num_proc: ${system.num_proc}
+batch_size: ${system.batch_size}
+
+prompt_manager:
+  _target_: src.pipelines.decoder.core.prompts.manager.PromptManager
+  templates: "${evaluation.prompts.templates}"

@@ -1,4 +1,0 @@
-_target_: src.pipelines.base.core.data.splitters.RandomDatasetSplitter
-val_size: ${rag_pipeline.data.val_size}
-test_size: ${rag_pipeline.data.test_size}
-seed: ${rag_pipeline.data.seed}

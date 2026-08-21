@@ -1,0 +1,6 @@
+# Замораживает все параметры — используется при eval инференсе
+# без LoRA адаптера (полная модель грузится as-is).
+# HFModelBuilder не применяет модификаторов — modifiers: {} в этом случае.
+# Этот файл — явный маркер намерения, чтобы в defaults было видно режим.
+_target_: src.pipelines.base.core.models.modifiers.FullFinetuningModifier
+gradient_checkpointing: false

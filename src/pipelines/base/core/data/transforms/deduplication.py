@@ -104,7 +104,7 @@ class ExactDeduplicationTransform(BaseDatasetTransform):
         dedup_dataset = dataset.select(unique_indices)
 
         logger.info(
-            "Точная дедупликация: %d → %d (удалено %d дубликатов)",
+            "Точная дедупликация: %d -> %d (удалено %d дубликатов)",
             initial_count,
             len(dedup_dataset),
             initial_count - len(dedup_dataset),
@@ -249,7 +249,7 @@ class MinHashDeduplicationTransform(BaseDatasetTransform):
         dedup_dataset = dataset.select(unique_indices)
 
         logger.info(
-            "MinHash дедупликация: %d → %d (удалено %d дубликатов)",
+            "MinHash дедупликация: %d -> %d (удалено %d дубликатов)",
             initial_count,
             len(dedup_dataset),
             initial_count - len(dedup_dataset),

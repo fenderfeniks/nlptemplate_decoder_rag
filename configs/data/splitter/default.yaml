@@ -1,0 +1,3 @@
+_target_: src.pipelines.base.core.data.splitters.RandomDatasetSplitter
+val_size: ${data.val_size}
+seed: ${system.seed}

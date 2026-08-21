@@ -1,0 +1,19 @@
+defaults:
+  - system: default
+  - data: eval_rag
+  - model: eval_rag
+  - vector_db: qdrant
+  - inference: rag
+  - evaluation: eval_rag
+  - _self_
+  - environments: local
+
+project_name: "nlp_project"
+pipeline_name: "rag_pipeline"
+seed: ${system.seed}
+use_reranker: true
+
+system:
+  logger:
+    pylightning:
+      experiment_name: ${project_name}_rag_eval

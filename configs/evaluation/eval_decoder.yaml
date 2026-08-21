@@ -1,0 +1,17 @@
+# evaluation/eval_decoder.yaml
+# Параметры для DecoderEvaluator — src/evaluation/evaluators/decoder.py
+# model и tokenizer инжектируются программно из inference-блока
+defaults:
+  - metrics: decoder
+  - prompts: rag_qa
+  - _self_
+
+num_random: 5                   # сколько случайных примеров генерировать на eval
+generation_batch_size: 2        # батч генерации (отдельно от train batch_size)
+generation_kwargs:
+  max_new_tokens: 512
+  temperature: 0.7
+  do_sample: true
+  top_p: 0.9
+  repetition_penalty: 1.1
+fixed_samples: []               # list[dict{prompt, target}] для фиксированных примеров

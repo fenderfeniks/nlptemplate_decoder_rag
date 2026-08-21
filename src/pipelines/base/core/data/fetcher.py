@@ -3,12 +3,14 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
+import boto3
+from urllib.parse import urlparse
 
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 
 logger = logging.getLogger(__name__)
 
-# Маппинг расширений → тип загрузчика HF datasets
+# Маппинг расширений -> тип загрузчика HF datasets
 _EXT_TO_LOADER: dict[str, str] = {
     "csv": "csv",
     "tsv": "csv",  # load_dataset("csv", sep="\t")
@@ -20,7 +22,7 @@ _EXT_TO_LOADER: dict[str, str] = {
     "arrow": "arrow",
 }
 
-_SUPPORTED_SOURCE_TYPES = ("local", "kaggle", "hf")
+_SUPPORTED_SOURCE_TYPES = ("local", "kaggle", "hf", "s3")
 
 
 def _detect_loader(file_name: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -115,6 +117,8 @@ class RawDataFetcher:
         # а не в момент первого скачивания, когда уже потрачено время на setup.
         if self.source_type == "kaggle":
             self._validate_kaggle_env()
+        elif self.source_type == "s3":
+            self._validate_s3_env()
 
     # ------------------------------------------------------------------
     # Публичный интерфейс
@@ -132,6 +136,7 @@ class RawDataFetcher:
             "local": self._load_local,
             "kaggle": self._load_kaggle,
             "hf": self._load_hf,
+            "s3": self._load_s3,
         }
         return dispatch[self.source_type]()
 
@@ -221,6 +226,46 @@ class RawDataFetcher:
         logger.info("HF датасет сохранён в кэш: %s", hf_local_path)
         return dataset
 
+    def _load_s3(self) -> Dataset | DatasetDict:
+        if not self.dataset_name:
+            raise ValueError("Для s3 источника необходимо указать dataset_name в виде S3 URI (s3://bucket/prefix).")
+
+        parsed = urlparse(self.dataset_name)
+        bucket_name = parsed.netloc
+        prefix = parsed.path.lstrip("/")
+
+        # Кэшируем в raw_dir/bucket/prefix
+        local_path = self.raw_dir / bucket_name / prefix
+
+        if local_path.exists() and any(local_path.iterdir()):
+            logger.info("Данные S3 найдены локально: %s. Скачивание пропущено.", local_path)
+        else:
+            logger.info("Скачиваем из S3 бакета '%s' (префикс '%s')...", bucket_name, prefix)
+            local_path.mkdir(parents=True, exist_ok=True)
+            
+            s3 = boto3.client("s3")
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    if key.endswith("/"):
+                        continue
+                    
+                    # Сохраняем структуру директорий
+                    rel_path = key[len(prefix):].lstrip("/")
+                    file_dest = local_path / rel_path
+                    file_dest.parent.mkdir(parents=True, exist_ok=True)
+                    s3.download_file(bucket_name, key, str(file_dest))
+                    
+            logger.info("Скачивание из S3 завершено.")
+
+        # Натравливаем локальный загрузчик
+        loader, kwargs = _detect_loader(self.file_name, dict(self.kwargs))
+        target_files = str(local_path / self.file_name) if self.file_name else str(local_path)
+        
+        logger.info("Загрузка S3 данных: %s (loader=%s)", target_files, loader)
+        return load_dataset(loader, data_files=target_files, **kwargs)
+    
     # ------------------------------------------------------------------
     # Вспомогательные методы
     # ------------------------------------------------------------------
@@ -233,4 +278,14 @@ class RawDataFetcher:
             raise EnvironmentError(
                 f"Переменные окружения не установлены: {missing}. "
                 "Для K8s: проверь Secret и прокидывание через KubernetesPodOperator env."
+            )
+
+    @staticmethod
+    def _validate_s3_env() -> None:
+        """Проверяет наличие AWS credentials в окружении."""
+        missing = [v for v in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY") if not os.getenv(v)]
+        if missing:
+            raise EnvironmentError(
+                f"Переменные окружения для S3 не установлены: {missing}. "
+                "Проверьте настройки доступа AWS."
             )

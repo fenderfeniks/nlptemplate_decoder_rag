@@ -1,0 +1,5 @@
+_target_: src.pipelines.base.core.data.transforms.validation.CleaningTransform
+pipeline: ${data.cleaner}
+columns_to_clean: ??? # Всегда переопределяется в корневом файле
+num_proc: ${system.num_proc}
+batch_size: ${system.batch_size}

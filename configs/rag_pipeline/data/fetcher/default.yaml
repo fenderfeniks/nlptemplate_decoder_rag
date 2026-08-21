@@ -1,6 +1,0 @@
-_target_: src.pipelines.base.core.data.fetcher.RawDataFetcher
-source_type: ${rag_pipeline.data.source_type}
-raw_dir: ${rag_pipeline.data.raw_dir}
-dataset_name: ${rag_pipeline.data.dataset_name}
-file_name: ${rag_pipeline.data.file_name}
-token: ${rag_pipeline.data.token}

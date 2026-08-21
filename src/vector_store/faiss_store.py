@@ -58,7 +58,7 @@ class FAISSVectorStore:
         Args:
             embedding_dim: Размерность векторов.
             index_type: Тип индекса — ``'flat'`` или ``'hnsw'``.
-            m: (HNSW) Число связей на узел. Больше → точнее, больше RAM.
+            m: (HNSW) Число связей на узел. Больше -> точнее, больше RAM.
             ef_construction: (HNSW) Ширина поиска при построении.
             ef_search: (HNSW) Ширина поиска при запросе.
             normalize_embeddings: Нормализовать ли векторы перед вставкой/поиском.
@@ -289,7 +289,7 @@ class FAISSVectorStore:
             if pending:
                 multiplier *= 2
                 logger.debug(
-                    "Фильтрация: %d запросов не набрали top_k=%d → multiplier=%d",
+                    "Фильтрация: %d запросов не набрали top_k=%d -> multiplier=%d",
                     len(pending),
                     top_k,
                     multiplier,

@@ -1,6 +1,6 @@
 # src/pipelines/decoder/core/data/transforms/tokenization.py
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from datasets import Dataset as HFDataset
 from transformers import PreTrainedTokenizerBase
@@ -11,33 +11,26 @@ logger = logging.getLogger(__name__)
 
 
 class TokenizationTransform(BaseDatasetTransform):
-    """Токенизация текстов для decoder-пайплайна.
+    """Токенизация текстов для decoder-пайплайна (SFT и Chat).
 
     Режимы:
-    - ``'cpt'``: Continual Pre-Training. Токенизирует колонку ``text`` целиком.
-      Оригинальные колонки удаляются — на выходе только ``input_ids``
-      и ``attention_mask``.
     - ``'sft'``: Supervised Fine-Tuning. Склеивает ``prompt`` и ``target``
       через ``separator``, токенизирует полный текст и отдельно промпт
       для вычисления ``prompt_len``. Loss маскируется по ``prompt_len``
       в коллаторе — separator включается в промпт и не обучается.
     - ``'chat'``: Применяет ``chat_template`` токенизатора к колонке
       ``messages`` (список словарей ``[{'role': ..., 'content': ...}]``).
-      Оригинальные колонки удаляются.
 
     .. note:: Все режимы применяют ``truncation=True`` с заданным ``max_length``.
         Последовательности длиннее ``max_length`` будут обрезаны без предупреждения.
-        Используйте ``LengthFilterTransform`` до токенизации чтобы контролировать
-        состав датасета, или после — чтобы отфильтровать обрезанные записи.
     """
 
-    _VALID_taskS = ("cpt", "sft", "chat")
+    _VALID_TASKS = ("sft", "chat", "sft_with_template")
 
     def __init__(
         self,
         tokenizer: PreTrainedTokenizerBase,
-        task: str = "cpt",
-        text_column: str = "text",
+        task: str = "sft",
         prompt_column: str = "prompt",
         target_column: str = "target",
         messages_column: str = "messages",
@@ -47,31 +40,10 @@ class TokenizationTransform(BaseDatasetTransform):
         batch_size: int = 1000,
         writer_batch_size: int = 200,
     ) -> None:
-        """
-        Args:
-            tokenizer: Токенизатор модели (PreTrainedTokenizerBase).
-            task: Режим работы — ``'cpt'``, ``'sft'`` или ``'chat'``.
-            text_column: Колонка с текстом (режим ``cpt``).
-            prompt_column: Колонка с промптом (режим ``sft``).
-            target_column: Колонка с целевым ответом (режим ``sft``).
-            messages_column: Колонка со списком сообщений (режим ``chat``).
-            max_length: Максимальная длина последовательности в токенах.
-                Должен быть положительным числом.
-            separator: Разделитель между промптом и таргетом (режим ``sft``).
-                Включается в промпт при вычислении ``prompt_len``.
-            num_proc: Число процессов для параллельного map.
-            batch_size: Размер батча для map.
-            writer_batch_size: Размер батча при записи на диск. Уменьшите при
-                нехватке RAM.
-
-        Raises:
-            ValueError: Если ``task`` не входит в допустимые значения.
-            ValueError: Если ``max_length`` не является положительным числом.
-        """
-        if task not in self._VALID_taskS:
+        if task not in self._VALID_TASKS:
             raise ValueError(
                 f"Неизвестный режим токенизации: '{task}'. "
-                f"Допустимые значения: {self._VALID_taskS}"
+                f"Допустимые значения: {self._VALID_TASKS}"
             )
         if max_length <= 0:
             raise ValueError(
@@ -79,7 +51,6 @@ class TokenizationTransform(BaseDatasetTransform):
             )
         self.tokenizer = tokenizer
         self.task = task
-        self.text_column = text_column
         self.prompt_column = prompt_column
         self.target_column = target_column
         self.messages_column = messages_column
@@ -88,18 +59,6 @@ class TokenizationTransform(BaseDatasetTransform):
         self.num_proc = num_proc
         self.batch_size = batch_size
         self.writer_batch_size = writer_batch_size
-
-    # ------------------------------------------------------------------
-    # Внутренние функции токенизации
-    # ------------------------------------------------------------------
-
-    def _tokenize_cpt(self, examples: dict[str, list[Any]]) -> dict[str, list[Any]]:
-        return self.tokenizer(
-            examples[self.text_column],
-            truncation=True,
-            max_length=self.max_length,
-            add_special_tokens=True,
-        )
 
     def _tokenize_sft(self, examples: dict[str, list[Any]]) -> dict[str, list[Any]]:
         prompts = examples[self.prompt_column]
@@ -113,8 +72,6 @@ class TokenizationTransform(BaseDatasetTransform):
             add_special_tokens=True,
         )
 
-        # Включаем separator в prompt_len — loss считается только по target,
-        # separator является частью промпта и не должен обучаться.
         prompts_with_sep = [p + self.separator for p in prompts]
         prompt_encodings = self.tokenizer(
             prompts_with_sep,
@@ -138,32 +95,65 @@ class TokenizationTransform(BaseDatasetTransform):
             return_dict=True,
         )
 
-    # ------------------------------------------------------------------
-    # Публичный интерфейс
-    # ------------------------------------------------------------------
+    def _tokenize_sft_with_template(
+        self, examples: dict[str, list[Any]]
+    ) -> dict[str, list[Any]]:
+        results: dict[str, list] = {
+            "input_ids": [],
+            "attention_mask": [],
+            "prompt_len": [],
+        }
+
+        for prompt, target in zip(
+            examples[self.prompt_column], examples[self.target_column]
+        ):
+            messages_full = [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": target},
+            ]
+            messages_prompt_only = [
+                {"role": "user", "content": prompt},
+            ]
+
+            full_ids = self.tokenizer.apply_chat_template(
+                messages_full,
+                tokenize=True,
+                truncation=True,
+                max_length=self.max_length,
+                add_generation_prompt=False,
+            )
+            prompt_ids = self.tokenizer.apply_chat_template(
+                messages_prompt_only,
+                tokenize=True,
+                truncation=True,
+                max_length=self.max_length,
+                add_generation_prompt=True,
+            )
+
+            results["input_ids"].append(full_ids)
+            results["attention_mask"].append([1] * len(full_ids))
+            results["prompt_len"].append(len(prompt_ids))
+
+        return results
 
     def __call__(self, dataset: HFDataset) -> HFDataset:
         task_column_map: dict[str, str] = {
-            "cpt": self.text_column,
             "sft": self.prompt_column,
             "chat": self.messages_column,
+            "sft_with_template": self.prompt_column,  # добавить
         }
         required_column = task_column_map[self.task]
+        
         if required_column not in dataset.column_names:
             logger.warning(
-                "Колонка '%s' не найдена в датасете — токенизация пропущена. "
-                "Убедитесь, что режим '%s' соответствует составу датасета.",
+                "Колонка '%s' не найдена в датасете — токенизация пропущена.",
                 required_column,
-                self.task,
             )
             return dataset
 
-        # SFT дополнительно требует target_column
         if self.task == "sft" and self.target_column not in dataset.column_names:
             logger.warning(
-                "Колонка '%s' не найдена в датасете — токенизация пропущена. "
                 "Для режима 'sft' необходимы обе колонки: '%s' и '%s'.",
-                self.target_column,
                 self.prompt_column,
                 self.target_column,
             )
@@ -174,13 +164,11 @@ class TokenizationTransform(BaseDatasetTransform):
         )
 
         func_map = {
-            "cpt": self._tokenize_cpt,
             "sft": self._tokenize_sft,
             "chat": self._tokenize_chat,
+            "sft_with_template": self._tokenize_sft_with_template,  # добавить
         }
 
-        # Оригинальные текстовые колонки удаляем — в отличие от RAG,
-        # decoder после токенизации работает только с тензорами.
         result = dataset.map(
             func_map[self.task],
             batched=True,

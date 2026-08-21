@@ -1,0 +1,9 @@
+# training/callbacks/rag/retrieval_eval.yaml
+# RetrievalEvaluationCallback — строит эфемерную vector_db на каждую val-эпоху
+# vector_db_cfg тянется из корневого блока vector_db — единый источник конфига БД
+_target_: src.pipelines.rag.training.callbacks.RetrievalEvaluationCallback
+_recursive_: false
+vector_db_cfg: ${vector_db}
+top_k: 10
+similarity_threshold: 0.0   # 0.0 = без обрезки по score
+log_full_metrics: true       # false -> только mrr + recall_biencoder + ndcg (legacy-режим)

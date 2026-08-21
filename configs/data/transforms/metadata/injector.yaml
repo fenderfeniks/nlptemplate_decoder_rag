@@ -1,0 +1,6 @@
+_target_: src.pipelines.rag.core.data.transforms.metadata.MetadataInjectorTransform
+text_column: ${data.text_column}
+metadata_column: "metadata"
+template: "{meta_string}\n\n{text}"
+num_proc: ${system.num_proc}
+batch_size: ${system.batch_size}

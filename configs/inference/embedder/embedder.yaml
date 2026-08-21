@@ -1,0 +1,8 @@
+# inference/embedder/default.yaml
+# RAGInferenceEmbedder — единственное место где живёт логика precision/autocast
+# model, pooler, tokenizer — инжектируются программно из builder, не instantiate здесь
+_target_: src.pipelines.rag.inference.embedder.RAGInferenceEmbedder
+device: ${system.device}        # cuda | cpu | mps — из system/default.yaml
+precision: bf16                 # bf16 | fp16 | fp32; на CPU/MPS автоматически fp32
+max_length: ${model.architecture.max_position_embeddings}  # тянем из архитектуры модели
+#batch_size: 32                  # батч инференса (отдельно от train batch_size)

@@ -1,0 +1,10 @@
+defaults:
+  - builder: default
+  - architecture: encoder/test
+  - pooling: mean
+  - quantization: none
+  - tokenizer: default
+  - modifiers/finetuning: just_freeze
+  - _self_
+
+use_manifest: true

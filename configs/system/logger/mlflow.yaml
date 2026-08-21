@@ -1,0 +1,36 @@
+# system/logger/mlflow.yaml
+# MLflowLogger — src/utils/logging/mlflow_logger.py
+
+# Standalone логгер — eval.py, DAG, inference, benchmark
+# MLflowLogger.__init__ принимает только tracking_uri
+experiment_logger:
+  _target_: src.utils.logging.mlflow_logger.MLflowLogger
+  tracking_uri: ${system.paths.mlflow_db_dir}
+  artifact_location: ${system.paths.log_dir}/mlruns
+  experiment_name: ${project_name}_${pipeline_name}         
+
+# Lightning MLflow logger — используется Trainer во время обучения
+# experiment_name тянется из корневого конфига пайплайна
+pylightning:
+  _target_: pytorch_lightning.loggers.MLFlowLogger
+  tracking_uri: ${system.logger.experiment_logger.tracking_uri}
+  artifact_location: ${system.logger.experiment_logger.artifact_location}
+  save_dir: ${system.paths.log_dir}
+  experiment_name: ${system.logger.experiment_logger.experiment_name}           # задаётся в корневом конфиге: train_decoder.yaml / train_rag.yaml
+  run_name: null                  # null = MLflow генерирует автоматически
+  log_model: false                # артефакты логируем вручную через save_adapter, не автоматически
+  prefix: ""                      # префикс для имён метрик (обычно пустой)
+  tags: {}                        # произвольные теги run'а — заполняются из корневого конфига
+
+# Registry — читается в save_adapter через cfg.logger.registry
+registry:
+  artifact_path: lora_weights     # путь внутри run где сохраняется адаптер
+  register_on_success: true       # регистрировать ли модель в MLflow Model Registry
+  promote_to_staging: true        # выставлять ли алиас Staging после регистрации
+
+# promote_model — параметры для MLflowLogger.promote_model()
+# вызывается в train.py после post-training evaluation
+promote:
+  staging_alias: Staging
+  production_alias: Production
+  metric_tag: val_loss            # тег по которому сравниваются версии; для RAG — val_mrr

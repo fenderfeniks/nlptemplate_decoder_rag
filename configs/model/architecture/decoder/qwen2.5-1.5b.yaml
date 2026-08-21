@@ -1,0 +1,13 @@
+_target_: src.pipelines.base.core.models.builder.HFModelBuilder
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+auto_model_class: transformers.AutoModelForCausalLM
+cache_dir: ${system.paths.hf_cache_dir}
+trust_remote_code: true
+torch_dtype: bfloat16
+attn_implementation: flash_attention_2   # fallback на sdpa если железо не тянет
+device_map: auto_cuda
+rope_scaling: null
+quantization_config: ${model.quantization.quantization_config}
+modifiers: ${model.modifiers}
+mlflow_model_name: "Qwen2.5-1.5B-Instruct"
+base_model_uri: "hf://Qwen/Qwen2.5-1.5B-Instruct"

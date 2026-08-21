@@ -1,0 +1,4 @@
+_target_: src.vector_store.lsh.LSHIndex
+threshold: 0.85
+num_perm: 128
+ngram_size: 5

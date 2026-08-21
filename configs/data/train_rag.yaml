@@ -1,0 +1,51 @@
+defaults:
+  - source: hf_rag
+  - cleaner: default
+  - splitter: default
+  - collator: rag_contrastive
+  - transforms/cleaning: default
+  - transforms/deduplication: exact
+  - transforms/filtering/exclusion@transforms.exclusion
+  - transforms/validation: rag
+  - transforms/tokenization: rag
+  - transforms/filtering/length@transforms.length
+  - ./eval_rag@eval
+  - _self_
+
+dataset_name: rag_contrastive
+max_samples: null
+force_reprocess: false
+
+# --- Топ-левел переменные ---
+max_length: 512
+text_column: null
+query_column: "anchor"
+positive_column: "positive"
+negative_column: "negative"
+mode: "contrastive"
+val_size: 0.1
+
+transforms:
+  cleaning:
+    columns_to_clean:
+      - "${data.query_column}"
+      - "${data.positive_column}"
+  deduplication:
+    target_columns:
+      - "${data.query_column}"
+  exclusion:
+    dataset_columns:
+      - "${data.query_column}"
+    benchmark_path: null
+  length:
+    column: "query_input_ids"
+
+collator:
+  _target_: src.pipelines.rag.core.data.collators.ContrastiveDataCollator
+
+dataloader:
+  batch_size: 32
+  num_workers: ${system.dataloader_num_workers}
+  pin_memory: ${system.pin_memory}
+  persistent_workers: ${system.persistent_workers}
+  prefetch_factor: ${system.prefetch_factor}

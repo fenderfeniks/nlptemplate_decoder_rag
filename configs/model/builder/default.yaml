@@ -1,0 +1,12 @@
+_target_: src.pipelines.base.core.models.builder.HFModelBuilder
+_recursive_: false
+# Прокидываем параметры из универсального пространства ${model}
+model_name_or_path: ${model.architecture.model_name_or_path}
+auto_model_class: ${model.architecture.auto_model_class}
+cache_dir: "${system.paths.data_dir}/weights"
+trust_remote_code: ${model.architecture.trust_remote_code}
+torch_dtype: ${model.architecture.torch_dtype}
+attn_implementation: ${model.architecture.attn_implementation}
+
+quantization_config: ${model.quantization}
+modifiers: ${model.modifiers}

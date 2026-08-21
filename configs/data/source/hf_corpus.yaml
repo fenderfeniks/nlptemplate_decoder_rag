@@ -1,0 +1,7 @@
+# configs/data/source/hf_corpus.yaml
+_target_: src.pipelines.base.core.data.fetcher.RawDataFetcher
+source_type: "hf"
+raw_dir: ${system.paths.raw_data_dir}
+dataset_name: "wikimedia/wikipedia"
+name: "20231101.simple"
+split: "train"

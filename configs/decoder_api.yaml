@@ -1,0 +1,20 @@
+# @package _global_
+defaults:
+  - system: default
+  - model: eval_decoder
+  - inference/generator: local      # менять на vllm через env или вручную
+  - inference/cleaner: default
+  - api/shared/server@api.server
+  - api/shared/rate_limit@api.rate_limit
+  - _self_
+  - environments: local
+
+project_name: "nlp_project"
+pipeline_name: "decoder_pipeline"
+
+api:
+  service_name: "decoder_api"
+  server:
+    title: "Decoder Generation API"
+    description: "Генерация текста через локальную модель или vLLM."
+  cors_origins: ["*"]

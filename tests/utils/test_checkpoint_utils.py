@@ -107,7 +107,7 @@ class TestCheckpointUtils:
     # ------------------------------------------------------------------
 
     def test_load_lora_adapter(self, dummy_model, tmp_path):
-        """Директория с adapter_config.json → загружается как PeftModel."""
+        """Директория с adapter_config.json -> загружается как PeftModel."""
         (tmp_path / "adapter_config.json").touch()
 
         mock_peft_model = MagicMock()

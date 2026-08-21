@@ -3,10 +3,10 @@
 
 Поддерживаемые пайплайны и их входные/выходные колонки:
 
-  sequence_pipeline  → text_column → predicted_label / predicted_score
-  similarity_pipeline (encoding) → encoding_column → embedding
-  token_pipeline     → tokens_column → predicted_tags
-  qa_pipeline        → question_column + context_column → predicted_answer
+  sequence_pipeline  -> text_column -> predicted_label / predicted_score
+  similarity_pipeline (encoding) -> encoding_column -> embedding
+  token_pipeline     -> tokens_column -> predicted_tags
+  qa_pipeline        -> question_column + context_column -> predicted_answer
 """
 
 import logging
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Маппинг пайплайнов → входные колонки и функция подготовки входа для пайплайна
+# Маппинг пайплайнов -> входные колонки и функция подготовки входа для пайплайна
 # ---------------------------------------------------------------------------
 
 
@@ -136,7 +136,7 @@ def _build_mock_df(pipeline_name: str, pipeline_cfg: DictConfig) -> pd.DataFrame
 
 
 # ---------------------------------------------------------------------------
-# Маппинг: pipeline_name → (input_builder, output_column)
+# Маппинг: pipeline_name -> (input_builder, output_column)
 # ---------------------------------------------------------------------------
 
 _PIPELINE_CONFIG = {

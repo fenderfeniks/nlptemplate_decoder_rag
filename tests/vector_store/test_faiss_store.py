@@ -276,7 +276,7 @@ class TestNormalize:
         np.testing.assert_allclose(norms, [1.0], atol=1e-6)
 
     def test_normalize_zero_vector_no_nan(self, store):
-        """Нулевой вектор → не NaN (clip предотвращает деление на 0)."""
+        """Нулевой вектор -> не NaN (clip предотвращает деление на 0)."""
         vecs = np.zeros((1, DIM), dtype=np.float32)
         result = store._normalize(vecs)
         assert not np.isnan(result).any()

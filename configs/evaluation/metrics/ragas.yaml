@@ -1,0 +1,9 @@
+# evaluation/metrics/ragas.yaml
+# RagasMetrics — src/evaluation/metrics/generator.py
+_target_: src.evaluation.metrics.generator.RagasMetrics
+metrics_to_run:
+  - answer_correctness
+  - faithfulness
+  - answer_relevancy
+  - context_precision
+raise_exceptions: false     # false = не роняет пайплайн при разовом сбое судьи

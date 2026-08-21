@@ -97,10 +97,10 @@ class TestResolveTrainingCallbacks:
         OmegaConf.set_struct(cfg, False)
         return cfg
 
-    # -- DictConfig → список -----------------------------------------------
+    # -- DictConfig -> список -----------------------------------------------
 
     def test_dict_config_converted_to_list(self):
-        """callbacks как DictConfig → конвертируется в список."""
+        """callbacks как DictConfig -> конвертируется в список."""
         cfg = self._make_training_cfg({"ckpt": {"monitor": "val_loss"}, "lr": {"log_every": 1}})
         result = _resolve_training_callbacks(cfg)
         assert isinstance(result.callbacks, ListConfig)
@@ -109,32 +109,32 @@ class TestResolveTrainingCallbacks:
     # -- ListConfig сохраняется --------------------------------------------
 
     def test_list_config_preserved(self):
-        """callbacks уже ListConfig → остаётся ListConfig той же длины."""
+        """callbacks уже ListConfig -> остаётся ListConfig той же длины."""
         cfg = OmegaConf.create({"callbacks": [{"monitor": "val_loss"}, {"log": True}]})
         OmegaConf.set_struct(cfg, False)
         result = _resolve_training_callbacks(cfg)
         assert len(result.callbacks) == 2
 
-    # -- None / пустой → пустой список -------------------------------------
+    # -- None / пустой -> пустой список -------------------------------------
 
     def test_none_callbacks_becomes_empty_list(self):
-        """callbacks=None → пустой список."""
+        """callbacks=None -> пустой список."""
         cfg = OmegaConf.create({"callbacks": None})
         OmegaConf.set_struct(cfg, False)
         result = _resolve_training_callbacks(cfg)
         assert result.callbacks == [] or list(result.callbacks) == []
 
     def test_missing_callbacks_becomes_empty_list(self):
-        """Отсутствующий ключ callbacks → пустой список."""
+        """Отсутствующий ключ callbacks -> пустой список."""
         cfg = OmegaConf.create({})
         OmegaConf.set_struct(cfg, False)
         result = _resolve_training_callbacks(cfg)
         assert list(result.callbacks) == []
 
-    # -- Неверный тип → TypeError ------------------------------------------
+    # -- Неверный тип -> TypeError ------------------------------------------
 
     def test_wrong_type_raises_type_error(self):
-        """callbacks — строка → TypeError с подсказкой."""
+        """callbacks — строка -> TypeError с подсказкой."""
         # Нужно создать через struct=False, чтобы протолкнуть строку как целый узел
         cfg = OmegaConf.create({"training": {"callbacks": "bad_value"}})
         training_node = cfg.training
@@ -149,10 +149,10 @@ class TestResolveTrainingCallbacks:
         with pytest.raises(TypeError, match="DictConfig или ListConfig"):
             _resolve_training_callbacks(training_cfg)
 
-    # -- Строки внутри списка → ValueError ---------------------------------
+    # -- Строки внутри списка -> ValueError ---------------------------------
 
     def test_string_items_raise_value_error(self):
-        """Строки вместо конфигов коллбэков → ValueError с подсказкой."""
+        """Строки вместо конфигов коллбэков -> ValueError с подсказкой."""
         cfg = OmegaConf.create({"callbacks": ["checkpoint", "lr_monitor"]})
         OmegaConf.set_struct(cfg, False)
 

@@ -1,0 +1,8 @@
+# Используется когда source: mixer.yaml.
+# InterleavedDataFetcher сам вызывает .load() на каждом дочернем фетчере.
+_target_: src.pipelines.base.core.data.mixers.InterleavedDataFetcher
+seed: ${data.source.seed}
+stopping_strategy: ${data.source.stopping_strategy}
+probabilities: ${data.source.probabilities}
+fetchers: ${data.source.fetchers}
+imbalance_warning_ratio: ${data.source.imbalance_warning_ratio}

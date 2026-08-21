@@ -2,7 +2,10 @@
 import importlib
 import logging
 from typing import Any
-
+import os
+import boto3
+from urllib.parse import urlparse
+from pathlib import Path
 import torch
 from hydra._internal.utils import _locate
 from hydra.utils import instantiate
@@ -71,8 +74,8 @@ class HFModelBuilder:
                 При ``'flash_attention_2'`` — автоматический fallback на ``'sdpa'``.
             rope_scaling: Словарь параметров RoPE scaling (опционально).
             device_map: Стратегия размещения модели по девайсам.
-                ``'auto_cuda'`` (дефолт) → ``{"": current_device}`` при наличии CUDA,
-                ``None`` при CPU/MPS. ``'auto'`` → HF авто-шардирование (multi-GPU).
+                ``'auto_cuda'`` (дефолт) -> ``{"": current_device}`` при наличии CUDA,
+                ``None`` при CPU/MPS. ``'auto'`` -> HF авто-шардирование (multi-GPU).
                 Передай явный dict для полного контроля.
             modifiers: DictConfig с модификаторами постзагрузки.
         """
@@ -103,8 +106,8 @@ class HFModelBuilder:
         - пакет ``flash-attn`` (``pip install flash-attn --no-build-isolation``)
         - CUDA compute capability >= 8.0 (A100, H100, RTX 30xx+)
 
-        Если CUDA недоступна совсем (CPU / MPS) → ``None``.
-        Если железо не тянет FA2 → ``'sdpa'``.
+        Если CUDA недоступна совсем (CPU / MPS) -> ``None``.
+        Если железо не тянет FA2 -> ``'sdpa'``.
         """
         if requested != "flash_attention_2":
             return requested
@@ -113,14 +116,14 @@ class HFModelBuilder:
             import flash_attn  # noqa: F401
         except ImportError:
             logger.warning(
-                "flash-attn не установлен → откат на attn_implementation='sdpa'. "
+                "flash-attn не установлен -> откат на attn_implementation='sdpa'. "
                 "Установите: pip install flash-attn --no-build-isolation"
             )
             return "sdpa"
 
         if not torch.cuda.is_available():
             logger.warning(
-                "CUDA недоступна (CPU или MPS) → attn_implementation сбрасывается в None."
+                "CUDA недоступна (CPU или MPS) -> attn_implementation сбрасывается в None."
             )
             return None
 
@@ -128,7 +131,7 @@ class HFModelBuilder:
         if major < 8:
             logger.warning(
                 "GPU compute capability %d.x < 8.0 — Flash Attention 2 не поддерживается "
-                "→ откат на 'sdpa'.",
+                "-> откат на 'sdpa'.",
                 major,
             )
             return "sdpa"
@@ -153,28 +156,14 @@ class HFModelBuilder:
         return getattr(torch, torch_dtype)
 
     @staticmethod
-    def _parse_bnb_config(quantization_config: Any) -> BitsAndBytesConfig | None:
-        """Нормализует конфиг квантизации в ``BitsAndBytesConfig``.
+    def _parse_quantization_config(quantization_config: Any) -> Any:
+        from transformers import AwqConfig, GPTQConfig
 
-        Поддерживает три формата входа:
-        - Готовый ``BitsAndBytesConfig`` → патчим строковые dtype, возвращаем.
-        - ``DictConfig`` из Hydra → конвертируем через ``OmegaConf.to_container``.
-        - Пустой dict (``none.yaml``) → ``None`` (квантизация отключена).
-
-        Строковые значения ключей ``*_dtype`` автоматически конвертируются в ``torch.*``.
-
-        Raises:
-            ValueError: Если строковый dtype не является валидным атрибутом torch.
-        """
         if quantization_config is None:
             return None
 
-        if isinstance(quantization_config, BitsAndBytesConfig):
-            for attr_name in dir(quantization_config):
-                if attr_name.endswith("_dtype"):
-                    val = getattr(quantization_config, attr_name)
-                    if isinstance(val, str):
-                        setattr(quantization_config, attr_name, getattr(torch, val))
+        # Уже готовый объект — возвращаем как есть
+        if isinstance(quantization_config, (BitsAndBytesConfig, AwqConfig, GPTQConfig)):
             return quantization_config
 
         quant_dict = (
@@ -184,17 +173,21 @@ class HFModelBuilder:
         )
 
         if not quant_dict:
-            return None
+            return None          # none.yaml — пустой dict
 
+        # Определяем тип по _target_
+        target = quant_dict.pop("_target_", None)
+
+        if target and "Awq" in target:
+            return AwqConfig(**quant_dict)
+
+        if target and "GPTQ" in target:
+            return GPTQConfig(**quant_dict)
+
+        # Без _target_ — считаем BnB (обратная совместимость)
         for k, v in quant_dict.items():
             if k.endswith("_dtype") and isinstance(v, str):
-                if not hasattr(torch, v):
-                    raise ValueError(
-                        f"Недопустимый dtype в quantization_config: "
-                        f"'{k}': '{v}'. Допустимые: {sorted(_TORCH_FLOAT_DTYPES)}."
-                    )
                 quant_dict[k] = getattr(torch, v)
-
         return BitsAndBytesConfig(**quant_dict)
 
     def _resolve_device_map(self, bnb_config: BitsAndBytesConfig | None) -> dict | str | None:
@@ -227,8 +220,8 @@ class HFModelBuilder:
 
         Runtime-аргументы определяются автоматически через маркерные атрибуты
         класса — без строкового матча по ``_target_``:
-        - ``_needs_tokenizer = True`` → передаёт ``tokenizer``
-        - ``_needs_lora_path = True`` → передаёт ``lora_resume_path``
+        - ``_needs_tokenizer = True`` -> передаёт ``tokenizer``
+        - ``_needs_lora_path = True`` -> передаёт ``lora_resume_path``
 
         Порядок ключей в ``model.modifiers`` соответствует порядку в defaults
         ``model/default.yaml``. Hydra гарантирует сохранение порядка DictConfig.
@@ -241,6 +234,9 @@ class HFModelBuilder:
 
         modifiers = []
         for name, modifier_cfg in self.modifiers_cfg.items():
+            if modifier_cfg is None:
+                logger.debug("Модификатор '%s' отключен (None). Пропускаем.", name)
+                continue
             target = modifier_cfg.get("_target_", "")
 
             # Резолвим класс через _locate — внутренний но стабильный API Hydra,
@@ -249,7 +245,7 @@ class HFModelBuilder:
             modifier_cls = _locate(target)
 
             extra_kwargs: dict[str, Any] = {}
-
+            
             if getattr(modifier_cls, "_needs_tokenizer", False):
                 if tokenizer is None:
                     raise ValueError(
@@ -267,6 +263,69 @@ class HFModelBuilder:
 
         return modifiers
 
+    def _download_model_from_s3(self) -> str:
+        """Скачивает веса модели из S3 в локальный кэш."""
+        missing = [v for v in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY") if not os.getenv(v)]
+        if missing:
+            raise EnvironmentError(f"AWS credentials не установлены: {missing}")
+
+        parsed = urlparse(self.model_name_or_path)
+        bucket_name = parsed.netloc
+        prefix = parsed.path.lstrip("/")
+
+        # Формируем путь в cache_dir
+        cache_base = Path(self.cache_dir) if self.cache_dir else Path.home() / ".cache" / "huggingface"
+        local_model_dir = cache_base / "s3_models" / bucket_name / prefix
+
+        if local_model_dir.exists() and any(local_model_dir.iterdir()):
+            logger.info("S3 модель найдена в кэше: %s", local_model_dir)
+            return str(local_model_dir)
+
+        logger.info("Скачиваем модель из S3: %s", self.model_name_or_path)
+        local_model_dir.mkdir(parents=True, exist_ok=True)
+
+        s3 = boto3.client("s3")
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith("/"):
+                    continue
+                rel_path = key[len(prefix):].lstrip("/")
+                file_dest = local_model_dir / rel_path
+                file_dest.parent.mkdir(parents=True, exist_ok=True)
+                s3.download_file(bucket_name, key, str(file_dest))
+
+        logger.info("Скачивание модели из S3 завершено: %s", local_model_dir)
+        return str(local_model_dir)
+
+    def _validate_quantization(
+        self,
+        model: PreTrainedModel,
+        requested_config: Any,
+    ) -> None:
+        """Проверяет соответствие запрошенной квантизации реальным весам модели."""
+        from transformers import AwqConfig, GPTQConfig
+
+        model_quant_cfg = getattr(model.config, "quantization_config", None)
+
+        # Запросили AWQ — веса должны быть AWQ
+        if isinstance(requested_config, AwqConfig):
+            if model_quant_cfg is None or model_quant_cfg.get("quant_type") != "awq":
+                raise ValueError(
+                    f"quantization_config=AwqConfig, но модель '{self.model_name_or_path}' "
+                    f"не квантизована в AWQ формат. "
+                    f"Запусти scripts/tools/quantize_awq.py или возьми готовую AWQ модель с HF."
+                )
+
+        # Запросили BnB — у модели не должно быть своего AWQ/GPTQ конфига
+        if isinstance(requested_config, BitsAndBytesConfig):
+            if model_quant_cfg is not None:
+                quant_type = model_quant_cfg.get("quant_type", "unknown")
+                raise ValueError(
+                    f"quantization_config=BitsAndBytesConfig, но модель уже квантизована "
+                    f"({quant_type}). Используй соответствующий конфиг или none.yaml."
+                )
     # ------------------------------------------------------------------
     # Публичный интерфейс
     # ------------------------------------------------------------------
@@ -287,6 +346,9 @@ class HFModelBuilder:
             RuntimeError: Если квантизация запрошена на машине без CUDA.
             ImportError: Если ``auto_model_class`` указывает на недоступный модуль.
         """
+        if self.model_name_or_path.startswith("s3://"):
+            self.model_name_or_path = self._download_model_from_s3()
+            
         logger.info(
             "Загрузка модели: %s (class=%s)",
             self.model_name_or_path,
@@ -297,7 +359,7 @@ class HFModelBuilder:
         module = importlib.import_module(module_name)
         model_class = getattr(module, class_name)
 
-        bnb_config = self._parse_bnb_config(self.quantization_config)
+        bnb_config = self._parse_quantization_config(self.quantization_config)
         parsed_dtype = self._parse_torch_dtype(self.torch_dtype)
         attn_impl = self._resolve_attn_implementation(self.attn_implementation)
         resolved_device_map = self._resolve_device_map(bnb_config)
@@ -326,6 +388,7 @@ class HFModelBuilder:
             model_kwargs["rope_scaling"] = parsed_rope_scaling
 
         model = model_class.from_pretrained(self.model_name_or_path, **model_kwargs)
+        self._validate_quantization(model, bnb_config) 
         logger.info("Базовая модель загружена.")
 
         for modifier in self._build_modifiers(tokenizer):

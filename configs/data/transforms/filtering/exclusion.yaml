@@ -1,0 +1,6 @@
+_target_: src.pipelines.base.core.data.transforms.exclusion.BenchmarkExclusionTransform
+benchmark_path: ???   # Резолвится ArtifactResolver'ом в Python-коде
+dataset_columns: ???  # Всегда переопределяется в корневом файле
+benchmark_columns: null
+column_separator: "\n\n"
+num_proc: ${system.num_proc}

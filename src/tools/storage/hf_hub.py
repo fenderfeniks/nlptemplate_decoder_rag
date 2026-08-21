@@ -42,6 +42,18 @@ class HFHubStorage(BaseStorage):
     def download(self, remote_path: str, local_dir: Path | str) -> Path:
         target_path = Path(local_dir)
         remote_path = remote_path.strip("/")
+        
+        # --- ДОБАВЛЕННЫЙ БЛОК ---
+        try:
+            files = self.api.list_repo_files(repo_id=self.repo_id, repo_type=self.repo_type)
+            if remote_path in files:
+                if target_path.suffix == "":
+                    target_path = target_path / Path(remote_path).name
+                return self.download_file(remote_path, target_path)
+        except Exception as e:
+            logger.warning("Не удалось проверить файлы в HF Hub, продолжаем скачивание как директории: %s", e)
+        # ------------------------
+
         tmp_path = target_path.with_name(target_path.name + ".tmp")
 
         if tmp_path.exists():
@@ -78,6 +90,43 @@ class HFHubStorage(BaseStorage):
                 shutil.rmtree(tmp_path)
             logger.error("Сбой скачивания из HF Hub. Временные директории очищены.")
             raise e
+
+    def download_file(self, remote_path: str, local_path: Path | str) -> Path:
+        target = Path(local_path)
+        remote_path = remote_path.strip("/")
+        tmp = target.with_name(target.name + ".tmp")
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            logger.info("Скачивание файла из HF Hub: %s/%s", self.repo_id, remote_path)
+            from huggingface_hub import hf_hub_download
+
+            downloaded = hf_hub_download(
+                repo_id=self.repo_id,
+                filename=remote_path,
+                token=self.token,
+                repo_type=self.repo_type,
+                local_dir=str(tmp.parent),
+                local_dir_use_symlinks=False,
+            )
+            # hf_hub_download кладёт файл по пути local_dir/filename
+            # переименовываем в tmp и затем в target атомарно
+            downloaded_path = Path(downloaded)
+            downloaded_path.rename(tmp)
+
+            if target.exists():
+                target.unlink()
+            tmp.rename(target)
+
+            logger.info("Файл атомарно скачан из HF Hub в: %s", target)
+            return target
+
+        except Exception as e:
+            if tmp.exists():
+                tmp.unlink()
+            logger.error("Сбой скачивания файла из HF Hub: %s", e)
+            raise
 
     def exists(self, remote_path: str) -> bool:
         """Проверяет наличие файла или директории в репозитории HF Hub."""

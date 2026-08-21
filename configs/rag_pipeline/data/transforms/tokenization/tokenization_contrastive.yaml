@@ -1,9 +1,0 @@
-_target_: src.pipelines.rag.core.data.transforms.tokenization.RAGTokenizationTransform
-mode: "contrastive"
-query_column: ${rag_pipeline.data.query_column}
-positive_column: ${rag_pipeline.data.positive_column}
-negative_column: ${rag_pipeline.data.negative_column}
-max_length: ${rag_pipeline.data.max_length}
-num_proc: ${rag_pipeline.data.num_proc}
-batch_size: ${rag_pipeline.data.batch_size}
-empty_doc_placeholder: ""

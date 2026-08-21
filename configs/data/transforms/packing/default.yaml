@@ -1,0 +1,4 @@
+_target_: src.pipelines.decoder.core.data.transforms.packing.PackingTransform
+max_length: ${data.max_length}
+eos_token_id: ${model.tokenizer.eos_token_id} # Тянется из общего дерева конфигов
+num_proc: ${system.num_proc}

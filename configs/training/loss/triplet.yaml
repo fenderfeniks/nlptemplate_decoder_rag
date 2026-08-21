@@ -1,0 +1,5 @@
+# training/loss/triplet.yaml
+# Triplet Margin Loss — требует явных hard negatives (neg_embeddings != None)
+_target_: src.pipelines.rag.training.losses.TripletLossWrapper
+margin: 1.0   # Минимальная разница между pos и neg расстоянием
+p: 2.0        # Норма расстояния (2.0 = евклидово)

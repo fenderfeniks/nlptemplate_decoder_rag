@@ -152,7 +152,7 @@ class OverlappingChunkingTransform(BaseDatasetTransform):
         )
 
         logger.info(
-            "Чанкинг завершён: %d документов → %d чанков",
+            "Чанкинг завершён: %d документов -> %d чанков",
             initial_count,
             len(chunked_dataset),
         )

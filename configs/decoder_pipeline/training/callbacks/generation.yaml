@@ -1,7 +1,0 @@
-_target_: src.pipelines.decoder.training.callbacks.GenerationEvaluationCallback
-model_name: ${decoder_pipeline.model.architecture.mlflow_model_name}
-num_random: 5
-generation_batch_size: 2
-mode: "auto"
-generation_kwargs: ${decoder_pipeline.inference.generation_kwargs}
-fixed_samples: []

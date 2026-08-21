@@ -1,0 +1,8 @@
+_target_: src.pipelines.rag.core.data.transforms.validation.RAGValidationTransform
+mode: ${data.mode}
+text_column: ${data.text_column}
+query_column: ${data.query_column}
+positive_column: ${data.positive_column}
+negative_column: ${data.negative_column}
+num_proc: ${system.num_proc}
+batch_size: ${system.batch_size}

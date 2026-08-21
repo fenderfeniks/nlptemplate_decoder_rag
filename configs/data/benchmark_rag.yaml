@@ -1,0 +1,12 @@
+# configs/data/benchmark_rag.yaml
+defaults:
+  - source: hf  # или local, если данные лежат на диске
+  - transforms/chunking: default
+  - _self_
+
+dataset_name: rag_corpus
+
+# Настройки чанкинга (если используется default OverlappingChunkingTransform)
+text_column: "text"
+chunk_size: 500
+chunk_overlap: 50

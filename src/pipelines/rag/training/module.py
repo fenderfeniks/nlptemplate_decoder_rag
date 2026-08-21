@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class RAGLightningModule(OptimizerMixin, pl.LightningModule):
     """LightningModule для контрастивного обучения энкодеров (RAG retriever).
 
-    MRO: RAGLightningModule → OptimizerMixin → pl.LightningModule.
+    MRO: RAGLightningModule -> OptimizerMixin -> pl.LightningModule.
     ``configure_optimizers`` и ``on_save_checkpoint`` берутся из OptimizerMixin.
 
     Обёртывает энкодер + пулер в единый forward-pass и делегирует
@@ -117,3 +117,16 @@ class RAGLightningModule(OptimizerMixin, pl.LightningModule):
             return
 
         self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+
+    def test_step(self, batch: dict[str, Any], batch_idx: int) -> None:
+        loss = self._shared_step(batch)
+
+        if not torch.isfinite(loss):
+            logger.warning(
+                "test batch_idx=%d: loss не конечен (%s) — шаг пропущен.",
+                batch_idx,
+                loss.item(),
+            )
+            return
+
+        self.log("test_loss", loss, on_epoch=True, prog_bar=True, logger=True)

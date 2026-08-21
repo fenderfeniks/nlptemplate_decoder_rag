@@ -1,0 +1,16 @@
+# configs/evaluation/benchmark/generator/api.yaml
+# APIQAGenerator — OpenRouter / OpenAI-совместимый эндпоинт
+# Переменная окружения: OPENROUTER_API_KEY
+
+# @package benchmark.generator_cfg
+_target_: src.tools.benchmark.generator.APIQAGenerator
+model: openai/gpt-4o-mini               # переопределяй: benchmark.generator_cfg.model=...
+api_key_env: OPENROUTER_API_KEY
+base_url: https://openrouter.ai/api/v1
+temperature: 0.3
+max_tokens: 256
+requests_per_minute: 60
+retry_attempts: 3
+retry_delay: 5.0
+system_prompt: null
+user_template: null

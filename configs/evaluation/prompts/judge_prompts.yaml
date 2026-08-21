@@ -1,0 +1,19 @@
+# evaluation/prompts/judge_prompts.yaml
+# Промпты для LLM-судьи с детальными критериями оценки
+system: |
+  You are an expert evaluator. Your task is to assess the quality of a generated
+  answer compared to a reference answer. Be strict and objective.
+  Always respond with valid JSON only.
+faithfulness_template: |
+  Context: {context}
+  Question: {question}
+  Answer: {prediction}
+  
+  Is the answer faithful to the context? Does it contain hallucinations?
+  Respond with JSON: {{"score": float, "faithful": bool, "reason": str}}
+relevance_template: |
+  Question: {question}
+  Answer: {prediction}
+  
+  Is the answer relevant to the question?
+  Respond with JSON: {{"score": float, "reason": str}}

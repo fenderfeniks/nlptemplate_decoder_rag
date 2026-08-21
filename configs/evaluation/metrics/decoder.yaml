@@ -1,0 +1,15 @@
+# evaluation/metrics/decoder.yaml
+# GeneratorMetricsPipeline — src/evaluation/metrics/generator.py
+# Оркестратор: прогоняет данные через все метрики из списка metrics
+_target_: src.evaluation.metrics.generator.GeneratorMetricsPipeline
+metrics:
+  - _target_: src.evaluation.metrics.generator.StatisticalMetrics
+    use_rouge: true
+    use_bleu: true
+
+  - _target_: src.evaluation.metrics.generator.TextQualityMetrics
+    repetition_ngram_n: 3
+
+  - _target_: src.evaluation.metrics.generator.GenerationSpeedMetrics
+    warn_latency_p95_s: null    # null = предупреждения отключены; float = порог в секундах
+    warn_empty_rate: 0.05       # WARNING если доля пустых ответов превышает порог

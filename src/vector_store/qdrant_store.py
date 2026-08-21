@@ -17,6 +17,8 @@
   чем post-filtering в FAISS).
 - ``existing_doc_ids`` — scroll по всей коллекции; кэшируется, инвалидируется
   при upsert/reset.
+- ``get_uri()`` — возвращает ``qdrant://<url>/<collection>`` для записи в манифест.
+  ``ArtifactResolver`` распознаёт эту схему и не пытается скачивать файлы.
 """
 
 from __future__ import annotations
@@ -60,6 +62,7 @@ class QdrantVectorStore:
       для тестов без запущенного сервера.
     - Батчевую вставку с контролем размера батча.
     - ``existing_doc_ids`` с кэшированием для инкрементальной индексации.
+    - ``get_uri()`` для записи адреса коллекции в манифест вместо пути к файлам.
     """
 
     def __init__(
@@ -72,7 +75,7 @@ class QdrantVectorStore:
         normalize_embeddings: bool = True,
         insert_batch_size: int = 256,
         in_memory: bool = False,
-        recreate_collection: bool = False,
+        enable_sparse: bool = False,
     ) -> None:
         """
         Args:
@@ -83,9 +86,6 @@ class QdrantVectorStore:
                 для локального in-memory режима (тесты, dev).
             api_key: API-ключ для Qdrant Cloud (опционально).
             distance: Метрика расстояния — ``'Cosine'``, ``'Dot'``, ``'Euclid'``.
-                ``'Cosine'`` автоматически нормализует векторы на стороне Qdrant,
-                но мы нормализуем на своей стороне тоже если ``normalize_embeddings=True``
-                — двойная нормализация идемпотентна для единичных векторов.
             normalize_embeddings: Нормализовать ли векторы перед вставкой/поиском
                 на клиентской стороне. Рекомендуется ``True`` для ``Cosine`` и ``Dot``.
             insert_batch_size: Размер батча для ``upsert`` (Qdrant рекомендует 100-256).
@@ -111,9 +111,12 @@ class QdrantVectorStore:
         self.distance = distance
         self.normalize_embeddings = normalize_embeddings
         self.insert_batch_size = insert_batch_size
+        self.enable_sparse = enable_sparse
 
-        # Инициализация клиента
-        if in_memory or url == ":memory:":
+        self._url = url
+        self._in_memory = in_memory or url == ":memory:"
+
+        if self._in_memory:
             logger.info("QdrantVectorStore: in-memory режим (без сервера).")
             self._client = QdrantClient(":memory:")
         else:
@@ -122,46 +125,69 @@ class QdrantVectorStore:
             )
             self._client = QdrantClient(url=url, api_key=api_key, timeout=30)
 
+        # Sparse-модель инициализируется один раз и живёт в store
+        self._sparse_model = None
+        if enable_sparse:
+            try:
+                from fastembed import SparseTextEmbedding
+                self._sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
+                logger.info("QdrantVectorStore: sparse-модель (BM25) загружена.")
+            except ImportError:
+                logger.warning(
+                    "fastembed не установлен — sparse отключён. "
+                    "Установите: pip install fastembed"
+                )
+                self.enable_sparse = False
+
         self._doc_id_cache: set[str] | None = None
-        self._ensure_collection(recreate=recreate_collection)
+        self._ensure_collection()
 
     # ------------------------------------------------------------------
     # Инициализация коллекции
     # ------------------------------------------------------------------
 
-    def _ensure_collection(self, recreate: bool = False) -> None:
-        """Создаёт коллекцию если она не существует. При recreate=True — пересоздаёт."""
+    def _ensure_collection(self) -> None:
+        """Создаёт коллекцию если она не существует."""
         distance_map = {
             "Cosine": qmodels.Distance.COSINE,
             "Dot": qmodels.Distance.DOT,
             "Euclid": qmodels.Distance.EUCLID,
         }
         qdrant_distance = distance_map[self.distance]
-
         collections = {c.name for c in self._client.get_collections().collections}
 
-        if recreate and self.collection_name in collections:
-            logger.warning(
-                "QdrantVectorStore: удаляем коллекцию '%s' (recreate=True).",
-                self.collection_name,
-            )
-            self._client.delete_collection(self.collection_name)
-            collections.discard(self.collection_name)
-
         if self.collection_name not in collections:
-            self._client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=qmodels.VectorParams(
-                    size=self._embedding_dim,
-                    distance=qdrant_distance,
-                ),
-            )
-            logger.info(
-                "Коллекция '%s' создана (dim=%d, distance=%s).",
-                self.collection_name,
-                self._embedding_dim,
-                self.distance,
-            )
+            if self.enable_sparse:
+                self._client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config={
+                        "dense": qmodels.VectorParams(
+                            size=self._embedding_dim,
+                            distance=qdrant_distance,
+                        )
+                    },
+                    sparse_vectors_config={
+                        "sparse": qmodels.SparseVectorParams(
+                            index=qmodels.SparseIndexParams(on_disk=False)
+                        )
+                    },
+                )
+                logger.info(
+                    "Коллекция '%s' создана (dim=%d, distance=%s, sparse=BM25).",
+                    self.collection_name, self._embedding_dim, self.distance,
+                )
+            else:
+                self._client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=qmodels.VectorParams(
+                        size=self._embedding_dim,
+                        distance=qdrant_distance,
+                    ),
+                )
+                logger.info(
+                    "Коллекция '%s' создана (dim=%d, distance=%s, sparse=off).",
+                    self.collection_name, self._embedding_dim, self.distance,
+                )
         else:
             logger.info("Коллекция '%s' уже существует — подключаемся.", self.collection_name)
 
@@ -187,7 +213,6 @@ class QdrantVectorStore:
         doc_ids: set[str] = set()
         next_offset = None
 
-        # Scroll по всей коллекции батчами — коллекция может быть большой
         while True:
             records, next_offset = self._client.scroll(
                 collection_name=self.collection_name,
@@ -209,6 +234,26 @@ class QdrantVectorStore:
 
     def _invalidate_cache(self) -> None:
         self._doc_id_cache = None
+
+    # ------------------------------------------------------------------
+    # URI для манифеста
+    # ------------------------------------------------------------------
+
+    def get_uri(self) -> str:
+        """Возвращает URI коллекции для записи в манифест.
+
+        Формат: ``qdrant://<server_url>/<collection_name>``
+        Пример: ``qdrant://http://localhost:6333/nlp_project_kb``
+
+        ``ArtifactResolver`` распознаёт схему ``qdrant://`` и вместо скачивания
+        файлов передаёт url и collection_name напрямую в ``QdrantVectorStore.connect()``.
+
+        In-memory режим возвращает ``qdrant+memory:///<collection_name>`` —
+        используется только в тестах, в реальном манифесте не появляется.
+        """
+        if self._in_memory:
+            return f"qdrant+memory:///{self.collection_name}"
+        return f"qdrant://{self._url}/{self.collection_name}"
 
     # ------------------------------------------------------------------
     # Вспомогательные методы
@@ -245,6 +290,9 @@ class QdrantVectorStore:
     def insert(self, embeddings: np.ndarray, metadata: list[dict[str, Any]]) -> None:
         """Вставляет векторы в Qdrant батчами через upsert.
 
+        Если enable_sparse=True — вычисляет BM25 sparse-векторы из metadata['text']
+        и сохраняет оба вектора в именованных полях 'dense' и 'sparse'.
+
         Raises:
             ValueError: При несоответствии размерностей или длин.
         """
@@ -260,19 +308,43 @@ class QdrantVectorStore:
 
         prepared = self._prepare(embeddings)
 
+        # Вычисляем sparse-векторы один раз для всего батча
+        sparse_vectors = None
+        if self.enable_sparse and self._sparse_model is not None:
+            texts = [m.get("text", "") for m in metadata]
+            sparse_vectors = list(self._sparse_model.embed(texts))
+
         for start in range(0, len(prepared), self.insert_batch_size):
             end = min(start + self.insert_batch_size, len(prepared))
             batch_emb = prepared[start:end]
             batch_meta = metadata[start:end]
 
-            points = [
-                qmodels.PointStruct(
-                    id=str(uuid.uuid4()),
-                    vector=emb.tolist(),
-                    payload=meta,
-                )
-                for emb, meta in zip(batch_emb, batch_meta)  # noqa
-            ]
+            if sparse_vectors is not None:
+                batch_sparse = sparse_vectors[start:end]
+                points = [
+                    qmodels.PointStruct(
+                        id=str(uuid.uuid4()),
+                        vector={
+                            "dense": emb.tolist(),
+                            "sparse": qmodels.SparseVector(
+                                indices=sv.indices.tolist(),
+                                values=sv.values.tolist(),
+                            ),
+                        },
+                        payload=meta,
+                    )
+                    for emb, sv, meta in zip(batch_emb, batch_sparse, batch_meta)
+                ]
+            else:
+                points = [
+                    qmodels.PointStruct(
+                        id=str(uuid.uuid4()),
+                        vector=emb.tolist(),
+                        payload=meta,
+                    )
+                    for emb, meta in zip(batch_emb, batch_meta)
+                ]
+
             self._client.upsert(
                 collection_name=self.collection_name,
                 points=points,
@@ -292,7 +364,11 @@ class QdrantVectorStore:
         top_k: int = 5,
         filter_metadata: dict[str, Any] | None = None,
     ) -> list[list[dict[str, Any]]]:
-        """Поиск ближайших векторов с опциональной нативной фильтрацией."""
+        """Поиск ближайших векторов с опциональной нативной фильтрацией.
+
+        Если enable_sparse=True — использует именованный вектор 'dense'.
+        Если enable_sparse=False — безымянный вектор (обратная совместимость).
+        """
         if self.ntotal == 0:
             return [[] for _ in range(len(query_embeddings))]
 
@@ -303,7 +379,11 @@ class QdrantVectorStore:
         for query_vec in prepared:
             hits = self._client.search(
                 collection_name=self.collection_name,
-                query_vector=query_vec.tolist(),
+                query_vector=(
+                    ("dense", query_vec.tolist())
+                    if self.enable_sparse
+                    else query_vec.tolist()
+                ),
                 query_filter=qdrant_filter,
                 limit=top_k,
                 with_payload=True,
@@ -319,6 +399,78 @@ class QdrantVectorStore:
             )
 
         return results
+
+    def search_hybrid(
+        self,
+        query_vectors: np.ndarray,
+        query_texts: list[str],
+        top_k: int = 5,
+        filter_metadata: dict[str, Any] | None = None,
+    ) -> list[list[dict[str, Any]]]:
+        """Гибридный поиск (Dense + Sparse) с Reciprocal Rank Fusion (RRF).
+
+        Требует enable_sparse=True и коллекции с именованными векторами.
+
+        Raises:
+            RuntimeError: Если вызван при enable_sparse=False.
+        """
+        if not self.enable_sparse or self._sparse_model is None:
+            raise RuntimeError(
+                "search_hybrid недоступен: enable_sparse=False. "
+                "Используйте search() или включите sparse в конфиге."
+            )
+
+        if self.ntotal == 0:
+            return [[] for _ in range(len(query_vectors))]
+
+        prepared_dense = self._prepare(query_vectors)
+        qdrant_filter = self._build_filter(filter_metadata)
+
+        # Sparse-модель уже живёт в self._sparse_model — не создаём заново
+        sparse_vectors = list(self._sparse_model.embed(query_texts))
+
+        final_results = []
+        prefetch_limit = top_k * 2
+
+        for dense_vec, sparse_vec in zip(prepared_dense, sparse_vectors):
+            qdrant_sparse = qmodels.SparseVector(
+                indices=sparse_vec.indices.tolist(),
+                values=sparse_vec.values.tolist(),
+            )
+
+            response = self._client.query_points(
+                collection_name=self.collection_name,
+                prefetch=[
+                    qmodels.Prefetch(
+                        query=dense_vec.tolist(),
+                        using="dense",
+                        limit=prefetch_limit,
+                        filter=qdrant_filter,
+                    ),
+                    qmodels.Prefetch(
+                        query=qdrant_sparse,
+                        using="sparse",
+                        limit=prefetch_limit,
+                        filter=qdrant_filter,
+                    ),
+                ],
+                query=qmodels.FusionQuery(fusion=qmodels.Fusion.RRF),
+                limit=top_k,
+                with_payload=True,
+            )
+
+            final_results.append(
+                [
+                    {
+                        "score": float(hit.score),
+                        "metadata": hit.payload or {},
+                        "doc_id": hit.payload.get("doc_id") if hit.payload else str(hit.id),
+                    }
+                    for hit in response.points
+                ]
+            )
+
+        return final_results
 
     # ------------------------------------------------------------------
     # Персистентность (BaseVectorStore protocol)
@@ -351,30 +503,43 @@ class QdrantVectorStore:
     ) -> QdrantVectorStore:
         """Подключается к существующей коллекции Qdrant.
 
-        Используется через ``cfg.vector_db.loader`` при старте сервера —
-        аналог ``FAISSVectorStore.load()``.
-
-        Фильтрует ``**kwargs`` через сигнатуру ``__init__`` — лишние ключи
-        которые Hydra подмешивает из конфига (например из storage-интерполяций)
-        отсекаются с предупреждением, не вызывая TypeError.
+        Используется через ``cfg.vector_db.loader`` при старте сервера.
+        Умеет парсить URI формата ``qdrant://<url>/<collection>`` который
+        ``ArtifactResolver`` передаёт через аргумент ``directory``.
 
         Args:
-            directory: Игнорируется. Принимается для совместимости с FAISS-интерфейсом
-                при вызове ``hydra.utils.instantiate(cfg.vector_db.loader, directory=...)``.
+            directory: Либо локальный путь (игнорируется), либо URI вида
+                ``qdrant://http://localhost:6333/nlp_project_kb`` — тогда
+                из него извлекаются ``url`` и ``collection_name``.
             **kwargs: Параметры для ``__init__``. Неизвестные ключи игнорируются.
-
-        Returns:
-            Инициализированный ``QdrantVectorStore`` подключённый к коллекции.
         """
         if directory is not None:
-            logger.debug(
-                "QdrantVectorStore.connect(): аргумент directory='%s' игнорируется "
-                "(Qdrant не использует локальные файлы индекса).",
-                directory,
-            )
+            uri = str(directory)
+            if uri.startswith("qdrant://"):
+                # Парсим: qdrant://http://localhost:6333/nlp_project_kb
+                #      -> url=http://localhost:6333, collection=nlp_project_kb
+                without_scheme = uri[len("qdrant://"):]
+                last_slash = without_scheme.rfind("/")
+                if last_slash == -1:
+                    raise ValueError(
+                        f"Невалидный qdrant:// URI — не найден '/' после хоста: {uri}"
+                    )
+                parsed_url = without_scheme[:last_slash]
+                parsed_collection = without_scheme[last_slash + 1:]
+                kwargs.setdefault("url", parsed_url)
+                kwargs.setdefault("collection_name", parsed_collection)
+                logger.info(
+                    "QdrantVectorStore.connect(): из URI — url='%s', collection='%s'",
+                    parsed_url,
+                    parsed_collection,
+                )
+            else:
+                logger.debug(
+                    "QdrantVectorStore.connect(): directory='%s' не является qdrant:// URI — "
+                    "игнорируется (Qdrant не использует локальные файлы индекса).",
+                    directory,
+                )
 
-        # Фильтруем kwargs через сигнатуру __init__ — та же защита что в FAISSVectorStore.load.
-        # Hydra может подмешать лишние ключи из storage-интерполяций конфига.
         valid_keys = set(inspect.signature(cls.__init__).parameters) - {"self"}
         filtered = {k: v for k, v in kwargs.items() if k in valid_keys}
         dropped = set(kwargs) - valid_keys
@@ -384,7 +549,7 @@ class QdrantVectorStore:
                 dropped,
             )
 
-        instance = cls(**filtered, recreate_collection=False)
+        instance = cls(**filtered)
 
         ntotal = instance.ntotal
         if ntotal == 0:

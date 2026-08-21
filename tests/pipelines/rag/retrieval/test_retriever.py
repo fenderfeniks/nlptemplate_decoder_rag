@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.pipelines.rag.retrieval.retriever import BaseRetriever
+from src.pipelines.rag.inference.retriever import BaseRetriever
 
 
 @pytest.fixture

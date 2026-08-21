@@ -1,74 +1,87 @@
-# scripts/rag/infer.py
 import logging
-import sys
-from pathlib import Path
-
 import hydra
-from omegaconf import DictConfig
+from dotenv import load_dotenv
+from omegaconf import DictConfig, OmegaConf
 
+from src.endpoints.infer import run_universal_infer
 from src.pipelines.rag.inference.builder import build_inference_encoder
-from src.pipelines.rag.inference.embedder_factory import build_embedder
 from src.tools.storage.resolver import ArtifactResolver
+from src.utils.cli import enforce_pipeline
 from src.utils.hydra_utils import setup_config
-from src.utils.logger import setup_logging
 
-
-setup_logging()
+load_dotenv()
 logger = logging.getLogger(__name__)
 
+def run_rag_logic(cfg: DictConfig, resolver: ArtifactResolver) -> None:
+    """Специфичная логика сборки и инференса RAG."""
+    # 1. Загрузка артефактов (БД и адаптер)
+    db_dir, lora_path, *_ = resolver.resolve_and_patch(
+        cfg, cfg.system.manifest.uri, pipeline_name="rag_pipeline", is_training=False
+    )
+    if not db_dir:
+        raise ValueError("Манифест не содержит 'vector_db_uri'. База не найдена.")
 
-@hydra.main(config_path="../../configs", config_name="main", version_base="1.3")
-def infer(cfg: DictConfig) -> None:
-    """Тестовый прогон RAG-ретривера по одному запросу."""
-    cfg = setup_config(cfg)
-    logger.info("Инициализация RAG-ретривера...")
-
-    # 1. Резолвинг артефактов (энкодер + БД)
-    router = hydra.utils.instantiate(cfg.storage_router)
-    cache_base = Path(cfg.paths.model_dir) / "rag_cache"
-    resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
-
-    try:
-        db_dir, lora_path = resolver.resolve_and_patch(
-            cfg, cfg.manifest.uri, pipeline_name="rag_pipeline"
-        )
-        if not db_dir:
-            raise ValueError("Манифест не содержит 'vector_db_uri'. База не найдена.")
-    except Exception as e:
-        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Сбой подготовки артефактов RAG: %s", e)
-        sys.exit(1)
-
-    # 2. Сборка энкодера и эмбеддера
+    # 2. Сборка энкодера (RAG биэнкодер)
     base_model, pooler, tokenizer = build_inference_encoder(cfg, lora_path)
-    embedder = build_embedder(cfg, base_model, pooler, tokenizer)
+    embedder = hydra.utils.instantiate(
+        cfg.inference.embedder,
+        model=base_model,
+        pooler=pooler,
+        tokenizer=tokenizer,
+    )
 
     # 3. Загрузка векторной БД
     vector_db = hydra.utils.instantiate(cfg.vector_db.loader, directory=db_dir)
-    logger.info("Векторная БД загружена из '%s' (%d документов).", db_dir, vector_db.ntotal)
+    logger.info("Векторная БД загружена. Документов: %d.", vector_db.ntotal)
 
-    # 4. Сборка ретривера и тестовый запрос
-    # test_query / top_k — поля inference.yaml для smoke-теста, не параметры эмбеддера.
-    inference_cfg = cfg.rag_pipeline.inference
-    query: str = inference_cfg.get("test_query", "Тестовый запрос")
-    top_k: int = inference_cfg.get("top_k", 3)
+    # 4. Реранкер (опционально)
+    reranker = None
+    if cfg.get("use_reranker", False):
+        try:
+            _, reranker_lora, *_ = resolver.resolve_and_patch(
+                cfg, cfg.system.manifest.uri, pipeline_name="reranker_pipeline", is_training=False
+            )
+            # Переопределяем auto_model_class для реранкера
+            OmegaConf.update(cfg, "model.builder.auto_model_class", "transformers.AutoModelForSequenceClassification")
+            r_model, _, r_tokenizer = build_inference_encoder(cfg, reranker_lora)
+            reranker = hydra.utils.instantiate(
+                cfg.inference.reranker, model=r_model, tokenizer=r_tokenizer
+            )
+            logger.info("Реранкер загружен.")
+        except Exception as e:
+            logger.error("Сбой загрузки реранкера — продолжаем без него: %s", e)
 
+    # 5. Сборка ретривера
     retriever = hydra.utils.instantiate(
-        cfg.rag_pipeline.retrieval,
-        embedder=embedder,
-        vector_db=vector_db,
+        cfg.inference.retriever, embedder=embedder, vector_db=vector_db, reranker=reranker
     )
 
+    # 6. Тестовый запрос
+    inference_cfg = cfg.inference
+    query: str = inference_cfg.get("test_query", "Тестовый запрос")
+    top_k: int = inference_cfg.get("top_k", 5)
+
     logger.info("Запрос: '%s'", query)
-    results = retriever.search(query, top_k=top_k)
+    results = retriever.search(query=query, top_k=top_k)
+
+    reranker_active = reranker is not None
+    logger.info("Результаты (%s реранкер):", "активен" if reranker_active else "отключён")
 
     for i, res in enumerate(results, 1):
-        score = res.get("score", 0.0)
+        dense_score = res.get("score", 0.0)
+        ce_score = res.get("cross_encoder_score")
         text = res.get("metadata", {}).get("text", "").replace("\n", " ")
-        logger.info("[%d] score=%.4f | текст: %s...", i, score, text[:150])
 
+        if ce_score is not None:
+            logger.info("[%d] dense=%.4f | ce=%.4f | текст: %s...", i, dense_score, ce_score, text[:150])
+        else:
+            logger.info("[%d] dense=%.4f | текст: %s...", i, dense_score, text[:150])
+
+@hydra.main(config_path="../../configs", config_name="eval_rag", version_base="1.3")
+def main(cfg: DictConfig) -> None:
+    cfg = setup_config(cfg)
+    run_universal_infer(cfg, "rag_pipeline", run_rag_logic)
 
 if __name__ == "__main__":
-    from src.utils.cli import enforce_pipeline
-
     enforce_pipeline("rag_pipeline")
-    infer()
+    main()

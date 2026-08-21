@@ -1,0 +1,7 @@
+_target_: src.pipelines.base.core.data.transforms.deduplication.MinHashDeduplicationTransform
+target_columns: ??? # Всегда переопределяется в корневом файле
+num_perm: 128
+threshold: 0.85      # Можно вынести в топ-левел как ${minhash_threshold}, если нужно менять
+ngram_size: 5
+column_separator: "\n\n"
+num_proc: ${system.num_proc}

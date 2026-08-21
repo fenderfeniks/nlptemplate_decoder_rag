@@ -1,0 +1,11 @@
+# Простой фетчер — делегирует в source.
+# source инстанцируется отдельно и передаётся в DataModule.
+# Этот файл используется если фетчер не нужен как отдельный слой
+# (т.е. source передаётся напрямую через data.source).
+# Для interleaved-источников используй data/fetcher/interleaved.yaml.
+_target_: src.pipelines.base.core.data.fetcher.RawDataFetcher
+source_type: ${data.source.source_type}
+raw_dir: ${system.paths.raw_data_dir}
+dataset_name: ${data.source.dataset_name}
+file_name: ${data.source.file_name}
+token: ${data.source.token}

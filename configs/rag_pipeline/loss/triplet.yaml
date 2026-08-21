@@ -1,3 +1,0 @@
-_target_: src.pipelines.rag.training.losses.TripletLossWrapper
-margin: 1.0
-p: 2.0

@@ -1,0 +1,9 @@
+# inference/generator/local.yaml
+# llama.cpp на CPU — тот же OpenAI-совместимый HTTP API, только порт другой.
+# Запуск: ./llama-server -m model.gguf --port 8080
+_target_: src.pipelines.decoder.inference.inference.LLMGenerationClient
+_recursive_: false
+api_base: ${oc.env:LLM_API_URL,http://localhost:8081/v1}
+temperature: 0.7
+max_tokens: 512        # CPU медленный — меньше токенов для dev/тестов
+max_concurrent_requests: 4   # llama.cpp однопоточный, больше смысла нет

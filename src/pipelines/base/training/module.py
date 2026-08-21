@@ -10,22 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 class OptimizerMixin:
-    """Миксин: configure_optimizers и on_save_checkpoint для всех NLP-модулей.
-
-    Не наследует ``pl.LightningModule`` намеренно — это чистый миксин.
-    Дочерние классы сами наследуют Lightning в правильном порядке:
-
-        class MyModule(OptimizerMixin, pl.LightningModule): ...
-
-    MRO при таком порядке: MyModule → OptimizerMixin → pl.LightningModule.
-    ``super().__init__()`` проходит по одному пути без дублирования хуков Lightning.
-
-    Требует от дочернего класса атрибутов:
-    - ``self.model``           — nn.Module с параметрами
-    - ``self.optimizer_cfg``   — DictConfig или callable
-    - ``self.scheduler_cfg``   — DictConfig, callable или None
-    - ``self.trainer``         — автоматически доступен через pl.LightningModule
-    """
 
     # ------------------------------------------------------------------
     # Чекпоинтинг

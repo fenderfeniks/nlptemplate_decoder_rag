@@ -1,0 +1,6 @@
+_target_: src.pipelines.base.core.data.fetcher.RawDataFetcher
+source_type: hf
+raw_dir: ${system.paths.raw_data_dir}
+dataset_name: "sentence-transformers/all-nli"   # обязательно: "org/dataset-name"
+token: null         # HF token для приватных датасетов
+name: "triplet"

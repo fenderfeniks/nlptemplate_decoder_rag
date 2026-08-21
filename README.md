@@ -23,7 +23,7 @@ Production-ready шаблон для задач **генерации текст�
 
 ### Главная ценность — смоук-тест без обучения
 
-Шаблон позволяет **проверить любую модель на ваших данных до начала обучения**. Запустите нулевой baseline через ноутбуки (zero-shot инференс, анализ промптов) — и если результаты устраивают, сервис буквально за один день можно подготовить к деплою: promote → merge_lora → docker_api. Обучение при этом опционально, а не обязательно.
+Шаблон позволяет **проверить любую модель на ваших данных до начала обучения**. Запустите нулевой baseline через ноутбуки (zero-shot инференс, анализ промптов) — и если результаты устраивают, сервис буквально за один день можно подготовить к деплою: promote -> merge_lora -> docker_api. Обучение при этом опционально, а не обязательно.
 
 Большинство NLP-задач — RAG-чат-боты, суммаризация, перевод, Q&A — повторяют одну и ту же инфраструктуру: загрузка данных, дообучение с LoRA, трекинг экспериментов, REST-сервис, переиндексация базы документов. Этот шаблон реализует всё это **один раз и продакшен-качественно**, оставляя только то, что специфично для задачи: данные, промпты и гиперпараметры.
 
@@ -53,28 +53,28 @@ Production-ready шаблон для задач **генерации текст�
                            │ HTTP
 ┌──────────────────────────▼──────────────────────────────┐
 │              API Gateway  (FastAPI, :8000)               │
-│   RAGOrchestrator: запрос → RAG API → промпт → LLM API  │
+│   RAGOrchestrator: запрос -> RAG API -> промпт -> LLM API  │
 │   PromptManager: шаблоны из YAML, без хардкода          │
 │   Middleware: CORS, rate-limit, Prometheus-метрики       │
 └────────────┬────────────────────────┬───────────────────┘
              │ HTTP                   │ HTTP
 ┌────────────▼──────────┐  ┌──────────▼──────────────────┐
 │  RAG API  (FastAPI,   │  │  Decoder API  (FastAPI,      │
-│  :8001)               │  │  :8003) → vLLM (:8002)      │
-│  Запрос → embedding   │  │  Принимает промпт + docs     │
-│  → поиск по FAISS     │  │  Отдаёт ответ в Gateway      │
-│  → возврат документов │  │  OpenAI-compatible /v1       │
+│  :8001)               │  │  :8003) -> vLLM (:8002)      │
+│  Запрос -> embedding   │  │  Принимает промпт + docs     │
+│  -> поиск по FAISS     │  │  Отдаёт ответ в Gateway      │
+│  -> возврат документов │  │  OpenAI-compatible /v1       │
 └───────────────────────┘  └──────────────────────────────┘
 
 ОБУЧЕНИЕ (batch jobs):
-  scripts/decoder_pipeline/train.py  — CPT/SFT + LoRA → MLflow
-  scripts/rag_pipeline/train.py      — Contrastive → MLflow
+  scripts/decoder_pipeline/train.py  — CPT/SFT + LoRA -> MLflow
+  scripts/rag_pipeline/train.py      — Contrastive -> MLflow
   scripts/rag_pipeline/index_db.py   — Индексация FAISS + обновление манифеста
-  → трекинг:    MLflow (единая БД, раздельные experiment name)
-  → промоут:    src/tools/promote.py  (LoRA из mlruns → storage + манифест)
-  → слияние:    src/tools/merge_lora.py (LoRA + base → merged model)
-  → оркестрация: Airflow DAGs (KubernetesPodOperator)
-  → деплой:     Helm chart
+  -> трекинг:    MLflow (единая БД, раздельные experiment name)
+  -> промоут:    src/tools/promote.py  (LoRA из mlruns -> storage + манифест)
+  -> слияние:    src/tools/merge_lora.py (LoRA + base -> merged model)
+  -> оркестрация: Airflow DAGs (KubernetesPodOperator)
+  -> деплой:     Helm chart
 ```
 
 ---
@@ -111,7 +111,7 @@ Production-ready шаблон для задач **генерации текст�
 ├── src/
 │   ├── api_gateway/                  # Оркестратор (FastAPI)
 │   ├── application/
-│   │   ├── orchestrator.py           # RAGOrchestrator: RAG API → PromptManager → LLM
+│   │   ├── orchestrator.py           # RAGOrchestrator: RAG API -> PromptManager -> LLM
 │   │   └── llamaindex_ext.py         # LlamaIndex-интеграция
 │   ├── pipelines/
 │   │   ├── base/                     # Общие строительные блоки (ModelBuilder, DataModule)
@@ -138,8 +138,8 @@ Production-ready шаблон для задач **генерации текст�
 │   │       └── api/                  # REST-эндпоинты RAG
 │   ├── schemas/                      # Pydantic-схемы (main, decoder, rag, nli, evaluation)
 │   ├── tools/
-│   │   ├── promote.py                # LoRA из MLflow → storage + манифест
-│   │   ├── merge_lora.py             # LoRA + base → merged model → storage + манифест
+│   │   ├── promote.py                # LoRA из MLflow -> storage + манифест
+│   │   ├── merge_lora.py             # LoRA + base -> merged model -> storage + манифест
 │   │   ├── fetch_data.py             # Загрузка данных
 │   │   ├── maintenance.py            # Очистка кэша
 │   │   ├── batch_analytics.py        # Аналитика логов генерации
@@ -161,8 +161,8 @@ Production-ready шаблон для задач **генерации текст�
 │   └── rag/                          # rag_fetch_data, rag_retrain, rag_index_db, rag_promote, rag_quality_control, rag_batch_analytics
 │
 ├── notebooks/
-│   └── decoder_pipeline/             # 01 EDA → 02 Baseline → 03 Prompts
-│                                     #   → 04 LoRA → 05 Eval → 06 Export
+│   └── decoder_pipeline/             # 01 EDA -> 02 Baseline -> 03 Prompts
+│                                     #   -> 04 LoRA -> 05 Eval -> 06 Export
 │                                     # TODO: RAG-ноутбуки
 │
 ├── demo/                             # Streamlit-клиент
@@ -256,7 +256,7 @@ make train_decoder ARGS="training.max_steps=5000"
 ### 6. Проверь результаты в MLflow
 
 ```bash
-make mlflow   # → http://127.0.0.1:5000
+make mlflow   # -> http://127.0.0.1:5000
 ```
 
 Каждый прогон автоматически логирует метрики, гиперпараметры и LoRA-адаптер.
@@ -267,7 +267,7 @@ make mlflow   # → http://127.0.0.1:5000
 # Шаг A: promote — переносит лучший LoRA из mlruns в storage + создаёт манифест
 python -m src.tools.promote pipeline_name=decoder_pipeline
 
-# Шаг Б: merge_lora — сливает LoRA с базовой моделью → готовая модель в storage
+# Шаг Б: merge_lora — сливает LoRA с базовой моделью -> готовая модель в storage
 python -m src.tools.merge_lora pipeline_name=decoder_pipeline
 
 # Или оба шага за раз:
@@ -287,8 +287,8 @@ make docker_api
 # :9090 — Prometheus    :3000 — Grafana (admin/admin)
 
 # Или локально
-make api_gateway   # → http://localhost:8000
-make api_rag       # → http://localhost:8001
+make api_gateway   # -> http://localhost:8000
+make api_rag       # -> http://localhost:8001
 ```
 
 ---
@@ -304,7 +304,7 @@ make api_rag       # → http://localhost:8001
 Данные подаются как поток текстов без разметки. Перед обучением применяется `SequencePackingTransform`: все последовательности конкатенируются и нарезаются на блоки фиксированного размера `packing_chunk_size` токенов. Это устраняет паддинг и существенно повышает эффективность использования GPU.
 
 ```
-Текст → очистка → токенизация → конкатенация → нарезка на блоки по N токенов
+Текст -> очистка -> токенизация -> конкатенация -> нарезка на блоки по N токенов
 ```
 
 **Метрики в MLflow (CPT):** `train_loss`, `val_loss`, `train_perplexity`, `val_perplexity`
@@ -320,7 +320,7 @@ make api_rag       # → http://localhost:8001
 `InstructionDataCollator` маскирует промпт в лейблах (`-100`) — loss считается только по ответу модели. Разделитель `separator` задаётся в конфиге (например: `"Перевод: "`, `"\n\n"` и т.д.). Системные токены подключаются через `use_chat_template=true` или через `messages_column` для диалогового формата.
 
 ```
-Пары (prompt, target) → очистка → дедупликация (MinHash) → токенизация → маскирование промпта
+Пары (prompt, target) -> очистка -> дедупликация (MinHash) -> токенизация -> маскирование промпта
 ```
 
 **Метрики в MLflow (SFT):** `train_loss`, `val_loss`, `val_sacrebleu`, `val_rouge1`, `val_rougeL`
@@ -330,7 +330,7 @@ make api_rag       # → http://localhost:8001
 `GenerationEvaluationCallback` запускает оценку генерации на валидации. Поддерживаются два судьи — подключаются через `configs/evaluation/judge/`:
 
 - **LLM-as-a-Judge** (`judge/openrouter`) — вызывает внешнюю LLM через OpenRouter (OpenAI-compatible). Настраиваемые флаги: `return_score`, `return_verdict`, `return_reasoning`. Судья создаётся лениво — не занимает VRAM во время обучения.
-- **NLI-Judge** (`judge/nli`) — локальная NLI-модель (RoBERTa-large-mnli и аналоги). `premise = reference`, `hypothesis = response` → entailment score → `EvalResult.score ∈ [0, 1]`.
+- **NLI-Judge** (`judge/nli`) — локальная NLI-модель (RoBERTa-large-mnli и аналоги). `premise = reference`, `hypothesis = response` -> entailment score -> `EvalResult.score ∈ [0, 1]`.
 
 **Дополнительные метрики при включённом judge:** `val_judge_score`, `val_judge_verdict`
 
@@ -343,7 +343,7 @@ make api_rag       # → http://localhost:8001
 Для индексации применяется `OverlappingChunkingTransform` — нарезка на уровне слов с перекрытием:
 
 ```
-Документы → очистка → чанкинг (chunk_size симв., chunk_overlap симв.) → эмбеддинг → FAISS
+Документы -> очистка -> чанкинг (chunk_size симв., chunk_overlap симв.) -> эмбеддинг -> FAISS
 ```
 
 > Обрати внимание: `chunk_size` и `chunk_overlap` задаются в **символах**, не токенах. Рекомендуется калибровать эмпирически под конкретный токенизатор (≈ chunk_size=400 при max_length=128).
@@ -368,7 +368,7 @@ make api_rag       # → http://localhost:8001
 
 ---
 
-### Транспортировка моделей: promote → merge_lora → инференс
+### Транспортировка моделей: promote -> merge_lora -> инференс
 
 ```
 Обучение завершено
@@ -378,11 +378,11 @@ make api_rag       # → http://localhost:8001
       │
       ▼
  promote.py                  — Сравнение Staging vs Production по val_loss
-  ├─ Staging лучше           → обновить алиас Production в MLflow Registry
-  │                          → скачать LoRA из mlruns
-  │                          → загрузить в storage (local / S3 / HF Hub)
-  │                          → обновить манифест (load_type=lora)
-  └─ Staging хуже            → промоут отменён, Production не меняется
+  ├─ Staging лучше           -> обновить алиас Production в MLflow Registry
+  │                          -> скачать LoRA из mlruns
+  │                          -> загрузить в storage (local / S3 / HF Hub)
+  │                          -> обновить манифест (load_type=lora)
+  └─ Staging хуже            -> промоут отменён, Production не меняется
       │
       ▼
  merge_lora.py               — Слияние LoRA + base model
@@ -394,7 +394,7 @@ make api_rag       # → http://localhost:8001
       │
       ▼
  Инференс загружает model по манифесту
- (manifest_uri из конфига → storage router → local / S3 / HF Hub)
+ (manifest_uri из конфига -> storage router -> local / S3 / HF Hub)
 ```
 
 **Для RAG pipeline** манифест дополнительно содержит путь к векторной БД. Индексация (`index_db.py`) обязательно должна быть выполнена до деплоя RAG API — она добавляет `vector_db_uri` в манифест.
@@ -493,9 +493,9 @@ python -m src.api_gateway.run_api \
 
 | DAG | Расписание | Что делает |
 |---|---|---|
-| `llm_retrain` | `@weekly` | CPT/SFT → log_lora → Staging |
-| `llm_promote` | вручную | Staging → Production сравнение, обновление манифеста |
-| `llm_quality_control` | `@daily` | Батч-инференс → метрики → алерт в Slack при деградации |
+| `llm_retrain` | `@weekly` | CPT/SFT -> log_lora -> Staging |
+| `llm_promote` | вручную | Staging -> Production сравнение, обновление манифеста |
+| `llm_quality_control` | `@daily` | Батч-инференс -> метрики -> алерт в Slack при деградации |
 | `llm_batch_analytics` | `@daily` | Аналитика по логам генерации |
 | `rag_fetch_data` | по расписанию | Забирает новые документы из источника |
 | `rag_retrain` | `@weekly` | Contrastive fine-tuning энкодера |
@@ -507,7 +507,7 @@ python -m src.api_gateway.run_api \
 Все DAG-и используют `KubernetesPodOperator` — тяжёлые ML-зависимости не попадают в Airflow-воркер. При ошибке — алерт в Slack.
 
 ```bash
-make docker_airflow   # → http://localhost:8080  (admin / admin)
+make docker_airflow   # -> http://localhost:8080  (admin / admin)
 ```
 
 ---
@@ -556,7 +556,7 @@ Prometheus собирает метрики с API Gateway и RAG API, Grafana с
 
 ```bash
 docker compose up -d prometheus grafana
-# Grafana → http://localhost:3000  (admin / admin)
+# Grafana -> http://localhost:3000  (admin / admin)
 ```
 
 Ключевые метрики: `gateway_requests_total`, `gateway_process_seconds` (E2E латентность), `rag_search_latency_seconds`.
@@ -634,13 +634,13 @@ uv pip install -e ".[experimentation]"       # ноутбуки, pandas, matplot
 
 ## Чеклист для нового проекта
 
-- [ ] `cp .env.example .env` → заполнить `HF_TOKEN`, `MLFLOW_TRACKING_URI`
+- [ ] `cp .env.example .env` -> заполнить `HF_TOKEN`, `MLFLOW_TRACKING_URI`
 - [ ] Запустить `notebooks/02_generation_baseline.ipynb` — оценить zero-shot качество
 - [ ] Настроить `configs/decoder_pipeline/data/source/` под свои данные
-- [ ] Выбрать архитектуру → `configs/decoder_pipeline/model/architecture/`
-- [ ] Написать промпт → `configs/prompts/default.yaml`
-- [ ] `make train_decoder` → проверить run в MLflow UI (`make mlflow`)
+- [ ] Выбрать архитектуру -> `configs/decoder_pipeline/model/architecture/`
+- [ ] Написать промпт -> `configs/prompts/default.yaml`
+- [ ] `make train_decoder` -> проверить run в MLflow UI (`make mlflow`)
 - [ ] `python -m scripts.prepare_artifacts pipeline_name=decoder_pipeline` — promote + merge
 - [ ] `python -m scripts.rag_pipeline.index_db` — индексация (если используется RAG)
-- [ ] `make docker_api` → отправить первый запрос на `:8000/api/v1/chat`
-- [ ] Открыть `notebooks/05_evaluation_and_errors.ipynb` → анализ качества
+- [ ] `make docker_api` -> отправить первый запрос на `:8000/api/v1/chat`
+- [ ] Открыть `notebooks/05_evaluation_and_errors.ipynb` -> анализ качества

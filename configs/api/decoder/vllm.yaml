@@ -1,0 +1,24 @@
+# @package _global_
+defaults:
+  - system: default
+  - model: eval_decoder
+  - inference/generator: vllm
+  - inference/cleaner: default
+  - api/shared/server: default@api.server
+  - api/shared/rate_limit: default@api.rate_limit
+  - _self_
+  - environments: prod_decoder
+
+project_name: "nlp_project"
+pipeline_name: "decoder_pipeline"
+
+api:
+  service_name: "decoder_api_vllm"
+  server:
+    title: "Decoder Generation API (vLLM)"
+    description: "Генерация текста через vLLM сервер."
+
+# vLLM endpoint — переопределяется через env в проде
+inference:
+  generator:
+    api_base: ${oc.env:VLLM_API_BASE,http://localhost:8080/v1}

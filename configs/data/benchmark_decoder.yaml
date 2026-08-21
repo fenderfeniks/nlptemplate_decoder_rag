@@ -1,0 +1,11 @@
+# configs/data/benchmark_decoder.yaml
+defaults:
+  - source: hf
+  - _self_
+
+# Колонки как в train_decoder — единый источник истины
+prompt_column: instruction
+target_column: response
+retrieve_column: context   # берём context из dolly — он там есть
+
+dataset_name: decoder_benchmark

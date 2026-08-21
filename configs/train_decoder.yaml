@@ -1,0 +1,17 @@
+defaults:
+  - system: default
+  - evaluation: eval_decoder
+  - data: train_decoder
+  - model: train_decoder
+  - training: train_decoder
+  - _self_
+  - environments: local 
+
+project_name: "nlp_project"
+pipeline_name: "decoder_pipeline"
+seed: ${system.seed}
+
+system:
+  logger:
+    experiment_logger:
+      experiment_name: ${project_name}_decoder

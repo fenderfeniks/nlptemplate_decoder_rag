@@ -1,2 +1,0 @@
-_target_: src.pipelines.rag.training.losses.MultipleNegativesRankingLoss
-scale: 20.0

@@ -1,0 +1,17 @@
+# configs/api/gateway/default.yaml
+defaults:
+  - system: default
+  - _self_
+
+project_name: "nlp_project"
+pipeline_name: "gateway"
+
+api:
+  service_name: "api_gateway"
+
+application:
+  orchestrator:
+    _target_: src.application.orchestrator.RAGOrchestrator
+    default_template: "rag_qa"
+    default_top_k: 5
+    max_history_msgs: 10

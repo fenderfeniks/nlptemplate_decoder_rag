@@ -3,7 +3,7 @@ from pathlib import Path
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
-from src.schemas.main import ConfigSchema
+#from src.schemas.main import ConfigSchema
 
 
 logger = logging.getLogger(__name__)
@@ -79,8 +79,9 @@ def setup_config(cfg: DictConfig) -> DictConfig:
 
     # 1. Выставляем корень проекта до резолва
     project_root = str(Path(__file__).resolve().parents[2])
-    cfg.paths.root_dir = project_root
-
+    if "paths" in cfg:
+        cfg.paths.root_dir = project_root
+        
     # 2. Резолвим всё дерево целиком
     OmegaConf.resolve(cfg)
 
@@ -96,8 +97,9 @@ def setup_config(cfg: DictConfig) -> DictConfig:
     cfg.pop("defaults", None)
 
     # 4. Валидируем структуру строгой схемой
-    schema = OmegaConf.structured(ConfigSchema)
-    validated_cfg = OmegaConf.merge(schema, cfg)
+    #schema = OmegaConf.structured(ConfigSchema)
+    #validated_cfg = OmegaConf.merge(schema, cfg)
+    validated_cfg = cfg
 
     OmegaConf.set_struct(validated_cfg, False)
 

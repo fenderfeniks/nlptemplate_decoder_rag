@@ -1,0 +1,14 @@
+root_dir: "."
+
+data_dir:           "${system.paths.root_dir}/data/${pipeline_name}"
+hf_cache_dir:       "${system.paths.root_dir}/data/cache/hf_models"
+processed_data_dir: "${system.paths.data_dir}/processed"
+raw_data_dir:       "${system.paths.data_dir}/raw"
+benchmark_cache_dir: "${system.paths.data_dir}/benchmark_cache"
+
+log_dir:       "${system.paths.root_dir}/logs/${pipeline_name}"
+mlflow_db_dir: sqlite:///${system.paths.root_dir}/logs/mlflow.db
+output_dir:    "${system.paths.root_dir}/outputs/${pipeline_name}"
+model_dir:     "${system.paths.root_dir}/models/${pipeline_name}"
+
+db_dir: "${system.paths.root_dir}/vector_db"

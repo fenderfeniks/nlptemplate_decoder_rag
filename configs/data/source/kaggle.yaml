@@ -1,0 +1,6 @@
+_target_: src.pipelines.base.core.data.fetcher.RawDataFetcher
+source_type: kaggle
+raw_dir: ${system.paths.raw_data_dir}
+dataset_name: ???   # обязательно: "username/dataset-name"
+file_name: ???      # обязательно: "data.csv"
+# Credentials берутся из env: KAGGLE_USERNAME, KAGGLE_KEY

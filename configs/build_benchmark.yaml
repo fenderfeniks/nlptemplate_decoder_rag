@@ -1,0 +1,10 @@
+defaults:
+  - system: default
+  - data: benchmark_decoder
+  - _self_
+
+project_name: "nlp_project"
+pipeline_name: "decoder_pipeline"
+seed: ${system.seed}
+
+benchmark_size: 500

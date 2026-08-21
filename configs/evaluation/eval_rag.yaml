@@ -1,0 +1,18 @@
+# evaluation/eval_rag.yaml
+# Параметры для RetrieverEvaluator — src/evaluation/evaluators/retriever.py
+# retriever и tokenizer инжектируются программно из inference-блока
+defaults:
+  - metrics: retriever
+  - _self_
+
+retrieval_top_k: 10        # глубина bi-encoder поиска
+rerank_top_k: 2           # глубина финальной выдачи после реранкинга
+ood_threshold: 0.3          # порог OOD-детекции по top dense score; null = отключить
+raise_on_drift: false       # false = sys.exit(1) при дрифте (eval-скрипт / CI)
+
+# Пороги drift-check — все null = проверка отключена
+drift_cfg:
+  max_latency_ms: null          # SLA по total_latency_ms_per_query
+  max_context_tokens: null      # бюджет токенов контекста на запрос
+  min_ndcg: null                # минимальный ndcg_{rerank_top_k}
+  min_recall_biencoder: null    # минимальный recall_{retrieval_top_k}_biencoder

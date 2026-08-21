@@ -1,9 +1,0 @@
-_target_: src.pipelines.base.core.data.transforms.deduplication.ExactDeduplicationTransform
-# Для contrastive-режима дедупликация по связке query + positive_doc:
-# это устраняет одинаковые пары при разных форматированиях.
-# Для indexing-режима достаточно ["text"].
-target_columns:
-  - ${rag_pipeline.data.query_column}
-  - ${rag_pipeline.data.positive_column}
-num_proc: ${system.num_proc}
-column_separator: "\n\n"

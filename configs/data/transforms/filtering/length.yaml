@@ -1,0 +1,4 @@
+_target_: src.pipelines.base.core.data.transforms.filtering.LengthFilterTransform
+max_length: ${data.max_length}
+column: ??? # Всегда переопределяется в корне (input_ids / query_input_ids)
+num_proc: ${system.num_proc}

@@ -2,7 +2,7 @@
 """Демо-скрипт: LlamaIndex как альтернативный оркестратор RAG-пайплайна.
 
 Использует те же модели (энкодер + декодер), что и основной RAGOrchestrator,
-но оркестрацию (ретривал → промпт → генерация) делегирует LlamaIndex.
+но оркестрацию (ретривал -> промпт -> генерация) делегирует LlamaIndex.
 
 Загружает существующий FAISS-индекс с диска (созданный через index_db.py)
 вместо создания нового пустого индекса.
@@ -40,13 +40,13 @@ def main(cfg: DictConfig) -> None:
 
     # ── 2. Эмбеддер (RAG-энкодер) ────────────────────────────────────────────
     logger.info("Загрузка RAGInferenceEmbedder...")
-    encoder_tokenizer = hydra.utils.instantiate(cfg.rag_pipeline.model.tokenizer).build()
-    encoder_builder = hydra.utils.instantiate(cfg.rag_pipeline.model.builder)
+    encoder_tokenizer = hydra.utils.instantiate(cfg.model.tokenizer).build()
+    encoder_builder = hydra.utils.instantiate(cfg.model.builder)
     encoder_model = encoder_builder.build(tokenizer=encoder_tokenizer)
-    pooler = hydra.utils.instantiate(cfg.rag_pipeline.model.pooling)
+    pooler = hydra.utils.instantiate(cfg.model.pooling)
 
     embedder = hydra.utils.instantiate(
-        cfg.rag_pipeline.inference.embedder,
+        cfg.inference.embedder,
         model=encoder_model,
         pooler=pooler,
         tokenizer=encoder_tokenizer,
@@ -80,10 +80,10 @@ def main(cfg: DictConfig) -> None:
     )
 
     # ── 5. Query Engine и тестовый запрос ────────────────────────────────────
-    top_k = cfg.rag_pipeline.inference.get("top_k", 3)
+    top_k = cfg.inference.get("top_k", 3)
     query_engine = index.as_query_engine(similarity_top_k=top_k)
 
-    query = cfg.rag_pipeline.inference.get(
+    query = cfg.inference.get(
         "test_query",
         "Какие существуют архитектурные паттерны для масштабирования RAG?",
     )

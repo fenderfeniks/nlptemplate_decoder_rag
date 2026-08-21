@@ -16,7 +16,7 @@
 """
 
 from src.vector_store.base import BaseVectorStore
-from src.vector_store.faiss_store import FAISSVectorStore
+#from src.vector_store.faiss_store import FAISSVectorStore
 from src.vector_store.lsh import LSHIndex
 
 

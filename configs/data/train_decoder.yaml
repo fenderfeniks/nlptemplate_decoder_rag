@@ -1,0 +1,51 @@
+defaults:
+  - source: hf
+  - cleaner: default
+  - splitter: default
+  - collator: decoder
+  - transforms/cleaning: default
+  - transforms/deduplication: exact
+  - transforms/filtering/exclusion@transforms.exclusion
+  - transforms/validation: decoder
+  - transforms/prompt_formatting: decoder
+  - transforms/tokenization: decoder
+  - transforms/filtering/length@transforms.length
+  - ./eval_decoder@eval   # конфиг для подготовки test_dataset_raw
+  - _self_
+
+dataset_name: decoder_sft
+max_samples: null
+force_reprocess: true
+
+# --- Топ-левел переменные ---
+max_length: 2048
+prompt_column: instruction
+target_column: response
+retrieve_column: context
+messages_column: null
+separator: " "
+response_template: "### Ответ:"
+task: "sft"
+val_size: 0.1
+
+transforms:
+  cleaning:
+    columns_to_clean:
+      - "${data.prompt_column}"
+      - "${data.target_column}"
+  deduplication:
+    target_columns:
+      - "${data.prompt_column}"
+  exclusion:
+    dataset_columns:
+      - "${data.prompt_column}"
+    benchmark_path: null
+  length:
+    column: "input_ids"
+
+dataloader:
+  batch_size: 8
+  num_workers: ${system.dataloader_num_workers}
+  pin_memory: ${system.pin_memory}
+  persistent_workers: ${system.persistent_workers}
+  prefetch_factor: ${system.prefetch_factor}

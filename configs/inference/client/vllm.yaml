@@ -1,0 +1,9 @@
+# inference/client/vllm.yaml
+# LLMGenerationClient — OpenAI-совместимый клиент для vLLM / TGI
+_target_: src.pipelines.decoder.inference.inference.LLMGenerationClient
+api_base: ???                    # http://localhost:8000/v1 — задаётся в корневом конфиге
+api_key: EMPTY                   # для локальных серверов всегда EMPTY
+model_name: ${model.architecture.model_name_or_path}  # имя как зарегистрировано на сервере
+temperature: 0.7
+max_tokens: 1024
+max_concurrent_requests: 20      # глобальный лимит одновременных запросов

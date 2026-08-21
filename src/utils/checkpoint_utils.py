@@ -17,9 +17,9 @@ def load_checkpoint(
     """Загружает веса в базовую модель из файла или директории.
 
     Поддерживает три формата:
-    - Директория с ``adapter_config.json``  → загружается как LoRA (PeftModel).
-    - Директория с ``pytorch_model.bin``    → загружается state_dict из файла.
-    - Одиночный файл ``.pt`` / ``.bin`` / ``.ckpt`` → загружается state_dict напрямую.
+    - Директория с ``adapter_config.json``  -> загружается как LoRA (PeftModel).
+    - Директория с ``pytorch_model.bin``    -> загружается state_dict из файла.
+    - Одиночный файл ``.pt`` / ``.bin`` / ``.ckpt`` -> загружается state_dict напрямую.
 
     Args:
         model: Базовая модель (до навешивания весов).

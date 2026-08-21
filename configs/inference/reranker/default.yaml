@@ -1,0 +1,4 @@
+# inference/reranker/default.yaml
+# CrossEncoderReranker — model и tokenizer инжектируются программно из builder
+_target_: src.pipelines.rag.inference.reranker.CrossEncoderReranker
+max_length: 512

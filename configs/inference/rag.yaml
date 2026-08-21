@@ -1,0 +1,6 @@
+# configs/inference/rag.yaml
+defaults:
+  - embedder: embedder
+  - retriever: default
+  - reranker: default
+#  - indexer: default

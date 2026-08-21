@@ -1,15 +1,5 @@
 # src/pipelines/rag/api/server.py
-# Показан только изменённый фрагмент _load_rag_stack_sync —
-# остальной код server.py остаётся без изменений.
-#
-# Было:
-#   from src.vector_store.faiss_store import FAISSVectorStore
-#   vector_db = FAISSVectorStore.load(directory=db_dir, ...)
-#
-# Стало:
-#   vector_db = hydra.utils.instantiate(cfg.vector_db.loader, directory=db_dir)
-#
-# При смене бэкенда меняем только configs/vector_db/*.yaml — server.py не трогаем.
+
 
 import asyncio
 import gc
@@ -39,9 +29,6 @@ logger = logging.getLogger(__name__)
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-_MODEL_LOAD_TIMEOUT_SEC: int = int(os.getenv("MODEL_LOAD_TIMEOUT_SEC", "120"))
-
-
 async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
     expected = os.getenv("API_KEY")
     if expected and api_key != expected:
@@ -53,17 +40,18 @@ def _load_rag_stack_sync(cfg: object, app: FastAPI) -> None:
     """Синхронная загрузка RAG-стека."""
 
     # 1. Резолвинг артефактов (Скачивание + Патчинг конфигов)
-    router = hydra.utils.instantiate(cfg.storage_router)
+    router = hydra.utils.instantiate(cfg.system.storage_router)
     resolver = ArtifactResolver(
-        router=router, cache_base_dir=Path(cfg.paths.model_dir) / "rag_cache"
+        router=router, cache_base_dir=Path(cfg.system.paths.model_dir) / "rag_cache"
     )
+    manifest_uri = cfg.system.manifest.uri
 
-    manifest_uri = cfg.manifest.uri
-
-    db_dir, lora_path = resolver.resolve_and_patch(cfg, manifest_uri, pipeline_name="rag_pipeline")
-    tokenizer = hydra.utils.instantiate(cfg.rag_pipeline.model.tokenizer).build()
-    OmegaConf.update(cfg, "rag_pipeline.model.builder.modifiers", None, force_add=True)
-    builder = hydra.utils.instantiate(cfg.rag_pipeline.model.builder)
+    db_dir, lora_path, _ = resolver.resolve_and_patch(
+        cfg, manifest_uri, pipeline_name="rag_pipeline", is_training=False
+    )
+    tokenizer = hydra.utils.instantiate(cfg.model.tokenizer).build()
+    OmegaConf.update(cfg, "model.builder.modifiers", None, force_add=True)
+    builder = hydra.utils.instantiate(cfg.model.builder)
     base_model = builder.build(tokenizer=tokenizer)
 
     if lora_path:
@@ -71,44 +59,103 @@ def _load_rag_stack_sync(cfg: object, app: FastAPI) -> None:
 
         base_model = PeftModel.from_pretrained(base_model, str(lora_path), is_trainable=False)
 
-    pooler = hydra.utils.instantiate(cfg.rag_pipeline.model.pooling)
+    pooler = hydra.utils.instantiate(cfg.model.pooling)
 
     # 3. Эмбеддер — фильтруем конфиг через сигнатуру __init__,
-    # test_query/top_k из embedder.yaml не являются параметрами RAGInferenceEmbedder
-    import inspect as _inspect
-
-    from omegaconf import OmegaConf as _OmegaConf
-
     from src.pipelines.rag.inference.embedder import RAGInferenceEmbedder
 
-    _valid_keys = frozenset(_inspect.signature(RAGInferenceEmbedder.__init__).parameters) | {
-        "_target_"
-    }
-    _embedder_cfg = _OmegaConf.masked_copy(
-        cfg.rag_pipeline.inference,
-        [k for k in cfg.rag_pipeline.inference if k in _valid_keys],
-    )
-    embedder = hydra.utils.instantiate(
-        _embedder_cfg,
+
+    _emb = cfg.inference.embedder  # вот настоящий конфиг embedder'а
+    embedder = RAGInferenceEmbedder(
         model=base_model,
         pooler=pooler,
         tokenizer=tokenizer,
+        device=_emb.get("device", "cuda"),
+        precision=_emb.get("precision", "bf16"),
+        max_length=_emb.get("max_length", 512),
     )
+    logger.info("embedder создан: %s", type(embedder))
 
     # 4. Векторное хранилище
     vector_db = hydra.utils.instantiate(cfg.vector_db.loader, directory=db_dir)
 
     logger.info("Векторное хранилище загружено из '%s' (%d документов).", db_dir, vector_db.ntotal)
 
-    # 5. Ретривер
+    reranker = None
+    reranker_cfg = OmegaConf.select(cfg, "rag_pipeline.reranker", default=None)
+
+    if reranker_cfg is not None:
+        try:
+            _, reranker_lora, _ = resolver.resolve_and_patch(
+                cfg,
+                cfg.system.manifest.uri,
+                pipeline_name="reranker_pipeline",
+                is_training=False,
+            )
+            OmegaConf.update(
+                cfg,
+                "model.builder.auto_model_class",
+                "transformers.AutoModelForSequenceClassification",
+            )
+            reranker_tokenizer = hydra.utils.instantiate(cfg.model.tokenizer).build()
+            reranker_builder = hydra.utils.instantiate(cfg.model.builder)
+            reranker_model = reranker_builder.build(tokenizer=reranker_tokenizer)
+            if reranker_lora:
+                from peft import PeftModel
+                reranker_model = PeftModel.from_pretrained(reranker_model, str(reranker_lora), is_trainable=False)
+            reranker = hydra.utils.instantiate(
+                reranker_cfg,
+                model=reranker_model,
+                tokenizer=reranker_tokenizer,
+            )
+            logger.info("CrossEncoderReranker инициализирован.")
+        except Exception as e:
+            logger.error("ОШИБКА инициализации реранкера: %s. Работаем без реранкинга.", e)
+            reranker = None
+    else:
+        logger.info("Реранкер не задан в конфиге — работаем без реранкинга.")
+
+    # --- Диагностика перед созданием ретривера ---
+    logger.info("embedder type: %s", type(embedder))
+    logger.info("embedder is RAGInferenceEmbedder: %s", isinstance(embedder, RAGInferenceEmbedder))
+
+    # Проверяем конфиг ретривера на наличие вложенного embedder-а,
+    # который Hydra может предпочесть переданному keyword-аргументу.
+    _retriever_cfg = cfg.inference.retriever
+    logger.info(
+        "cfg.inference.retriever keys: %s",
+        list(_retriever_cfg.keys()) if hasattr(_retriever_cfg, "keys") else _retriever_cfg,
+    )
+    _has_embedded_embedder_cfg = (
+        hasattr(_retriever_cfg, "keys") and "embedder" in _retriever_cfg
+    )
+    if _has_embedded_embedder_cfg:
+        logger.warning(
+            "cfg.inference.retriever содержит ключ 'embedder' (%s). "
+            "Hydra может подставить DictConfig вместо переданного инстанса. "
+            "Удаляем из конфига — embedder передаётся напрямую.",
+            type(_retriever_cfg.embedder),
+        )
+        # Создаём копию конфига без ключа embedder, чтобы Hydra
+        # не перезаписала переданный инстанс своим DictConfig.
+        from omegaconf import OmegaConf as _OmegaConf2
+        _retriever_cfg = _OmegaConf2.masked_copy(
+            _retriever_cfg,
+            [k for k in _retriever_cfg if k != "embedder"],
+        )
+
+    # --- 5б. Ретривер (с реранкером) ---
     retriever = hydra.utils.instantiate(
-        cfg.rag_pipeline.retrieval,
+        _retriever_cfg,
         embedder=embedder,
         vector_db=vector_db,
+        reranker=reranker,          # None -> реранкинг отключён
+        # rerank_factor задаётся в retrieval.yaml, по умолчанием 3
     )
-
+    logger.info("retriever.embedder type after instantiate: %s", type(getattr(retriever, "embedder", None)))
+    
     app.state.ml_models["retriever"] = retriever
-    logger.info("RAG-стек успешно запущен.")
+    logger.info("RAG-стек успешно запущен%s.", " (с реранкером)" if reranker else "")
 
 
 def create_app() -> FastAPI:
@@ -127,25 +174,26 @@ def create_app() -> FastAPI:
         pass
 
     with hydra.initialize_config_dir(config_dir=str(config_dir), version_base="1.3"):
-        cfg = hydra.compose(config_name="main", overrides=["pipeline_name=rag_pipeline"])
+        cfg = hydra.compose(config_name="rag_api")
         OmegaConf.resolve(cfg)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        timeout = cfg.api.server.model_load_timeout_sec
         app.state.ml_models = {}
-        logger.info("Загрузка RAG-стека (таймаут=%ds)...", _MODEL_LOAD_TIMEOUT_SEC)
+        logger.info("Загрузка RAG-стека (таймаут=%ds)...", timeout)
 
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(_load_rag_stack_sync, cfg, app),
-                timeout=_MODEL_LOAD_TIMEOUT_SEC,
+                timeout = timeout,
             )
         except asyncio.TimeoutError:
             logger.critical(
                 "Загрузка RAG-стека превысила таймаут %ds — завершаем процесс.",
-                _MODEL_LOAD_TIMEOUT_SEC,
+                timeout,
             )
-            raise RuntimeError(f"Model load timeout after {_MODEL_LOAD_TIMEOUT_SEC}s") from None
+            raise RuntimeError(f"Model load timeout after {timeout}s") from None
         except Exception:
             logger.exception("Критическая ошибка при старте RAG API:")
             raise
@@ -156,24 +204,22 @@ def create_app() -> FastAPI:
         gc.collect()
         logger.info("RAG API: ресурсы освобождены.")
 
-    cors_origins_raw = os.getenv(
-        "CORS_ORIGINS",
-        OmegaConf.select(cfg, "rag_pipeline.api.cors_origins", default="*"),
-    )
-    cors_origins = (
-        [o.strip() for o in cors_origins_raw.split(",")]
-        if isinstance(cors_origins_raw, str)
-        else list(cors_origins_raw)
-    )
+    raw = cfg.api.server.cors_origins
+    if isinstance(raw, str):
+        cors_origins = [o.strip() for o in raw.split(",")]
+    else:
+        cors_origins = list(raw)
 
     app = FastAPI(
-        title="RAG Retrieval API",
-        description="Векторный поиск по базе знаний.",
-        version=os.getenv("APP_VERSION", "0.1.0"),
+        title=cfg.api.server.title,
+        version=cfg.api.server.version,
         lifespan=lifespan,
     )
 
     app.state.limiter = limiter
+    app.state.rate_limit = cfg.api.rate_limit.default_limit
+    app.state.service_name = cfg.api.service_name
+    limiter._enabled = cfg.api.rate_limit.enabled
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.add_middleware(SlowAPIMiddleware)
 

@@ -1,0 +1,15 @@
+_target_: src.pipelines.base.core.models.builder.HFModelBuilder
+model_name_or_path: BAAI/bge-m3
+auto_model_class: transformers.AutoModel   # энкодер — не CausalLM
+cache_dir: ${system.paths.hf_cache_dir}
+trust_remote_code: true
+torch_dtype: bfloat16
+attn_implementation: flash_attention_2
+device_map: auto_cuda
+rope_scaling: null
+quantization_config: ${model.quantization.quantization_config}
+modifiers: ${model.modifiers}
+mlflow_model_name: "bge-m3"
+base_model_uri: "hf://BAAI/bge-m3"
+embedding_dim: 1024
+max_position_embeddings: 8192

@@ -1,0 +1,4 @@
+# configs/inference/decoder.yaml
+defaults:
+  - cleaner: default
+  - generator: local

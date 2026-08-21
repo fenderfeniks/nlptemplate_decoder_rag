@@ -1,0 +1,3 @@
+_target_: src.pipelines.rag.core.models.pooling.Pooler
+pooling_mode: cls
+normalize: true

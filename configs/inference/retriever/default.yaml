@@ -1,0 +1,6 @@
+# inference/retriever/default.yaml
+# HybridRetriever — embedder, vector_db, reranker инжектируются программно
+_target_: src.pipelines.rag.inference.retriever.HybridRetriever
+rerank_factor: 3        # fetch_k = top_k * rerank_factor перед реранкингом
+top_k: 5                # финальное число документов после реранкинга
+#score_threshold: null   # null = без обрезки по dense score; float — минимальный порог
