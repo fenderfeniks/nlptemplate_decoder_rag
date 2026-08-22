@@ -3,36 +3,113 @@ version: '3.8'
 volumes:
   grafana_data:
   models_cache:
-  vector_db_cache:
   mlflow_data:
+  minio_data:
+  qdrant_data:
 
 services:
+
   # ----------------------------------------------------
-  # 0. Init Container (Загрузчик моделей)
+  # ИНФРАСТРУКТУРА
+  # ----------------------------------------------------
+
+  # S3-совместимое хранилище артефактов (веса, манифест, бенчмарки)
+  minio:
+    image: minio/minio:latest
+    container_name: nlp_template_minio
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web UI (http://localhost:9001)
+    environment:
+      - MINIO_ROOT_USER=${AWS_ACCESS_KEY_ID:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${AWS_SECRET_ACCESS_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Создаёт бакет nlp-storage при первом старте
+  minio_init:
+    image: minio/mc:latest
+    container_name: nlp_template_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${AWS_ACCESS_KEY_ID:-minioadmin} ${AWS_SECRET_ACCESS_KEY:-minioadmin};
+        mc mb --ignore-existing local/nlp-storage;
+        echo 'Bucket nlp-storage ready.'
+      "
+    restart: "no"
+
+  # Векторная БД (Qdrant) — персистентные данные на qdrant_data volume
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: nlp_template_qdrant
+    ports:
+      - "6333:6333"   # REST API
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Distributed tracing (Jaeger — all-in-one для dev/staging)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: nlp_template_jaeger
+    ports:
+      - "4317:4317"   # OTLP gRPC (куда шлёт api_gateway)
+      - "16686:16686" # Jaeger UI (http://localhost:16686)
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+    profiles:
+      - observability
+      - full
+
+  # ----------------------------------------------------
+  # 0. Init Container (Загрузчик артефактов из S3)
   # ----------------------------------------------------
   artifact_downloader:
-    # Загрузчику могут понадобиться клиенты БД и MLflow, поэтому даем ему api и rag
-    image: my-company/nlp_template:rag-api
-    build: 
+    image: my-company/nlp_template:training-rag
+    build:
       context: .
       dockerfile: Dockerfile
       args:
-        INSTALL_EXTRAS: "api,rag"
+        # Нужны rag (для Qdrant-клиента при индексации) + training (для резолвера)
+        INSTALL_EXTRAS: "rag,training"
     container_name: nlp_template_downloader
-    command: ["python", "-m", "scripts.download_artifacts"]
-    environment:
-      - PROJECT_ROOT=/app
+    command: ["python", "-m", "scripts.prepare_artifacts"]
     env_file:
       - .env
+    environment:
+      - PROJECT_ROOT=/app
+      # StorageRouter читает endpoint из env
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - QDRANT_URL=http://qdrant:6333
     volumes:
       - ./configs:/app/configs
       - models_cache:/app/models
-      - vector_db_cache:/app/vector_db
-      - ./prod_storage:/app/prod_storage
     restart: "no"
+    depends_on:
+      minio_init:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
 
   # ----------------------------------------------------
-  # 1. LLM API (Инференс генератора через vLLM)
+  # 1. LLM API (vLLM — OpenAI-совместимый инференс)
   # ----------------------------------------------------
   llm_api:
     image: vllm/vllm-openai:latest
@@ -40,7 +117,7 @@ services:
     ports:
       - "8002:8000"
     command: >
-      --model /app/models/decoder_cache/merged_model
+      --model /app/models/merged_models/decoder_model
       --host 0.0.0.0
       --port 8000
       --max-model-len 2048
@@ -58,30 +135,42 @@ services:
     depends_on:
       artifact_downloader:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   # ----------------------------------------------------
-  # 2. RAG API (Векторный поиск и Энкодер)
+  # 2. RAG API (Энкодер + Qdrant-ретривер)
   # ----------------------------------------------------
   rag_api:
-    # Уникальный тег для RAG
     image: my-company/nlp_template:rag-api
-    build: 
+    build:
       context: .
+      dockerfile: Dockerfile
       args:
+        # api — FastAPI/uvicorn, rag — Qdrant/FAISS/fastembed
         INSTALL_EXTRAS: "api,rag"
     container_name: nlp_template_rag_api
     ports:
       - "8001:8001"
     command: ["python", "-m", "scripts.rag_pipeline.run_api"]
+    env_file:
+      - .env
     environment:
       - PROJECT_ROOT=/app
       - RAG_API_PORT=8001
-    env_file:
-      - .env
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - QDRANT_URL=http://qdrant:6333
+      # OTEL → Jaeger (опционально, можно убрать если jaeger не поднят)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=rag-api
     volumes:
       - ./configs:/app/configs
       - models_cache:/app/models
-      - vector_db_cache:/app/vector_db
+      # vector_db_cache убран: данные персистентны в Qdrant, не на диске
     restart: always
     deploy:
       resources:
@@ -93,45 +182,53 @@ services:
     depends_on:
       artifact_downloader:
         condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
 
   # ----------------------------------------------------
-  # 3. API Gateway (Оркестратор)
+  # 3. API Gateway (Оркестратор RAG + LLM)
   # ----------------------------------------------------
   api_gateway:
-    # Легковесный образ только с FastAPI
     image: my-company/nlp_template:api
-    build: 
+    build:
       context: .
+      dockerfile: Dockerfile
       args:
+        # Gateway не грузит модели сам — только HTTP-клиент + observability
         INSTALL_EXTRAS: "api"
     container_name: nlp_template_api_gateway
     ports:
       - "${GATEWAY_PORT:-8000}:8000"
     command: ["python", "-m", "scripts.api"]
+    env_file:
+      - .env
     environment:
       - PROJECT_ROOT=/app
       - RAG_API_URL=http://rag_api:8001
       - LLM_API_URL=http://llm_api:8000/v1
-    env_file:
-      - .env
+      - AWS_ENDPOINT_URL=http://minio:9000
+      # Манифест читается из S3, а не с диска — убран volume prod_storage
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=api-gateway
     volumes:
       - ./configs:/app/configs
       - ./logs:/app/logs
     restart: always
     depends_on:
       llm_api:
-        condition: service_started
+        condition: service_healthy
       rag_api:
         condition: service_started
 
   # ----------------------------------------------------
-  # Инфраструктура MLOps
+  # MLOps инфраструктура
   # ----------------------------------------------------
+
   mlflow:
-    # MLflow находится в группе training
     image: my-company/nlp_template:training
-    build: 
+    build:
       context: .
+      dockerfile: Dockerfile
       args:
         INSTALL_EXTRAS: "training"
     container_name: nlp_template_mlflow
@@ -153,22 +250,24 @@ services:
   # ----------------------------------------------------
   # Training сервисы
   # ----------------------------------------------------
+
   train_decoder:
     image: my-company/nlp_template:training
     build:
       context: .
+      dockerfile: Dockerfile
       args:
-        # Для обучения берем либы для ML (training) и DVC/датасеты (data)
         INSTALL_EXTRAS: "training,data"
     container_name: nlp_template_train_decoder
     profiles:
       - training
     command: ["python", "-m", "scripts.decoder_pipeline.train"]
+    env_file:
+      - .env
     environment:
       - PROJECT_ROOT=/app
       - MLFLOW_TRACKING_URI=http://mlflow:5000
-    env_file:
-      - .env
+      - AWS_ENDPOINT_URL=http://minio:9000
     volumes:
       - ./configs:/app/configs
       - ~/.cache/huggingface:/root/.cache/huggingface
@@ -183,22 +282,24 @@ services:
     depends_on:
       - mlflow
 
-  train_rag:                                    
-    # Обучению RAG нужен еще и сам RAG фреймворк
+  train_rag:
     image: my-company/nlp_template:training-rag
     build:
       context: .
+      dockerfile: Dockerfile
       args:
         INSTALL_EXTRAS: "training,data,rag"
     container_name: nlp_template_train_rag
     profiles:
       - training
     command: ["python", "-m", "scripts.rag_pipeline.train"]
+    env_file:
+      - .env
     environment:
       - PROJECT_ROOT=/app
       - MLFLOW_TRACKING_URI=http://mlflow:5000
-    env_file:
-      - .env
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - QDRANT_URL=http://qdrant:6333
     volumes:
       - ./configs:/app/configs
       - ~/.cache/huggingface:/root/.cache/huggingface
@@ -212,6 +313,11 @@ services:
               capabilities: [gpu]
     depends_on:
       - mlflow
+      - qdrant
+
+  # ----------------------------------------------------
+  # Мониторинг
+  # ----------------------------------------------------
 
   prometheus:
     image: prom/prometheus:latest
@@ -225,6 +331,9 @@ services:
     restart: unless-stopped
     depends_on:
       - api_gateway
+    profiles:
+      - observability
+      - full
 
   grafana:
     image: grafana/grafana:latest
@@ -239,3 +348,6 @@ services:
     restart: unless-stopped
     depends_on:
       - prometheus
+    profiles:
+      - observability
+      - full

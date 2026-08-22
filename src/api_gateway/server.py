@@ -9,7 +9,7 @@ import yaml
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from src.api_gateway.endpoints import chat
+from src.api_gateway.endpoints import chat, health
 from src.api_gateway.middlewares import setup_gateway_middlewares
 from src.api_gateway.telemetry import setup_telemetry
 from src.application.orchestrator import RAGOrchestrator
@@ -69,6 +69,7 @@ def create_gateway_app() -> FastAPI:
     cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
     setup_gateway_middlewares(app, cors_origins)
 
+    app.include_router(health.router)
     app.include_router(chat.router)
 
     Instrumentator(

@@ -17,11 +17,9 @@ requires-python = ">=3.10, <3.12"
 # ==========================================
 # БАЗОВЫЙ МИНИМУМ (Ядро)
 # Только то, без чего не запускается вообще ничего:
-# конфигурация, логирование, базовые ML-примитивы.
+# конфигурация, логирование, хранилище артефактов.
 # ==========================================
 dependencies = [
-    # OpenAI & Базовые
-    "openai>=2.51.0",
     # ML-ядро
     "torch>=2.0.0",
     "transformers>=4.38.0",
@@ -32,32 +30,22 @@ dependencies = [
     "pydantic>=2.6.0",
     "python-dotenv>=1.0.0",
     "omegaconf>=2.3.1",
-    # Логирование и инфраструктура
+    # Логирование
     "python-json-logger>=2.0.0",
-    "tomli>=2.0.0; python_version < '3.11'",
+    # Хранилище артефактов (S3 / MinIO)
     "boto3>=1.43.64",
+    # Шаблонизатор (промпты)
     "jinja2>=3.1.6",
+    # Прогресс-бары
     "tqdm>=4.69.1",
-    "absl-py>=2.5.0",
-    "rouge-score>=0.1.2",
-    "sacrebleu>=2.6.0",
-    "faiss-cpu>=1.15.0",
-    "qdrant-client>=1.19.0",
-    "fastembed>=0.8.0",
-    "autoawq>=0.2.9",
-    "grep>=0.3.2",
-    "pybreak>=0.1.0",
-    "opentelemetry-sdk>=1.44.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.44.0",
-    "opentelemetry-instrumentation-fastapi>=0.65b0",
-    "opentelemetry-instrumentation-httpx>=0.65b0",
-    "pybreaker>=1.4.1",
+    # tomli нужен только до Python 3.11 (в 3.11+ встроен tomllib)
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
 
 # ==========================================
-# ГРУППА 0: INFERENCE-CORE
+# ГРУППА: INFERENCE-CORE
 # Минимум для запуска модели из MLflow-артефакта.
 # Экспортируется как requirements для артефакта модели.
 # ==========================================
@@ -67,17 +55,31 @@ inference-core = [
 ]
 
 # ==========================================
-# НОВАЯ ГРУППА: RAG
-# Векторные базы данных и LlamaIndex (выделено из ядра)
+# ГРУППА: RAG
+# Векторные базы данных и энкодеры.
 # ==========================================
 rag = [
-    "faiss-cpu>=1.14.3",
+    "faiss-cpu>=1.15.0",
     "qdrant-client>=1.19.0",
-    "llama-index>=0.14.23",
+    "fastembed>=0.8.0",          # BM25 sparse-векторы для Qdrant
 ]
 
 # ==========================================
-# ГРУППА 1: DATA
+# ГРУППА: OBSERVABILITY
+# Метрики, трейсинг, circuit breaker.
+# Нужна api-сервисам и gateway.
+# ==========================================
+observability = [
+    "prometheus-client>=0.20.0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.44.0",
+    "opentelemetry-instrumentation-fastapi>=0.65b0",
+    "opentelemetry-instrumentation-httpx>=0.65b0",
+    "pybreaker>=1.4.1",
+]
+
+# ==========================================
+# ГРУППА: DATA
 # Подготовка и версионирование датасетов.
 # ==========================================
 data = [
@@ -88,7 +90,8 @@ data = [
 ]
 
 # ==========================================
-# ГРУППА 2: ОБУЧЕНИЕ (Training)
+# ГРУППА: TRAINING
+# Обучение моделей.
 # ==========================================
 training = [
     "decoder-template[data]",           # Датасеты нужны при обучении
@@ -98,28 +101,34 @@ training = [
     "accelerate>=0.27.0",               # Multi-GPU, mixed precision
     "peft>=0.8.2",                      # LoRA / адаптеры
     "bitsandbytes>=0.46.1",             # Квантизация (QLoRA)
+    "autoawq>=0.2.9",                   # AWQ-квантизация (только при обучении/экспорте)
     "evaluate>=0.4.0",
-    #"flash-attn>=2.5.0",                # Внимание (из отчета deptry)
+    "rouge-score>=0.1.2",               # ROUGE для eval
+    "sacrebleu>=2.6.0",                 # BLEU для eval
+    "absl-py>=2.5.0",                   # Зависимость rouge-score
 ]
 
 # ==========================================
-# ГРУППА 3: INFERENCE (API и Боты)
+# ГРУППА: API
+# FastAPI-сервисы: RAG API, Gateway, Telegram-бот.
 # ==========================================
 api = [
+    "decoder-template[observability]",  # Метрики и трейсинг нужны всем сервисам
     "fastapi>=0.110.0",
     "starlette>=0.36.0",
     "uvicorn[standard]>=0.27.0",
-    "aiogram>=3.4.0",
+    "httpx>=0.27.0",
+    "prometheus-fastapi-instrumentator>=6.1.0",
+    "openai>=2.51.0",                   # OpenAI-совместимый клиент (vLLM / llama.cpp)
+    "aiogram>=3.4.0",                   # Telegram-бот
     "aiohttp>=3.9.3",
     "redis>=8.0.1",
-    "prometheus-fastapi-instrumentator>=6.1.0",
-    "prometheus-client>=0.20.0",
-    "slowapi>=0.1.9",
-    "httpx>=0.27.0",
+    "slowapi>=0.1.9",                   # Rate limiting
 ]
 
 # ==========================================
-# ГРУППА 4: ОРКЕСТРАЦИЯ (Airflow)
+# ГРУППА: ORCHESTRATION
+# Airflow DAGи.
 # ==========================================
 orchestration = [
     "apache-airflow>=2.8.0",
@@ -129,7 +138,8 @@ orchestration = [
 ]
 
 # ==========================================
-# ГРУППА 5: EDA (Notebooks)
+# ГРУППА: EXPERIMENTATION
+# Ноутбуки и EDA.
 # ==========================================
 experimentation = [
     "jupyterlab>=4.1.0",
@@ -140,19 +150,21 @@ experimentation = [
 ]
 
 # ==========================================
-# ГРУППА 6: РАЗРАБОТКА (Dev Tools)
+# ГРУППА: DEV
+# Инструменты разработки.
 # ==========================================
 dev = [
+    "decoder-template[experimentation]",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "httpx>=0.27.0",
     "ruff>=0.3.0",
     "mypy>=1.8.0",
-    "decoder-template[experimentation]",
 ]
 
 # ==========================================
-# ГРУППА 8: DEMO
+# ГРУППА: DEMO
+# Streamlit-демо.
 # ==========================================
 demo = [
     "streamlit>=1.32.0",
@@ -231,16 +243,14 @@ packages = ["src"]
 known_first_party = ["src", "pipelines"]
 
 [tool.deptry.per_rule_ignores]
-# Игнорируем tomllib, так как это встроенная библиотека в Python 3.11+
+# tomllib встроен в Python 3.11+
 DEP001 = ["tomllib"]
 
-# Игнорируем утилиты, ноутбуки, ссылки на сам проект и неявные вызовы
 DEP002 = [
-    "dvc", "uvicorn", "apache-airflow", "apache-airflow-providers-cncf-kubernetes", 
+    "dvc", "uvicorn", "apache-airflow", "apache-airflow-providers-cncf-kubernetes",
     "apache-airflow-providers-slack", "pendulum", "streamlit",
-    "torchmetrics", "accelerate", "bitsandbytes", 
+    "torchmetrics", "accelerate", "bitsandbytes",
     "scikit-learn", "matplotlib", "seaborn",
     "aiohttp", "requests", "redis",
-    # Новые исключения для dev-тулзов и самого проекта:
     "jupyterlab", "pytest", "pytest-asyncio", "ruff", "mypy", "decoder-template"
 ]
