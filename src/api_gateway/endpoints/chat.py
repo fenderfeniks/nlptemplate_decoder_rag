@@ -4,7 +4,6 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 
-import pybreaker
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from opentelemetry import trace
@@ -22,6 +21,7 @@ from src.api_gateway.resilience import CircuitBreakerError
 from src.api_gateway.schemas import ChatRequest
 from src.application.orchestrator import RAGOrchestrator
 from src.pipelines.decoder.inference.response_cleaner import ResponseCleaner
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
@@ -111,7 +111,8 @@ async def chat_stream_endpoint(
                 completion_tokens = len(cleaned_for_metrics.split())
                 logger.debug(
                     "[%s] usage не получен от сервера, completion_tokens аппроксимирован: %d",
-                    request_id, completion_tokens,
+                    request_id,
+                    completion_tokens,
                 )
 
             if cleaned_for_metrics and cleaned_for_metrics[-1] not in ".!?":
@@ -137,9 +138,7 @@ async def chat_stream_endpoint(
             current_span = trace.get_current_span()
             otel_trace_id: str | None = None
             if current_span and current_span.is_recording():
-                otel_trace_id = format(
-                    current_span.get_span_context().trace_id, "032x"
-                )
+                otel_trace_id = format(current_span.get_span_context().trace_id, "032x")
 
             # Логируем тройку только при успешной генерации (или деградации RAG).
             # При circuit_breaker_open ответа нет — логировать нечего.

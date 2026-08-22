@@ -12,9 +12,9 @@ from src.api_gateway.metrics import (
     LLM_PROMPT_TOKENS_TOTAL,
     LLM_REQUESTS_IN_FLIGHT,
     LLM_TOKENS_PER_SECOND,
-    LLM_TRUNCATED_RESPONSES_TOTAL,
     LLM_TTFT_SECONDS,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -60,5 +60,9 @@ def record_stream_metrics(
 
     logger.info(
         "[%s] stream завершён | model=%s status=%s ttft=%.2fs elapsed=%.2fs",
-        request_id, model, status, ttft_s, elapsed,
+        request_id,
+        model,
+        status,
+        ttft_s,
+        elapsed,
     )

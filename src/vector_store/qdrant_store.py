@@ -130,12 +130,12 @@ class QdrantVectorStore:
         if enable_sparse:
             try:
                 from fastembed import SparseTextEmbedding
+
                 self._sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
                 logger.info("QdrantVectorStore: sparse-модель (BM25) загружена.")
             except ImportError:
                 logger.warning(
-                    "fastembed не установлен — sparse отключён. "
-                    "Установите: pip install fastembed"
+                    "fastembed не установлен — sparse отключён. Установите: pip install fastembed"
                 )
                 self.enable_sparse = False
 
@@ -174,7 +174,9 @@ class QdrantVectorStore:
                 )
                 logger.info(
                     "Коллекция '%s' создана (dim=%d, distance=%s, sparse=BM25).",
-                    self.collection_name, self._embedding_dim, self.distance,
+                    self.collection_name,
+                    self._embedding_dim,
+                    self.distance,
                 )
             else:
                 self._client.create_collection(
@@ -186,7 +188,9 @@ class QdrantVectorStore:
                 )
                 logger.info(
                     "Коллекция '%s' создана (dim=%d, distance=%s, sparse=off).",
-                    self.collection_name, self._embedding_dim, self.distance,
+                    self.collection_name,
+                    self._embedding_dim,
+                    self.distance,
                 )
         else:
             logger.info("Коллекция '%s' уже существует — подключаемся.", self.collection_name)
@@ -333,7 +337,7 @@ class QdrantVectorStore:
                         },
                         payload=meta,
                     )
-                    for emb, sv, meta in zip(batch_emb, batch_sparse, batch_meta)
+                    for emb, sv, meta in zip(batch_emb, batch_sparse, batch_meta, strict=True)
                 ]
             else:
                 points = [
@@ -342,7 +346,7 @@ class QdrantVectorStore:
                         vector=emb.tolist(),
                         payload=meta,
                     )
-                    for emb, meta in zip(batch_emb, batch_meta)
+                    for emb, meta in zip(batch_emb, batch_meta, strict=True)
                 ]
 
             self._client.upsert(
@@ -430,7 +434,7 @@ class QdrantVectorStore:
         final_results = []
         prefetch_limit = top_k * 2
 
-        for dense_vec, sparse_vec in zip(prepared_dense, sparse_vectors):
+        for dense_vec, sparse_vec in zip(prepared_dense, sparse_vectors, strict=True):
             qdrant_sparse = qmodels.SparseVector(
                 indices=sparse_vec.indices.tolist(),
                 values=sparse_vec.values.tolist(),
@@ -516,14 +520,12 @@ class QdrantVectorStore:
             if uri.startswith("qdrant://"):
                 # Парсим: qdrant://http://localhost:6333/nlp_project_kb
                 #      -> url=http://localhost:6333, collection=nlp_project_kb
-                without_scheme = uri[len("qdrant://"):]
+                without_scheme = uri[len("qdrant://") :]
                 last_slash = without_scheme.rfind("/")
                 if last_slash == -1:
-                    raise ValueError(
-                        f"Невалидный qdrant:// URI — не найден '/' после хоста: {uri}"
-                    )
+                    raise ValueError(f"Невалидный qdrant:// URI — не найден '/' после хоста: {uri}")
                 parsed_url = without_scheme[:last_slash]
-                parsed_collection = without_scheme[last_slash + 1:]
+                parsed_collection = without_scheme[last_slash + 1 :]
                 kwargs.setdefault("url", parsed_url)
                 kwargs.setdefault("collection_name", parsed_collection)
                 logger.info(

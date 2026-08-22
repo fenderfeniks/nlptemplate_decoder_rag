@@ -24,7 +24,7 @@ class CausalLMLightningModule(OptimizerMixin, pl.LightningModule):
         self.model = model
         self.optimizer_cfg = optimizer_cfg
         self.scheduler_cfg = scheduler_cfg
-        
+
         self.save_hyperparameters(ignore=["model"])
 
     def forward(

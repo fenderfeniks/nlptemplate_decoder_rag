@@ -22,7 +22,9 @@ from src.utils.logging.protocol import ExperimentLogger
 logger = logging.getLogger(__name__)
 
 
-def build_rag_module(cfg: DictConfig, experiment_logger: ExperimentLogger) -> tuple[RAGLightningModule, Any, Any]:
+def build_rag_module(
+    cfg: DictConfig, experiment_logger: ExperimentLogger
+) -> tuple[RAGLightningModule, Any, Any]:
     """Собирает RAGLightningModule из корневого конфига Hydra.
 
     Порядок сборки:
@@ -54,7 +56,7 @@ def build_rag_module(cfg: DictConfig, experiment_logger: ExperimentLogger) -> tu
 
     # ── Энкодер ──────────────────────────────────────────────────────────────
     lora_resume_path = experiment_logger.load_adapter(cfg.model.get("lora_resume", {}))
-    
+
     logger.info("Сборка энкодера...")
     builder = hydra.utils.instantiate(cfg.model.builder)
     builder.lora_resume_path = lora_resume_path
@@ -66,9 +68,7 @@ def build_rag_module(cfg: DictConfig, experiment_logger: ExperimentLogger) -> tu
 
     # ── Планировщик (опционально) ────────────────────────────────────────────
     scheduler_cfg = (
-        hydra.utils.instantiate(cfg.training.scheduler)
-        if "scheduler" in cfg.training
-        else None
+        hydra.utils.instantiate(cfg.training.scheduler) if "scheduler" in cfg.training else None
     )
 
     # ── LightningModule ───────────────────────────────────────────────────────

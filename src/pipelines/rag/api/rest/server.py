@@ -64,7 +64,6 @@ def _load_rag_stack_sync(cfg: object, app: FastAPI) -> None:
     # 3. Эмбеддер — фильтруем конфиг через сигнатуру __init__,
     from src.pipelines.rag.inference.embedder import RAGInferenceEmbedder
 
-
     _emb = cfg.inference.embedder  # вот настоящий конфиг embedder'а
     embedder = RAGInferenceEmbedder(
         model=base_model,
@@ -102,7 +101,10 @@ def _load_rag_stack_sync(cfg: object, app: FastAPI) -> None:
             reranker_model = reranker_builder.build(tokenizer=reranker_tokenizer)
             if reranker_lora:
                 from peft import PeftModel
-                reranker_model = PeftModel.from_pretrained(reranker_model, str(reranker_lora), is_trainable=False)
+
+                reranker_model = PeftModel.from_pretrained(
+                    reranker_model, str(reranker_lora), is_trainable=False
+                )
             reranker = hydra.utils.instantiate(
                 reranker_cfg,
                 model=reranker_model,
@@ -126,9 +128,7 @@ def _load_rag_stack_sync(cfg: object, app: FastAPI) -> None:
         "cfg.inference.retriever keys: %s",
         list(_retriever_cfg.keys()) if hasattr(_retriever_cfg, "keys") else _retriever_cfg,
     )
-    _has_embedded_embedder_cfg = (
-        hasattr(_retriever_cfg, "keys") and "embedder" in _retriever_cfg
-    )
+    _has_embedded_embedder_cfg = hasattr(_retriever_cfg, "keys") and "embedder" in _retriever_cfg
     if _has_embedded_embedder_cfg:
         logger.warning(
             "cfg.inference.retriever содержит ключ 'embedder' (%s). "
@@ -139,6 +139,7 @@ def _load_rag_stack_sync(cfg: object, app: FastAPI) -> None:
         # Создаём копию конфига без ключа embedder, чтобы Hydra
         # не перезаписала переданный инстанс своим DictConfig.
         from omegaconf import OmegaConf as _OmegaConf2
+
         _retriever_cfg = _OmegaConf2.masked_copy(
             _retriever_cfg,
             [k for k in _retriever_cfg if k != "embedder"],
@@ -149,11 +150,13 @@ def _load_rag_stack_sync(cfg: object, app: FastAPI) -> None:
         _retriever_cfg,
         embedder=embedder,
         vector_db=vector_db,
-        reranker=reranker,          # None -> реранкинг отключён
+        reranker=reranker,  # None -> реранкинг отключён
         # rerank_factor задаётся в retrieval.yaml, по умолчанием 3
     )
-    logger.info("retriever.embedder type after instantiate: %s", type(getattr(retriever, "embedder", None)))
-    
+    logger.info(
+        "retriever.embedder type after instantiate: %s", type(getattr(retriever, "embedder", None))
+    )
+
     app.state.ml_models["retriever"] = retriever
     logger.info("RAG-стек успешно запущен%s.", " (с реранкером)" if reranker else "")
 
@@ -186,7 +189,7 @@ def create_app() -> FastAPI:
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(_load_rag_stack_sync, cfg, app),
-                timeout = timeout,
+                timeout=timeout,
             )
         except asyncio.TimeoutError:
             logger.critical(

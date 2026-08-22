@@ -7,7 +7,7 @@ import hashlib
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -18,6 +18,7 @@ from src.tools.benchmark.schema import BenchmarkDataset, BenchmarkRecord
 # ------------------------------------------------------------------
 # Fixtures
 # ------------------------------------------------------------------
+
 
 @pytest.fixture()
 def mock_generator():
@@ -31,6 +32,7 @@ def mock_generator():
 def mock_nli_judge_pass():
     """NLI-judge, который всегда одобряет (score=0.9)."""
     from src.tools.evaluation.schema import EvalResult
+
     judge = MagicMock()
     judge.evaluate.return_value = EvalResult(score=0.9, verdict=True)
     return judge
@@ -40,6 +42,7 @@ def mock_nli_judge_pass():
 def mock_nli_judge_fail():
     """NLI-judge, который всегда отклоняет (score=0.1)."""
     from src.tools.evaluation.schema import EvalResult
+
     judge = MagicMock()
     judge.evaluate.return_value = EvalResult(score=0.1, verdict=False)
     return judge
@@ -62,6 +65,7 @@ def _make_dataloader(texts: list[str], metadatas: list[dict] | None = None):
 # compute_chunk_id
 # ------------------------------------------------------------------
 
+
 class TestComputeChunkId:
     def test_matches_indexer_algorithm(self):
         """chunk_id должен совпадать с KnowledgeBaseIndexer._generate_doc_id."""
@@ -79,18 +83,21 @@ class TestComputeChunkId:
     def test_deterministic(self):
         """Тот же вход — тот же chunk_id."""
         text, meta = "hello world", {"url": "x"}
-        assert BenchmarkBuilder.compute_chunk_id(text, meta) == \
-               BenchmarkBuilder.compute_chunk_id(text, meta)
+        assert BenchmarkBuilder.compute_chunk_id(text, meta) == BenchmarkBuilder.compute_chunk_id(
+            text, meta
+        )
 
     def test_different_texts_different_ids(self):
         """Разные тексты — разные chunk_id."""
-        assert BenchmarkBuilder.compute_chunk_id("text A", {}) != \
-               BenchmarkBuilder.compute_chunk_id("text B", {})
+        assert BenchmarkBuilder.compute_chunk_id("text A", {}) != BenchmarkBuilder.compute_chunk_id(
+            "text B", {}
+        )
 
 
 # ------------------------------------------------------------------
 # BenchmarkBuilder
 # ------------------------------------------------------------------
+
 
 class TestBenchmarkBuilder:
     def _make_builder(self, generator, nli_judge, nli_threshold=0.60):
@@ -178,6 +185,7 @@ class TestBenchmarkBuilder:
 # ------------------------------------------------------------------
 # BenchmarkDataset (save/load)
 # ------------------------------------------------------------------
+
 
 class TestBenchmarkDataset:
     def _make_record(self, chunk_id="abc123", question="Q?", answer="A.") -> BenchmarkRecord:

@@ -173,7 +173,7 @@ class RetrieverMetrics:
         empty_count = 0
         redundancy_sum = 0.0
 
-        for res_list, gt_ids in zip(search_results, ground_truth_ids):
+        for res_list, gt_ids in zip(search_results, ground_truth_ids, strict=True):
             true_ids = set(gt_ids)
 
             # ── OOD-детекция по top dense score (bi-encoder, до всяких фильтров) ──
@@ -183,10 +183,7 @@ class RetrieverMetrics:
                     ood_count += 1
 
             # ── Фильтрация по similarity_threshold (по dense score) ──
-            filtered = [
-                r for r in res_list
-                if r.get("score", 1.0) >= self.similarity_threshold
-            ]
+            filtered = [r for r in res_list if r.get("score", 1.0) >= self.similarity_threshold]
 
             if not filtered:
                 empty_count += 1
@@ -195,14 +192,14 @@ class RetrieverMetrics:
             # ── Bi-encoder recall: был ли релевантный документ среди всех кандидатов? ──
             # Используем весь filtered (retrieval_top_k), а не срез rerank_top_k,
             # потому что нас интересует не упустил ли энкодер документ вообще.
-            bi_candidates = filtered[:self.retrieval_top_k]
+            bi_candidates = filtered[: self.retrieval_top_k]
             bi_doc_ids = {r.get("metadata", {}).get("doc_id") for r in bi_candidates}
             bi_recall_sum += 1.0 if (true_ids & bi_doc_ids) else 0.0
 
             # ── Cross-encoder / финальная выдача: срез до rerank_top_k ──
             # Если реранкер применялся — документы уже отсортированы по cross_encoder_score.
             # Если нет — порядок из bi-encoder, cross_encoder_score отсутствует.
-            final_results = filtered[:self.rerank_top_k]
+            final_results = filtered[: self.rerank_top_k]
 
             has_reranker = any("cross_encoder_score" in r for r in final_results)
             score_key = "cross_encoder_score" if has_reranker else "score"
@@ -225,13 +222,11 @@ class RetrieverMetrics:
             # Bi-encoder: насколько хорошо энкодер «не потерял» релевантные документы
             f"recall_{k_ret}_biencoder": bi_recall,
             f"fnr_{k_ret}_biencoder": 1.0 - bi_recall,
-
             # Cross-encoder / финальная выдача: качество того, что видит пользователь
             f"recall_{k_rank}_final": ce_recall,
             "mrr": ce_mrr_sum / n_queries,
             f"precision_{k_rank}": ce_precision_sum / n_queries,
             f"ndcg_{k_rank}": ce_ndcg_sum / n_queries,
-
             # Бизнес-метрики
             "empty_retrieval_rate": empty_count / n_queries,
             "ood_rate": ood_count / n_queries,

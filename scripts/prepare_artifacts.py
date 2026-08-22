@@ -21,12 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import hydra
+import yaml
 from dotenv import load_dotenv
 from omegaconf import OmegaConf
-import yaml
 
 from src.tools.storage.router import StorageRouter
 from src.utils.logger import setup_logging
+
 
 load_dotenv()
 setup_logging()
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _resolve_oc_env(obj):
     """Рекурсивно резолвит ${oc.env:VAR, default} в строках через os.environ.
 
@@ -44,6 +46,7 @@ def _resolve_oc_env(obj):
     "null" и None конвертируем в None — boto3 принимает endpoint_url=None.
     """
     if isinstance(obj, str):
+
         def replace(m):
             parts = m.group(1).split(",", 1)
             var = parts[0].strip()
@@ -52,6 +55,7 @@ def _resolve_oc_env(obj):
             if val in (None, "null", " null"):
                 return "__NONE__"
             return val.strip()
+
         result = re.sub(r"\$\{oc\.env:([^}]+)\}", replace, obj)
         return None if result == "__NONE__" else result
     if isinstance(obj, dict):
@@ -94,8 +98,8 @@ def _is_hf_id(model_name_or_path: str) -> bool:
 def _download_from_hub(repo_id: str, local_dir: Path, force: bool = False) -> Path:
     try:
         from huggingface_hub import snapshot_download
-    except ImportError:
-        raise ImportError("pip install huggingface-hub")
+    except ImportError as err:
+        raise ImportError("pip install huggingface-hub") from err
     local_dir.mkdir(parents=True, exist_ok=True)
     logger.info("HF Hub: скачивание '%s' -> %s", repo_id, local_dir)
     path = snapshot_download(
@@ -146,6 +150,7 @@ def _save_manifest(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -208,13 +213,15 @@ def main() -> None:
             router.upload_dir_to_uri(local_download_dir, artifact_uri)
             logger.info("Загружено: %s", artifact_uri)
 
-        global_manifest.setdefault(pipeline_name, {}).update({
-            "load_type": "full_model",
-            "model_uri": artifact_uri,
-            "mlflow_model_name": mlflow_model_name,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "generated_by": "prepare_artifacts.py",
-        })
+        global_manifest.setdefault(pipeline_name, {}).update(
+            {
+                "load_type": "full_model",
+                "model_uri": artifact_uri,
+                "mlflow_model_name": mlflow_model_name,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_by": "prepare_artifacts.py",
+            }
+        )
         prepared_count += 1
 
     _save_manifest(router, global_manifest, manifest_uri, manifest_tmp)

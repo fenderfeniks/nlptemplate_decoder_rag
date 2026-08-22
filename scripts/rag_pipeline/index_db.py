@@ -6,20 +6,22 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
 from dotenv import load_dotenv
+
+
 load_dotenv()
 
-import hydra
+import hydra  # noqa
+from omegaconf import DictConfig, OmegaConf  # noqa
 
-from omegaconf import DictConfig, OmegaConf
-
-from src.endpoints.index import run_universal_index
-from src.pipelines.base.core.data.builder import DataModule
-from src.pipelines.rag.inference.indexer import KnowledgeBaseIndexer
-from src.pipelines.rag.inference.builder import build_inference_encoder
-from src.tools.storage.resolver import ArtifactResolver
-from src.utils.cli import enforce_pipeline
-from src.utils.hydra_utils import setup_config
+from src.endpoints.index import run_universal_index  # noqa
+from src.pipelines.base.core.data.builder import DataModule  # noqa
+from src.pipelines.rag.inference.builder import build_inference_encoder  # noqa
+from src.pipelines.rag.inference.indexer import KnowledgeBaseIndexer  # noqa
+from src.tools.storage.resolver import ArtifactResolver  # noqa
+from src.utils.cli import enforce_pipeline  # noqa
+from src.utils.hydra_utils import setup_config  # noqa
 
 
 logger = logging.getLogger(__name__)
@@ -62,9 +64,13 @@ def run_index_logic(cfg: DictConfig, resolver: ArtifactResolver, router: Any) ->
             sys.exit(1)
         vector_db = hydra.utils.instantiate(cfg.vector_db.loader, directory=db_dir)
     else:
-        vector_db_cfg = OmegaConf.create({
-            k: v for k, v in OmegaConf.to_container(cfg.vector_db, resolve=True).items() if k != "loader"
-        })
+        vector_db_cfg = OmegaConf.create(
+            {
+                k: v
+                for k, v in OmegaConf.to_container(cfg.vector_db, resolve=True).items()
+                if k != "loader"
+            }
+        )
         vector_db = hydra.utils.instantiate(vector_db_cfg)
 
     # 4. Подготовка данных для индексации
@@ -142,10 +148,12 @@ def run_index_logic(cfg: DictConfig, resolver: ArtifactResolver, router: Any) ->
         if pipeline_name not in manifest:
             manifest[pipeline_name] = {}
 
-        manifest[pipeline_name].update({
-            "vector_db_uri": db_uri,
-            "db_updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+        manifest[pipeline_name].update(
+            {
+                "vector_db_uri": db_uri,
+                "db_updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
         manifest_filename = manifest_uri.rstrip("/").split("/")[-1]
         manifest_file = tmp_path / manifest_filename

@@ -39,7 +39,7 @@ def _build_sequence_input(df: pd.DataFrame, pipeline_cfg: DictConfig) -> list:
 
     if text_pair_col and text_pair_col in df.columns:
         # NLI-режим: пары (premise, hypothesis)
-        return list(zip(df[text_col].tolist(), df[text_pair_col].tolist()))  # noqa
+        return list(zip(df[text_col].tolist(), df[text_pair_col].tolist(), strict=True))
     return df[text_col].tolist()
 
 
@@ -62,7 +62,7 @@ def _build_qa_input(df: pd.DataFrame, pipeline_cfg: DictConfig) -> list:
     data_cfg = pipeline_cfg.data
     question_col = data_cfg.get("question_column", "question")
     context_col = data_cfg.get("context_column", "context")
-    return list(zip(df[question_col].tolist(), df[context_col].tolist()))  # noqa
+    return list(zip(df[question_col].tolist(), df[context_col].tolist(), strict=True))
 
 
 # ---------------------------------------------------------------------------

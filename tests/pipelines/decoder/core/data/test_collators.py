@@ -16,7 +16,7 @@ def mock_tokenizer():
         max_len = max(len(ids) for ids in features["input_ids"])
         padded_ids = []
         padded_masks = []
-        for ids, mask in zip(features["input_ids"], features["attention_mask"]):
+        for ids, mask in zip(features["input_ids"], features["attention_mask"], strict=True):
             pad_len = max_len - len(ids)
             padded_ids.append(ids + [0] * pad_len)
             padded_masks.append(mask + [0] * pad_len)

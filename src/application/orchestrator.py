@@ -12,6 +12,7 @@ from src.api_gateway.resilience import rag_breaker
 from src.pipelines.decoder.core.prompts.manager import PromptManager
 from src.pipelines.decoder.inference.inference import LLMGenerationClient
 
+
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
@@ -23,6 +24,7 @@ class BuildPromptResult:
     Разделяем данные (prompt) и observability (docs, rag_degraded) явно,
     чтобы chat.py мог передать docs в rag_logger без повторного вызова RAG.
     """
+
     prompt: str
     retrieved_docs: list[dict[str, Any]] = field(default_factory=list)
     rag_degraded: bool = False  # True если RAG был недоступен
@@ -75,7 +77,7 @@ class RAGOrchestrator:
                 len(chat_history),
                 self.max_history_msgs,
             )
-            chat_history = chat_history[-self.max_history_msgs:]
+            chat_history = chat_history[-self.max_history_msgs :]
 
         docs, rag_degraded = await self._retrieve_with_fallback(
             query=query,

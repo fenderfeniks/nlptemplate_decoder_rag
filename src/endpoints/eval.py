@@ -32,15 +32,17 @@
 import json
 import logging
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import hydra
 from omegaconf import DictConfig
 
 from src.tools.benchmark.loader import BenchmarkLoader
 from src.tools.storage.resolver import ArtifactResolver
+
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +136,9 @@ def _resolve_column(
             if name != requested:
                 logger.info(
                     "Колонка '%s' (%s) не найдена — используем '%s'.",
-                    requested, role, name,
+                    requested,
+                    role,
+                    name,
                 )
             return name
 
@@ -142,7 +146,10 @@ def _resolve_column(
         "Не найдена колонка для '%s'. "
         "Запрошено: '%s'. Проверено: %s. Доступные колонки: %s. "
         "Укажите правильное имя в cfg.data или передайте явно в run_universal_eval.",
-        role, requested, candidates, available,
+        role,
+        requested,
+        candidates,
+        available,
     )
     sys.exit(1)
 
@@ -197,7 +204,8 @@ def _load_benchmark(
 
     # Автодетект реальных имён колонок с внятной диагностикой при промахе
     real_query_col = _resolve_column(
-        dataset, query_column,
+        dataset,
+        query_column,
         fallbacks=["question", "query", "input", "text", "prompt"],
         role="query_column",
     )
@@ -252,13 +260,14 @@ def check_drift(
 
     logger.info(
         "Drift check: %s=%.4f, порог=%.4f (lower_is_better=%s)",
-        metric_key, primary_metric, drift_threshold, lower_is_better,
+        metric_key,
+        primary_metric,
+        drift_threshold,
+        lower_is_better,
     )
 
     degraded = (
-        primary_metric > drift_threshold
-        if lower_is_better
-        else primary_metric < drift_threshold
+        primary_metric > drift_threshold if lower_is_better else primary_metric < drift_threshold
     )
     if degraded:
         logger.error("ДРИФТ (деградация %s). Выход с кодом 1.", metric_key)

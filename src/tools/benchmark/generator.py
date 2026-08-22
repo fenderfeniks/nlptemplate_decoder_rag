@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
@@ -56,9 +57,7 @@ class BaseQAGenerator(ABC):
         """
         ...
 
-    def generate_batch(
-        self, chunk_texts: list[str]
-    ) -> list[tuple[str, str] | None]:
+    def generate_batch(self, chunk_texts: list[str]) -> list[tuple[str, str] | None]:
         """Генерирует QA для списка чанков. Дефолт — sequential."""
         return [self.generate(text) for text in chunk_texts]
 
@@ -88,8 +87,7 @@ class APIQAGenerator(BaseQAGenerator):
         api_key = os.environ.get(api_key_env)
         if not api_key:
             raise OSError(
-                f"Переменная окружения '{api_key_env}' не задана. "
-                "Добавьте её в .env или secrets."
+                f"Переменная окружения '{api_key_env}' не задана. Добавьте её в .env или secrets."
             )
 
         self.client = OpenAI(api_key=api_key, base_url=base_url)
@@ -130,7 +128,9 @@ class APIQAGenerator(BaseQAGenerator):
             except Exception as e:
                 logger.warning(
                     "APIQAGenerator: API ошибка (попытка %d/%d): %s",
-                    attempt, self.retry_attempts, e,
+                    attempt,
+                    self.retry_attempts,
+                    e,
                 )
                 if attempt < self.retry_attempts:
                     time.sleep(self.retry_delay * attempt)
@@ -202,7 +202,7 @@ class LocalQAGenerator(BaseQAGenerator):
         manifest_uri: str,
         cache_base: Path,
         gen_cfg: dict | None = None,
-    ) -> "LocalQAGenerator":
+    ) -> LocalQAGenerator:
         """Загружает decoder LLM из manifest["decoder_pipeline"] через HFModelBuilder.
 
         Args:
@@ -220,7 +220,6 @@ class LocalQAGenerator(BaseQAGenerator):
         Returns:
             Готовый LocalQAGenerator с загруженным pipeline.
         """
-        import torch
         from transformers import AutoTokenizer
         from transformers import pipeline as hf_pipeline
 
@@ -229,9 +228,7 @@ class LocalQAGenerator(BaseQAGenerator):
         cfg = gen_cfg or {}
 
         logger.info("LocalQAGenerator: загрузка из манифеста '%s'", manifest_uri)
-        full_manifest = router.download_manifest(
-            manifest_uri, cache_base / "decoder_manifest"
-        )
+        full_manifest = router.download_manifest(manifest_uri, cache_base / "decoder_manifest")
 
         pipeline_key = "decoder_pipeline"
         if pipeline_key not in full_manifest:
@@ -247,9 +244,7 @@ class LocalQAGenerator(BaseQAGenerator):
                 f"получено: {manifest.get('load_type')}."
             )
 
-        model_path = router.download_from_uri(
-            manifest["model_uri"], cache_base / "decoder_model"
-        )
+        model_path = router.download_from_uri(manifest["model_uri"], cache_base / "decoder_model")
         logger.info("LocalQAGenerator: веса получены из storage: %s", model_path)
 
         builder = HFModelBuilder(
@@ -267,7 +262,9 @@ class LocalQAGenerator(BaseQAGenerator):
             tokenizer.pad_token_id = tokenizer.eos_token_id
 
         if getattr(tokenizer, "chat_template", None) is None:
-            logger.warning("chat_template не найден в конфигурации. Устанавливаем дефолтный ChatML.")
+            logger.warning(
+                "chat_template не найден в конфигурации. Устанавливаем дефолтный ChatML."
+            )
             tokenizer.chat_template = (
                 "{% for message in messages %}"
                 "{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>\n'}}"

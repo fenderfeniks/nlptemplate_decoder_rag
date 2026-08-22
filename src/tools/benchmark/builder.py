@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from pathlib import Path
 from typing import Any
 
 import torch
@@ -112,7 +111,7 @@ class BenchmarkBuilder:
         eval_input = EvalInput(
             prompt=chunk_text,
             response=answer,
-            reference=chunk_text,   # premise = chunk
+            reference=chunk_text,  # premise = chunk
             metadata={"chunk_id": chunk_id},
         )
         result = self.nli_judge.evaluate(eval_input)
@@ -158,19 +157,23 @@ class BenchmarkBuilder:
                 stats["failed_nli"] += 1
                 logger.debug(
                     "NLI-фильтр отклонил (score=%.3f < %.3f): chunk_id=%s",
-                    nli_score, self.nli_threshold, chunk_id,
+                    nli_score,
+                    self.nli_threshold,
+                    chunk_id,
                 )
                 continue
 
-            records.append(BenchmarkRecord(
-                chunk_id=chunk_id,
-                chunk_text=text,
-                question=question,
-                answer=answer,
-                nli_score=nli_score,
-                metadata=item_meta,
-                generator_model=generator_model_name,
-            ))
+            records.append(
+                BenchmarkRecord(
+                    chunk_id=chunk_id,
+                    chunk_text=text,
+                    question=question,
+                    answer=answer,
+                    nli_score=nli_score,
+                    metadata=item_meta,
+                    generator_model=generator_model_name,
+                )
+            )
             stats["accepted"] += 1
 
         return records
@@ -244,10 +247,11 @@ class BenchmarkBuilder:
                 stats["skipped_short"] += 1
                 continue
 
-            item_meta: dict[str, Any] = {
-                k: v for k, v in item.items()
-                if k not in (text_column, id_column)
-            } if isinstance(item, dict) else {}
+            item_meta: dict[str, Any] = (
+                {k: v for k, v in item.items() if k not in (text_column, id_column)}
+                if isinstance(item, dict)
+                else {}
+            )
 
             if has_id_column:
                 chunk_id = str(item[id_column])

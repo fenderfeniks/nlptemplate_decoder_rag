@@ -244,10 +244,10 @@ class FAISSVectorStore:
         return [
             [
                 {"score": float(d), "metadata": self._metadata[i]}
-                for d, i in zip(dist_row, idx_row)  # noqa
+                for d, i in zip(dist_row, idx_row, strict=True)
                 if i != -1
             ]
-            for dist_row, idx_row in zip(distances, indices)  # noqa
+            for dist_row, idx_row in zip(distances, indices, strict=True)
         ]
 
     def _search_with_filter(
@@ -272,7 +272,7 @@ class FAISSVectorStore:
             still_pending = []
             for local_idx, orig_idx in enumerate(pending):
                 row_res: list[dict[str, Any]] = []
-                for d, i in zip(distances[local_idx], indices[local_idx]):  # noqa
+                for d, i in zip(distances[local_idx], indices[local_idx], strict=True):
                     if i == -1:
                         continue
                     if self._match_filters(self._metadata[i], filter_metadata):

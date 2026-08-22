@@ -2,9 +2,10 @@
 
 import gc
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
+import hydra
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig, open_dict
@@ -15,24 +16,18 @@ from src.tools.benchmark.loader import BenchmarkLoader
 from src.tools.storage.resolver import ArtifactResolver
 from src.utils.logger import setup_logging
 from src.utils.torch_utils import register_safe_globals
-import hydra
 
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 
-def run_universal_train(
-    cfg: DictConfig, 
-    pipeline_name: str, 
-    build_module_fn: Callable
-) -> None:
+def run_universal_train(cfg: DictConfig, pipeline_name: str, build_module_fn: Callable) -> None:
     """Универсальный цикл обучения.
-    
     Args:
         cfg: Корневой конфиг Hydra.
         pipeline_name: Имя пайплайна (напр., 'rag_pipeline', 'decoder_pipeline').
-        build_module_fn: Фабрика сборки LightningModule. 
+        build_module_fn: Фабрика сборки LightningModule.
             Сигнатура: (cfg, experiment_logger) -> (model_module, base_model, tokenizer)
     """
     logger.info("Старт обучения пайплайна: %s...", pipeline_name)
@@ -41,7 +36,7 @@ def run_universal_train(
         raise RuntimeError("accelerator='gpu', но CUDA недоступна.")
 
     pl.seed_everything(cfg.seed, workers=True)
-    
+
     experiment_logger = hydra.utils.instantiate(cfg.system.logger.experiment_logger)
     router = hydra.utils.instantiate(cfg.system.storage_router)
 
@@ -64,7 +59,7 @@ def run_universal_train(
         router=router,
         cache_dir=cfg.system.paths.benchmark_cache_dir,
         manifest_uri=cfg.system.manifest.uri,
-        pipeline_name=pipeline_name, 
+        pipeline_name=pipeline_name,
     )
 
     datamodule = DataModule(
@@ -80,14 +75,21 @@ def run_universal_train(
         for cb_name, cb_cfg in cfg.training.callbacks.items():
             # Прокидываем логгер только в те коллбэки, которые отвечают за evaluation
             if cb_name in ("retrieval_eval", "generation_eval"):
-                callbacks.append(hydra.utils.instantiate(cb_cfg, experiment_logger=experiment_logger))
+                callbacks.append(
+                    hydra.utils.instantiate(cb_cfg, experiment_logger=experiment_logger)
+                )
             else:
                 callbacks.append(hydra.utils.instantiate(cb_cfg))
 
     with open_dict(cfg.training):
         keys_to_remove = [
-            "callbacks", "optimizer", "scheduler", "loss", 
-            "primary_metric", "primary_metric_mode", "warmup_steps"
+            "callbacks",
+            "optimizer",
+            "scheduler",
+            "loss",
+            "primary_metric",
+            "primary_metric_mode",
+            "warmup_steps",
         ]
         for key in keys_to_remove:
             cfg.training.pop(key, None)
@@ -122,12 +124,14 @@ def run_universal_train(
             best_ckpt_path = trainer.checkpoint_callback.best_model_path
             if best_ckpt_path:
                 logger.info("Загрузка лучших LoRA-весов для теста...")
-                checkpoint = torch.load(best_ckpt_path, map_location=model_module.device, weights_only=False)
+                checkpoint = torch.load(
+                    best_ckpt_path, map_location=model_module.device, weights_only=False
+                )
                 lora_sd = {k: v for k, v in checkpoint["state_dict"].items() if "lora_" in k}
                 model_module.load_state_dict(lora_sd, strict=False)
             else:
                 logger.warning("Лучший чекпоинт не найден — тест на текущих весах.")
-            
+
             logger.info("Запуск trainer.test()...")
             trainer.test(model=model_module, datamodule=datamodule)
             score = trainer.checkpoint_callback.best_model_score

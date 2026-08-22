@@ -33,6 +33,7 @@ from dotenv import load_dotenv
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
+
 load_dotenv()
 
 # ---------------------------------------------------------------------------
@@ -54,6 +55,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _find_llamacpp_dir() -> Path:
     env_val = os.getenv("LLAMACPP_DIR")
     if env_val:
@@ -67,8 +69,7 @@ def _find_llamacpp_dir() -> Path:
         return _DEFAULT_LLAMACPP_DIR
 
     logger.error(
-        "llama.cpp не найден. Укажите путь через env LLAMACPP_DIR "
-        "или склонируйте в ~/llama.cpp."
+        "llama.cpp не найден. Укажите путь через env LLAMACPP_DIR или склонируйте в ~/llama.cpp."
     )
     sys.exit(1)
 
@@ -85,6 +86,7 @@ def _find_server_binary(llamacpp_dir: Path) -> Path:
             return p
 
     import shutil as _shutil
+
     found = _shutil.which("llama-server")
     if found:
         return Path(found)
@@ -115,17 +117,16 @@ def _load_config():
 def _resolve_local_uri(gguf_uri: str, storage_root: Path) -> Path:
     """Резолвит local://path/to/file в абсолютный путь на диске."""
     if not gguf_uri.startswith("local://"):
-        logger.error(
-            "Поддерживается только local:// URI, получен: %s", gguf_uri
-        )
+        logger.error("Поддерживается только local:// URI, получен: %s", gguf_uri)
         sys.exit(1)
-    relative = gguf_uri[len("local://"):]
+    relative = gguf_uri[len("local://") :]
     return storage_root / relative
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     logger.info("=== serve_gguf.py: старт ===")
@@ -144,17 +145,12 @@ def main() -> None:
     )
     if not manifest_uri:
         logger.error(
-            "manifest_uri не задан ни в конфиге (system.manifest.uri) "
-            "ни в env MANIFEST_URI."
+            "manifest_uri не задан ни в конфиге (system.manifest.uri) ни в env MANIFEST_URI."
         )
         sys.exit(1)
 
-    storage_root = Path(
-        OmegaConf.select(cfg, "system.paths.storage_root", default="prod_storage")
-    )
-    cache_base = Path(
-        OmegaConf.select(cfg, "system.paths.model_dir", default="/tmp/nlp_cache")
-    )
+    storage_root = Path(OmegaConf.select(cfg, "system.paths.storage_root", default="prod_storage"))
+    cache_base = Path(OmegaConf.select(cfg, "system.paths.model_dir", default="/tmp/nlp_cache"))
     router = hydra.utils.instantiate(cfg.system.storage_router)
 
     # --- Читаем манифест ---
@@ -164,7 +160,8 @@ def main() -> None:
     if _PIPELINE_NAME not in full_manifest:
         logger.error(
             "Секция '%s' не найдена в манифесте. Доступные: %s",
-            _PIPELINE_NAME, list(full_manifest.keys()),
+            _PIPELINE_NAME,
+            list(full_manifest.keys()),
         )
         sys.exit(1)
 
@@ -173,8 +170,7 @@ def main() -> None:
     gguf_uri = pipeline_manifest.get("gguf_uri")
     if not gguf_uri:
         logger.error(
-            "Поле 'gguf_uri' не найдено в секции '%s'. "
-            "Сначала запустите prepare_gguf.py.",
+            "Поле 'gguf_uri' не найдено в секции '%s'. Сначала запустите prepare_gguf.py.",
             _PIPELINE_NAME,
         )
         sys.exit(1)
@@ -198,11 +194,16 @@ def main() -> None:
 
     cmd = [
         str(server_bin),
-        "--model", str(gguf_path),
-        "--alias", model_name,
-        "--port", str(port),
-        "--ctx-size", str(ctx_size),
-        "--n-gpu-layers", str(gpu_layers),
+        "--model",
+        str(gguf_path),
+        "--alias",
+        model_name,
+        "--port",
+        str(port),
+        "--ctx-size",
+        str(ctx_size),
+        "--n-gpu-layers",
+        str(gpu_layers),
     ]
 
     logger.info("Запускаем llama-server:")

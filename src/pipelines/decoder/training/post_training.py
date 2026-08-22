@@ -5,14 +5,17 @@ import logging
 
 import torch
 
-from src.utils.torch_utils import register_safe_globals
 # Импорт протокола нужен только для type hinting
 from src.utils.logging.protocol import ExperimentLogger
+from src.utils.torch_utils import register_safe_globals
+
 
 logger = logging.getLogger(__name__)
 
 
-def run_post_training_evaluation(trainer, model_module, datamodule, experiment_logger: ExperimentLogger):
+def run_post_training_evaluation(
+    trainer, model_module, datamodule, experiment_logger: ExperimentLogger
+):
     """Запускает финальную оценку на лучшем чекпоинте после обучения.
 
     Загружает лучшие веса LoRA из checkpoint_callback, затем запускает
@@ -38,9 +41,7 @@ def run_post_training_evaluation(trainer, model_module, datamodule, experiment_l
             map_location=model_module.device,
             weights_only=False,
         )
-        lora_state_dict = {
-            k: v for k, v in checkpoint["state_dict"].items() if "lora_" in k
-        }
+        lora_state_dict = {k: v for k, v in checkpoint["state_dict"].items() if "lora_" in k}
         logger.info("LoRA тензоров найдено: %d.", len(lora_state_dict))
         model_module.load_state_dict(lora_state_dict, strict=False)
 
@@ -68,12 +69,12 @@ def run_post_training_evaluation(trainer, model_module, datamodule, experiment_l
         if not callback._env_ready.get("test", False):
             logger.warning("test eval_dataset не готов — генерация пропущена.")
             continue
-            
+
         # Используем контекстный менеджер из интерфейса логгера
         with experiment_logger.reopen_run(run_id) if run_id else _null_context():
             callback._evaluator.evaluate(
                 stage="test",
-                metrics_logger=experiment_logger, # Передаем правильный логгер
+                metrics_logger=experiment_logger,  # Передаем правильный логгер
                 trainer=trainer,
                 pl_module=model_module,
                 global_step=trainer.global_step,
@@ -93,9 +94,11 @@ def run_post_training_evaluation(trainer, model_module, datamodule, experiment_l
     return float(score) if score is not None else None
 
 
-class _null_context:
+class _null_context:  # noqa
     """Контекстный менеджер-заглушка когда run_id недоступен."""
+
     def __enter__(self):
         return self
+
     def __exit__(self, *args):
         pass

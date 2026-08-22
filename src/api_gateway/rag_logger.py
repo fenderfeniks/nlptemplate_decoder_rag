@@ -41,6 +41,7 @@ import logging
 import time
 from typing import Any
 
+
 _rag_logger = logging.getLogger("rag.traces")
 
 

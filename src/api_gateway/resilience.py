@@ -19,6 +19,7 @@ import os
 
 import pybreaker
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,7 +61,7 @@ class BreakerStateListener(pybreaker.CircuitBreakerListener):
 
 llm_breaker = _make_breaker(
     "llm-server",
-    fail_env="LLM_BREAKER_FAIL_MAX",       # default: 5 ошибок подряд
+    fail_env="LLM_BREAKER_FAIL_MAX",  # default: 5 ошибок подряд
     timeout_env="LLM_BREAKER_RESET_TIMEOUT",  # default: 30 сек
 )
 

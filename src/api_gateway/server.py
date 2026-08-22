@@ -16,6 +16,7 @@ from src.application.orchestrator import RAGOrchestrator
 from src.pipelines.decoder.core.prompts.manager import PromptManager
 from src.pipelines.decoder.inference.inference import LLMGenerationClient
 
+
 logger = logging.getLogger(__name__)
 
 

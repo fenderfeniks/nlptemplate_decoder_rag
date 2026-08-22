@@ -34,11 +34,9 @@ class BaseStorage(ABC):
     @abstractmethod
     def download_file(self, remote_path: str, local_path: Path | str) -> Path:
         """Скачивает один файл из хранилища.
-        
         Args:
             remote_path: Путь к файлу в хранилище.
             local_path:  Локальный путь куда сохранить файл.
-        
         Returns:
             Path к скачанному файлу.
         """

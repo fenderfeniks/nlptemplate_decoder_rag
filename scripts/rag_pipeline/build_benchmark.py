@@ -6,16 +6,19 @@ import logging
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from dotenv import load_dotenv
-load_dotenv()
-import hydra
-from omegaconf import DictConfig
 
-from src.utils.hydra_utils import setup_config
-from src.utils.logger import setup_logging
-from src.tools.evaluation.schema import EvalInput
-from src.tools.benchmark.generator import APIQAGenerator, LocalQAGenerator
-from src.tools.evaluation.judges.nli_judge import NLIJudge
+from dotenv import load_dotenv
+
+
+load_dotenv()
+import hydra  # noqa
+from omegaconf import DictConfig  # noqa
+
+from src.tools.benchmark.generator import LocalQAGenerator  # noqa
+from src.tools.evaluation.judges.nli_judge import NLIJudge  # noqa
+from src.tools.evaluation.schema import EvalInput  # noqa
+from src.utils.hydra_utils import setup_config  # noqa
+from src.utils.logger import setup_logging  # noqa
 
 
 setup_logging()
@@ -64,7 +67,7 @@ def build_benchmark(cfg: DictConfig) -> None:
             router=router,
             manifest_uri=manifest_uri,
             cache_base=cache_base,
-            gen_cfg=cfg.get("evaluation", {}).get("benchmark", {}).get("generator", {})
+            gen_cfg=cfg.get("evaluation", {}).get("benchmark", {}).get("generator", {}),
         )
     else:
         logger.info("Инициализация APIQAGenerator...")
@@ -75,14 +78,14 @@ def build_benchmark(cfg: DictConfig) -> None:
         router=router,
         manifest_uri=manifest_uri,
         cache_base=cache_base,
-        verdict_threshold=cfg.benchmark.nli_threshold
+        verdict_threshold=cfg.benchmark.nli_threshold,
     )
 
     # 3. Основной цикл: Генерация и фильтрация
     benchmark_size = cfg.benchmark.benchmark_size
     text_column = cfg.benchmark.text_column
     min_length = cfg.benchmark.min_chunk_length
-    
+
     records = []
     logger.info("Запуск сборки бенчмарка (цель: %d валидных пар)...", benchmark_size)
 
@@ -100,41 +103,40 @@ def build_benchmark(cfg: DictConfig) -> None:
         qa_pair = generator.generate(chunk_text)
         if not qa_pair:
             continue
-            
+
         question, answer = qa_pair
 
         # Фильтрация (NLI)
         # premise = chunk_text (reference), hypothesis = answer (response)
         eval_inp = EvalInput(
-            prompt=question,
-            response=answer,
-            reference=chunk_text,
-            metadata={"chunk_id": chunk_id}
+            prompt=question, response=answer, reference=chunk_text, metadata={"chunk_id": chunk_id}
         )
         eval_result = nli_judge.evaluate_batch([eval_inp])[0]
 
         if eval_result.verdict:
-            records.append({
-                "chunk_id": chunk_id,
-                "chunk_text": chunk_text,
-                "question": question,
-                "answer": answer,
-                "nli_score": eval_result.score
-            })
+            records.append(
+                {
+                    "chunk_id": chunk_id,
+                    "chunk_text": chunk_text,
+                    "question": question,
+                    "answer": answer,
+                    "nli_score": eval_result.score,
+                }
+            )
             if len(records) % 10 == 0:
                 logger.info("Собрано %d / %d пар...", len(records), benchmark_size)
 
     # 4. Выгрузка в Storage
     remote_benchmark_dir = f"{cfg.pipeline_name}/benchmarks/latest"
-    
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
         benchmark_file = tmp_path / BENCHMARK_FILENAME
-        
+
         with open(benchmark_file, "w", encoding="utf-8") as f:
             for record in records:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                
+
         logger.info("Выгрузка бенчмарка в Storage: %s", remote_benchmark_dir)
         storage_client.upload(local_dir=tmp_dir, remote_path=remote_benchmark_dir)
 
@@ -151,8 +153,12 @@ def build_benchmark(cfg: DictConfig) -> None:
         if cfg.pipeline_name not in global_manifest:
             global_manifest[cfg.pipeline_name] = {}
 
-        global_manifest[cfg.pipeline_name]["benchmark_uri"] = f"{uri_prefix}{remote_benchmark_dir}/{BENCHMARK_FILENAME}"
-        global_manifest[cfg.pipeline_name]["benchmark_updated_at"] = datetime.now(timezone.utc).isoformat()
+        global_manifest[cfg.pipeline_name]["benchmark_uri"] = (
+            f"{uri_prefix}{remote_benchmark_dir}/{BENCHMARK_FILENAME}"
+        )
+        global_manifest[cfg.pipeline_name]["benchmark_updated_at"] = datetime.now(
+            timezone.utc
+        ).isoformat()
         global_manifest[cfg.pipeline_name]["benchmark_size"] = len(records)
 
         manifest_file = tmp_path / "manifest.json"
@@ -163,11 +169,14 @@ def build_benchmark(cfg: DictConfig) -> None:
 
     logger.info(
         "=== RAG Бенчмарк успешно зафиксирован. URI: %s%s/%s ===",
-        uri_prefix, remote_benchmark_dir, BENCHMARK_FILENAME
+        uri_prefix,
+        remote_benchmark_dir,
+        BENCHMARK_FILENAME,
     )
 
 
 if __name__ == "__main__":
     from src.utils.cli import enforce_pipeline
+
     enforce_pipeline("rag_pipeline")
     build_benchmark()

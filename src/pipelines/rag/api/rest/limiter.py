@@ -1,5 +1,5 @@
-import os
 import hashlib
+import os
 
 from fastapi import Request
 from slowapi import Limiter
@@ -30,7 +30,7 @@ def get_client_identifier(request: Request) -> str:
     if api_key:
         # Хэшируем ключ чтобы не держать сырой секрет в памяти лимитера
         return f"apikey:{hashlib.sha256(api_key.encode()).hexdigest()[:16]}"
-    
+
     return f"ip:{get_real_ip(request)}"
 
 

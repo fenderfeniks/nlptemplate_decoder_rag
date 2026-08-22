@@ -64,7 +64,7 @@ class ArtifactResolver:
 
     def _resolve_base_model_uri(self, base_model_uri: str, cache_subdir: str) -> str:
         if base_model_uri.startswith("hf://"):
-            return base_model_uri[len("hf://"):]
+            return base_model_uri[len("hf://") :]
 
         known_storage_schemes = ("local://", "s3://", "gs://", "az://")
         if any(base_model_uri.startswith(s) for s in known_storage_schemes):
@@ -130,16 +130,12 @@ class ArtifactResolver:
                 )
             else:
                 # FAISS и другие файловые бэкенды: скачиваем из storage.
-                db_dir = self.router.download_from_uri(
-                    vector_db_uri, self.cache_base / "vector_db"
-                )
+                db_dir = self.router.download_from_uri(vector_db_uri, self.cache_base / "vector_db")
                 logger.info("Vector DB загружена из storage: %s", db_dir)
 
         # --- BM25 ---
         if "bm25_uri" in manifest:
-            bm25_dir = self.router.download_from_uri(
-                manifest["bm25_uri"], self.cache_base / "bm25"
-            )
+            bm25_dir = self.router.download_from_uri(manifest["bm25_uri"], self.cache_base / "bm25")
             bm25_index_path = str(bm25_dir / "bm25_index.pkl")
             OmegaConf.update(cfg, "inference.bm25.index_path", bm25_index_path, force_add=True)
             logger.info("BM25 загружен. Путь пропатчен: %s", bm25_index_path)

@@ -8,16 +8,15 @@ import logging
 import os
 import re
 import time
-from pathlib import Path
 from string import Template
 from typing import Any
-import torch
-from openai import OpenAI
-from transformers import pipeline as hf_pipeline
 
-from src.tools.evaluation.judges.base import BaseJudge
+from openai import OpenAI
+
 from src.tools.benchmark.generator import BaseQAGenerator
+from src.tools.evaluation.judges.base import BaseJudge
 from src.tools.evaluation.schema import EvalInput, EvalResult
+
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +51,9 @@ _REASONING_INSTR = "- `reasoning`: one sentence explaining your decision."
 _REFERENCE_BLOCK = "### Reference Answer\n$reference\n"
 
 
-def _parse_llm_json(raw: str, min_score: float, max_score: float) -> tuple[float | None, bool | None, str | None]:
+def _parse_llm_json(
+    raw: str, min_score: float, max_score: float
+) -> tuple[float | None, bool | None, str | None]:
     """Парсит JSON-ответ от judge. Устойчив к markdown-обёрткам."""
     cleaned = re.sub(r"```(?:json)?|```", "", raw).strip()
     try:
@@ -200,29 +201,26 @@ class LLMJudge(BaseJudge):
 
 
 _SYSTEM_PROMPT = (
-    "You are a helpful assistant that generates question-answer pairs "
-    "from provided text passages."
+    "You are a helpful assistant that generates question-answer pairs from provided text passages."
 )
- 
+
 _USER_TMPL = (
     "Generate one question and a concise answer based solely on the passage below.\n"
-    "Respond ONLY in JSON: {{\"question\": \"...\", \"answer\": \"...\"}}\n\n"
+    'Respond ONLY in JSON: {{"question": "...", "answer": "..."}}\n\n'
     "Passage:\n{chunk_text}"
 )
- 
- 
+
+
 class LocalQAGenerator(BaseQAGenerator):
     """Генератор QA-пар через локальную HF-модель (decoder/instruction-tuned).
- 
     Принимает готовый HF text-generation pipeline снаружи — модель загружается
     через HFModelBuilder в вызывающем коде. Содержит только логику генерации
     и парсинга ответа.
- 
     Пример инициализации в build_benchmark.py:
         hf_pipe = _build_decoder_pipeline(cfg, router, cache_base)
         generator = LocalQAGenerator(pipeline=hf_pipe)
     """
- 
+
     def __init__(
         self,
         pipeline: Any,  # HF text-generation pipeline, готовый снаружи
@@ -239,13 +237,13 @@ class LocalQAGenerator(BaseQAGenerator):
         self.system_prompt = system_prompt
         self.user_template = user_template
         logger.info("LocalQAGenerator: готов.")
- 
+
     def _build_messages(self, chunk_text: str) -> list[dict[str, str]]:
         return [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": self.user_template.format(chunk_text=chunk_text)},
         ]
- 
+
     @staticmethod
     def _parse(raw: str) -> tuple[str, str] | None:
         cleaned = re.sub(r"```(?:json)?|```", "", raw).strip()
@@ -258,7 +256,7 @@ class LocalQAGenerator(BaseQAGenerator):
         except json.JSONDecodeError:
             logger.warning("LocalQAGenerator: не удалось распарсить JSON: %r", raw[:200])
         return None
- 
+
     def generate(self, chunk_text: str) -> tuple[str, str] | None:
         messages = self._build_messages(chunk_text)
         try:

@@ -84,7 +84,7 @@ class MetadataInjectorTransform(BaseDatasetTransform):
 
         def _inject(batch: dict[str, list[Any]]) -> dict[str, list[Any]]:
             new_texts = []
-            for text, meta in zip(batch[self.text_column], batch[self.metadata_column]):
+            for text, meta in zip(batch[self.text_column], batch[self.metadata_column], strict=True):
                 if not meta:
                     new_texts.append(text)
                     continue

@@ -42,7 +42,7 @@ class HFHubStorage(BaseStorage):
     def download(self, remote_path: str, local_dir: Path | str) -> Path:
         target_path = Path(local_dir)
         remote_path = remote_path.strip("/")
-        
+
         # --- ДОБАВЛЕННЫЙ БЛОК ---
         try:
             files = self.api.list_repo_files(repo_id=self.repo_id, repo_type=self.repo_type)
@@ -51,7 +51,9 @@ class HFHubStorage(BaseStorage):
                     target_path = target_path / Path(remote_path).name
                 return self.download_file(remote_path, target_path)
         except Exception as e:
-            logger.warning("Не удалось проверить файлы в HF Hub, продолжаем скачивание как директории: %s", e)
+            logger.warning(
+                "Не удалось проверить файлы в HF Hub, продолжаем скачивание как директории: %s", e
+            )
         # ------------------------
 
         tmp_path = target_path.with_name(target_path.name + ".tmp")

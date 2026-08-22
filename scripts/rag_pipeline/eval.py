@@ -12,17 +12,22 @@
 """
 
 import logging
+
 from dotenv import load_dotenv
+
+
 load_dotenv()
 
-import hydra
-from omegaconf import DictConfig, OmegaConf
-from src.endpoints.eval import EvalContext, run_universal_eval
-from src.evaluation.evaluators.retriever import RetrieverEvaluator
-from src.pipelines.rag.inference.builder import build_inference_encoder
-from src.utils.cli import enforce_pipeline
-from src.utils.hydra_utils import setup_config
-from src.utils.logger import setup_logging
+import hydra  # noqa
+from omegaconf import DictConfig, OmegaConf  # noqa
+
+from src.endpoints.eval import EvalContext, run_universal_eval  # noqa
+from src.evaluation.evaluators.retriever import RetrieverEvaluator  # noqa
+from src.pipelines.rag.inference.builder import build_inference_encoder  # noqa
+from src.utils.cli import enforce_pipeline  # noqa
+from src.utils.hydra_utils import setup_config  # noqa
+from src.utils.logger import setup_logging  # noqa
+
 
 setup_logging()
 logger = logging.getLogger(__name__)

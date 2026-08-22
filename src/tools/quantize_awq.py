@@ -24,15 +24,17 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
 import hydra
 import torch
 from dotenv import load_dotenv
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from src.tools.benchmark.loader import BenchmarkLoader
 from src.tools.storage.resolver import ArtifactResolver
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
+
 
 load_dotenv()
 setup_logging()
@@ -97,7 +99,8 @@ def _load_calibration_data(
     sampled = texts[:n_samples]
     logger.info(
         "Калибровочные данные: %d сэмплов из бенчмарка (колонка '%s').",
-        len(sampled), text_col,
+        len(sampled),
+        text_col,
     )
     return sampled
 
@@ -109,18 +112,14 @@ def quantize_and_export(cfg: DictConfig) -> None:
 
     if not torch.cuda.is_available():
         logger.critical(
-            "CUDA недоступна. AWQ калибровка требует GPU. "
-            "Запусти скрипт на машине с CUDA."
+            "CUDA недоступна. AWQ калибровка требует GPU. Запусти скрипт на машине с CUDA."
         )
         sys.exit(1)
 
     try:
         from awq import AutoAWQForCausalLM
     except ImportError:
-        logger.critical(
-            "Пакет autoawq не установлен. "
-            "Установи: pip install autoawq"
-        )
+        logger.critical("Пакет autoawq не установлен. Установи: pip install autoawq")
         sys.exit(1)
 
     storage_client = hydra.utils.instantiate(cfg.system.storage)
@@ -156,14 +155,16 @@ def quantize_and_export(cfg: DictConfig) -> None:
 
     logger.info(
         "AWQ квантизация: модель='%s', w_bit=%d, group_size=%d, version=%s",
-        mlflow_model_name, w_bit, q_group_size, version,
+        mlflow_model_name,
+        w_bit,
+        q_group_size,
+        version,
     )
 
     # ── 1. Проверка: уже квантизовано? ───────────────────────────────────
     if storage_client.exists(remote_awq_dir):
         logger.info(
-            "AWQ модель уже существует в '%s'. "
-            "Квантизация пропущена. Обновляем только манифест.",
+            "AWQ модель уже существует в '%s'. Квантизация пропущена. Обновляем только манифест.",
             remote_awq_dir,
         )
     else:
@@ -175,7 +176,8 @@ def quantize_and_export(cfg: DictConfig) -> None:
 
         try:
             _, lora_path, _ = resolver.resolve_and_patch(
-                cfg, manifest_uri,
+                cfg,
+                manifest_uri,
                 pipeline_name=cfg.pipeline_name,
                 is_training=False,
             )
@@ -226,8 +228,7 @@ def quantize_and_export(cfg: DictConfig) -> None:
 
         # ── 6. Локальное сохранение ───────────────────────────────────────
         local_awq_path = (
-            Path(cfg.system.paths.model_dir)
-            / f"awq_{mlflow_model_name}_w{w_bit}g{q_group_size}"
+            Path(cfg.system.paths.model_dir) / f"awq_{mlflow_model_name}_w{w_bit}g{q_group_size}"
         )
         local_awq_path.mkdir(parents=True, exist_ok=True)
         logger.info("Сохранение AWQ модели локально: %s", local_awq_path)
@@ -261,19 +262,21 @@ def quantize_and_export(cfg: DictConfig) -> None:
         if pipeline_name not in manifest:
             manifest[pipeline_name] = {}
 
-        manifest[pipeline_name].update({
-            "load_type": "full_model",
-            "model_uri": f"{uri_prefix}{remote_awq_dir}",
-            # Сохраняем метаданные квантизации — полезно для аудита
-            "quantization": {
-                "method": "awq",
-                "w_bit": w_bit,
-                "q_group_size": q_group_size,
-                "version": version,
-                "n_calib_samples": n_calib_samples,
-            },
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+        manifest[pipeline_name].update(
+            {
+                "load_type": "full_model",
+                "model_uri": f"{uri_prefix}{remote_awq_dir}",
+                # Сохраняем метаданные квантизации — полезно для аудита
+                "quantization": {
+                    "method": "awq",
+                    "w_bit": w_bit,
+                    "q_group_size": q_group_size,
+                    "version": version,
+                    "n_calib_samples": n_calib_samples,
+                },
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
         # lora_uri больше не актуален после квантизации монолита
         manifest[pipeline_name].pop("lora_uri", None)
@@ -286,8 +289,7 @@ def quantize_and_export(cfg: DictConfig) -> None:
         storage_client.upload_file(local_path=manifest_file, remote_path="manifest.json")
 
     logger.info(
-        "Манифест обновлён для '%s'. "
-        "Для инференса используй quantization: awq в конфиге.",
+        "Манифест обновлён для '%s'. Для инференса используй quantization: awq в конфиге.",
         pipeline_name,
     )
 

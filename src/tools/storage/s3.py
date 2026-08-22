@@ -10,6 +10,7 @@ from botocore.exceptions import ClientError
 
 from src.tools.storage.base import BaseStorage
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -142,7 +143,7 @@ class S3Storage(BaseStorage):
                     s3_key = obj["Key"]
                     if s3_key.endswith("/"):
                         continue
-                    rel_path = s3_key[len(remote_path):].lstrip("/")
+                    rel_path = s3_key[len(remote_path) :].lstrip("/")
                     local_file = tmp_path / rel_path
                     files_to_download.append((s3_key, local_file))
 
@@ -174,7 +175,7 @@ class S3Storage(BaseStorage):
             logger.info("Директория атомарно скачана из S3 в: %s", target_path)
             return target_path
 
-        except Exception as e:
+        except Exception:
             if tmp_path.exists():
                 shutil.rmtree(tmp_path)
             logger.error("Критический сбой скачивания из S3. Временные файлы очищены.")
@@ -220,7 +221,8 @@ class S3Storage(BaseStorage):
                 # 403, 500 и т.п. — реальная ошибка, не отсутствие объекта
                 logger.error(
                     "Ошибка при проверке существования '%s' в S3: %s",
-                    remote_path, e,
+                    remote_path,
+                    e,
                 )
                 return False
 
@@ -235,6 +237,7 @@ class S3Storage(BaseStorage):
         except ClientError as e:
             logger.error(
                 "Ошибка при проверке префикса '%s' в S3: %s",
-                remote_path, e,
+                remote_path,
+                e,
             )
             return False

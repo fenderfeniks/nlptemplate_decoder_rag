@@ -74,7 +74,7 @@ class RAGValidationTransform(BaseValidationTransform):
         texts = batch.get(self.text_column, [])
         meta_col: list = batch.get("metadata", [{}] * len(texts))
 
-        for text, meta in zip(texts, meta_col):
+        for text, meta in zip(texts, meta_col, strict=True):
             try:
                 record = RAGIndexingRecord(text=text, metadata=meta or {})
                 valid_texts.append(record.text)
@@ -101,7 +101,7 @@ class RAGValidationTransform(BaseValidationTransform):
         else:
             negatives = [None] * len(queries)
 
-        for q, p, n in zip(queries, positives, negatives):
+        for q, p, n in zip(queries, positives, negatives, strict=True):
             try:
                 record = RAGTrainingRecord(query=q, positive_doc=p, negative_doc=n)
                 valid_queries.append(record.query)

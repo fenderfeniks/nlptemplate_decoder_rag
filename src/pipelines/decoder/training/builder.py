@@ -1,6 +1,5 @@
 # src/pipelines/decoder/training/builder.py
 import logging
-from typing import Any
 
 import hydra
 import torch
@@ -29,9 +28,7 @@ def build_decoder_module(
     tokenizer = hydra.utils.instantiate(cfg.model.tokenizer).build()
 
     # Загрузка адаптера через логгер — не через прямой импорт утилиты
-    lora_resume_path = experiment_logger.load_adapter(
-        cfg.model.get("lora_resume", {})
-    )
+    lora_resume_path = experiment_logger.load_adapter(cfg.model.get("lora_resume", {}))
 
     logger.info("Сборка модели...")
     builder = hydra.utils.instantiate(cfg.model.builder)

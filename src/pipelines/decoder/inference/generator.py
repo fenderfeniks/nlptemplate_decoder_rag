@@ -133,7 +133,7 @@ class HFTextGenerator:
 
         return [
             self.cleaner.clean(raw_text=raw, prompt=prompt)
-            for prompt, raw in zip(texts, decoded)  # noqa
+            for prompt, raw in zip(texts, decoded, strict=True)
         ]
 
     def generate_stream(self, text: str, **kwargs: Any) -> Iterator[str]:

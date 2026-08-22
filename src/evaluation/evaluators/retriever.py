@@ -113,8 +113,7 @@ class RetrieverEvaluator:
         ndcg_key = f"ndcg_{self.rerank_top_k}"
         if min_ndcg and metrics.get(ndcg_key, 1.0) < min_ndcg:
             msg = (
-                f"ДРИФТ (Качество): {ndcg_key}={metrics[ndcg_key]:.4f} "
-                f"упал ниже порога {min_ndcg}."
+                f"ДРИФТ (Качество): {ndcg_key}={metrics[ndcg_key]:.4f} упал ниже порога {min_ndcg}."
             )
             logger.error(msg)
             messages.append(msg)
@@ -164,8 +163,12 @@ class RetrieverEvaluator:
             return {}
 
         n = len(queries)
-        logger.info("Запуск поиска по %d запросам (retrieval_top_k=%d, rerank_top_k=%d)...",
-                    n, self.retrieval_top_k, self.rerank_top_k)
+        logger.info(
+            "Запуск поиска по %d запросам (retrieval_top_k=%d, rerank_top_k=%d)...",
+            n,
+            self.retrieval_top_k,
+            self.rerank_top_k,
+        )
 
         # ── 1. Batch search + замер total latency ──
         t_total_start = time.perf_counter()
@@ -186,9 +189,7 @@ class RetrieverEvaluator:
         }
         for component in ("encode", "search", "rerank"):
             if component in timing:
-                latency_metrics[f"{component}_latency_ms_per_query"] = (
-                    timing[component] / n * 1000
-                )
+                latency_metrics[f"{component}_latency_ms_per_query"] = timing[component] / n * 1000
 
         # ── 3. IR-метрики (bi-encoder + cross-encoder) ──
         metrics = self.metrics_calculator.compute(search_results, ground_truths)
@@ -196,12 +197,10 @@ class RetrieverEvaluator:
         # ── 4. Cost-метрики (context tokens по финальному срезу) ──
         total_tokens = 0
         for res_list in search_results:
-            for res in res_list[:self.rerank_top_k]:
+            for res in res_list[: self.rerank_top_k]:
                 text = res.get("metadata", {}).get("text", "")
                 if text:
-                    total_tokens += len(
-                        self.tokenizer.encode(text, add_special_tokens=False)
-                    )
+                    total_tokens += len(self.tokenizer.encode(text, add_special_tokens=False))
         metrics["avg_context_tokens"] = total_tokens / n
 
         # Объединяем все метрики

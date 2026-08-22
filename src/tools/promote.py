@@ -4,14 +4,18 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
 from dotenv import load_dotenv
+
+
 load_dotenv()
 
-import hydra
-from omegaconf import DictConfig, OmegaConf
+import hydra  # noqa
+from omegaconf import DictConfig, OmegaConf  # noqa
 
-from src.utils.hydra_utils import setup_config
-from src.utils.logger import setup_logging
+from src.utils.hydra_utils import setup_config  # noqa
+from src.utils.logger import setup_logging  # noqa
+
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -38,7 +42,7 @@ def main(cfg: DictConfig) -> None:
             reg_model_name=reg_model_name,
             staging_alias="Staging",
             production_alias="Production",
-            metric_tag="val_loss"
+            metric_tag="val_loss",
         )
     except Exception as e:
         logger.error("Ошибка при продвижении модели: %s", e)
@@ -67,11 +71,10 @@ def main(cfg: DictConfig) -> None:
         # Манифест фиксирует откуда реально грузилась базовая модель при обучении
         current = manifest.get(pipeline_name, {})
         base_model_uri = (
-            current.get("base_model_uri")       # уже была lora — берём оттуда
-            or current.get("model_uri")          # был full_model — это и есть база
-            or cfg.model.architecture.get(       # крайний fallback — конфиг
-                "base_model_uri",
-                f"hf://{cfg.model.architecture.model_name_or_path}"
+            current.get("base_model_uri")  # уже была lora — берём оттуда
+            or current.get("model_uri")  # был full_model — это и есть база
+            or cfg.model.architecture.get(  # крайний fallback — конфиг
+                "base_model_uri", f"hf://{cfg.model.architecture.model_name_or_path}"
             )
         )
         logger.info("base_model_uri для манифеста: %s", base_model_uri)
@@ -99,12 +102,14 @@ def main(cfg: DictConfig) -> None:
         if pipeline_name not in manifest:
             manifest[pipeline_name] = {}
 
-        manifest[pipeline_name].update({
-            "load_type": "lora",
-            "base_model_uri": base_model_uri,
-            "lora_uri": f"{uri_prefix}adapters/{mlflow_model_name}_prod",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+        manifest[pipeline_name].update(
+            {
+                "load_type": "lora",
+                "base_model_uri": base_model_uri,
+                "lora_uri": f"{uri_prefix}adapters/{mlflow_model_name}_prod",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
         # Удаляем ключи от монолитной сборки если были
         manifest[pipeline_name].pop("model_uri", None)

@@ -16,6 +16,7 @@ from hydra.utils import instantiate
 from src.evaluation.metrics.generator import GeneratorMetricsPipeline
 from src.utils.logging.protocol import ExperimentLogger
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,11 +76,13 @@ class DecoderEvaluator:
 
         from src.pipelines.decoder.inference.generator import HFTextGenerator
 
-        actual_model = model if model is not None else (
-            pl_module.model if pl_module is not None else None
+        actual_model = (
+            model if model is not None else (pl_module.model if pl_module is not None else None)
         )
-        actual_tokenizer = tokenizer if tokenizer is not None else (
-            trainer.datamodule.tokenizer if trainer is not None else None
+        actual_tokenizer = (
+            tokenizer
+            if tokenizer is not None
+            else (trainer.datamodule.tokenizer if trainer is not None else None)
         )
 
         if actual_model is None or actual_tokenizer is None:
@@ -125,9 +128,7 @@ class DecoderEvaluator:
     # Генерация с замером латентности
     # ------------------------------------------------------------------
 
-    def _generate_chunks_with_stats(
-        self, prompts: list[str]
-    ) -> tuple[list[str], list[dict]]:
+    def _generate_chunks_with_stats(self, prompts: list[str]) -> tuple[list[str], list[dict]]:
         """Генерация с замером per-sample латентности и токенов.
 
         Returns:
@@ -151,7 +152,7 @@ class DecoderEvaluator:
             return max(1, len(text.split()))
 
         for i in range(0, len(prompts), self.generation_batch_size):
-            chunk = prompts[i: i + self.generation_batch_size]
+            chunk = prompts[i : i + self.generation_batch_size]
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
@@ -161,12 +162,14 @@ class DecoderEvaluator:
 
             per_sample_latency = elapsed / len(chunk)
 
-            for prompt_text, gen_text in zip(chunk, chunk_generated):
-                stats.append({
-                    "latency_s": per_sample_latency,
-                    "prompt_tokens": _count_tokens(prompt_text),
-                    "generated_tokens": _count_tokens(gen_text),
-                })
+            for prompt_text, gen_text in zip(chunk, chunk_generated, strict=True):
+                stats.append(
+                    {
+                        "latency_s": per_sample_latency,
+                        "prompt_tokens": _count_tokens(prompt_text),
+                        "generated_tokens": _count_tokens(gen_text),
+                    }
+                )
 
             generated.extend(chunk_generated)
 
@@ -250,12 +253,14 @@ class DecoderEvaluator:
             step=global_step,
         )
         metrics_logger.log_table(
-            df=pd.DataFrame({
-                "Type": sample_types,
-                "Prompt": prompts,
-                "Target": targets,
-                "Generated": generated,
-            }),
+            df=pd.DataFrame(
+                {
+                    "Type": sample_types,
+                    "Prompt": prompts,
+                    "Target": targets,
+                    "Generated": generated,
+                }
+            ),
             stage=stage,
             step=global_step,
         )

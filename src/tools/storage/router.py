@@ -3,7 +3,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
+
 logger = logging.getLogger(__name__)
+
 
 class StorageRouter:
     """Маршрутизатор для скачивания артефактов по URI."""
@@ -14,13 +16,14 @@ class StorageRouter:
     def _normalize_uri(self, uri: str) -> str:
         """Гарантирует что схема URI имеет двойной слеш: local:/ -> local://"""
         import re
+
         return re.sub(r"^([a-z][a-z0-9+\-.]*):(?!//)", r"\1://", uri)
 
     def _get_client_and_path(self, uri: str) -> tuple[Any, str]:
         uri = self._normalize_uri(uri)
         for prefix, client in self.routes.items():
             if uri.startswith(prefix):
-                remote_path = uri[len(prefix):].lstrip("/")
+                remote_path = uri[len(prefix) :].lstrip("/")
                 return client, remote_path
         raise ValueError(
             f"Неизвестная схема URI: '{uri}'. Поддерживаемые: {list(self.routes.keys())}"
@@ -31,7 +34,8 @@ class StorageRouter:
         client, remote_path = self._get_client_and_path(uri)
         logger.info(
             "StorageRouter: скачивание '%s' через %s",
-            uri, client.__class__.__name__,
+            uri,
+            client.__class__.__name__,
         )
         return client.download(remote_path=remote_path, local_dir=cache_dir)
 
@@ -40,7 +44,8 @@ class StorageRouter:
         client, remote_path = self._get_client_and_path(uri)
         logger.info(
             "StorageRouter: скачивание файла '%s' через %s",
-            uri, client.__class__.__name__,
+            uri,
+            client.__class__.__name__,
         )
         return client.download_file(remote_path=remote_path, local_path=local_path)
 
@@ -57,7 +62,9 @@ class StorageRouter:
         client, remote_path = self._get_client_and_path(uri)
         logger.info(
             "StorageRouter: загрузка файла '%s' → '%s' через %s",
-            local_path, uri, client.__class__.__name__,
+            local_path,
+            uri,
+            client.__class__.__name__,
         )
         client.upload_file(local_path=local_path, remote_path=remote_path)
 
@@ -74,7 +81,9 @@ class StorageRouter:
         client, remote_path = self._get_client_and_path(uri)
         logger.info(
             "StorageRouter: загрузка директории '%s' → '%s' через %s",
-            local_dir, uri, client.__class__.__name__,
+            local_dir,
+            uri,
+            client.__class__.__name__,
         )
         client.upload(local_dir=local_dir, remote_path=remote_path)
 
@@ -83,14 +92,16 @@ class StorageRouter:
         logger.info("StorageRouter: поиск манифеста '%s'", manifest_uri)
         cache_dir = Path(cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         manifest_filename = manifest_uri.split("/")[-1]
         local_path = cache_dir / manifest_filename
 
         downloaded_file = self.download_file_from_uri(manifest_uri, local_path)
 
         if not downloaded_file.exists():
-            raise FileNotFoundError(f"Файл '{manifest_filename}' не найден по пути {downloaded_file}")
+            raise FileNotFoundError(
+                f"Файл '{manifest_filename}' не найден по пути {downloaded_file}"
+            )
 
         with open(downloaded_file, encoding="utf-8") as f:
             manifest_data = json.load(f)

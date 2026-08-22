@@ -9,15 +9,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Generator, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import pandas as pd
 
 
 @runtime_checkable
 class ExperimentLogger(Protocol):
-
     def log_metrics(
         self,
         metrics: dict[str, float],

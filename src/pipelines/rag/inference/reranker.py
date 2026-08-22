@@ -5,12 +5,12 @@ from typing import Any
 import torch
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
+
 logger = logging.getLogger(__name__)
 
 
 class CrossEncoderReranker:
     """Реранкер на базе архитектуры Cross-Encoder.
-    
     Принимает уже инстанцированные через HFModelBuilder модель и токенизатор.
     """
 
@@ -23,10 +23,10 @@ class CrossEncoderReranker:
         self.model = model
         self.tokenizer = tokenizer
         self.max_length = max_length
-        
+
         # Получаем устройство напрямую из параметров загруженной модели
         self.device = next(self.model.parameters()).device
-        
+
         # Принудительно переводим в eval, чтобы отключить dropout и т.д.
         self.model.eval()
 
@@ -55,7 +55,7 @@ class CrossEncoderReranker:
         scores = self.model(**inputs).logits.squeeze(-1)
         scores_np = scores.float().cpu().numpy()
 
-        for doc, new_score in zip(documents, scores_np):
+        for doc, new_score in zip(documents, scores_np, strict=True):
             doc["cross_encoder_score"] = float(new_score)
 
         documents.sort(key=lambda x: x["cross_encoder_score"], reverse=True)

@@ -134,7 +134,7 @@ class RAGTokenizationTransform(BaseDatasetTransform):
 
             neg_input_ids = []
             neg_attention_mask = []
-            for v, ids, mask in zip(neg_values, n_enc["input_ids"], n_enc["attention_mask"]):
+            for v, ids, mask in zip(neg_values, n_enc["input_ids"], n_enc["attention_mask"], strict=True):
                 if v is None:
                     # Запись без негатива — передаём None, коллатор должен их обработать
                     neg_input_ids.append(None)

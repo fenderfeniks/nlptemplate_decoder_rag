@@ -66,7 +66,7 @@ class DecoderValidationTransform(BaseValidationTransform):
             and self.context_column in batch
         )
 
-        for i, (p, t) in enumerate(zip(prompts, targets)):
+        for i, (p, t) in enumerate(zip(prompts, targets, strict=True)):
             ctx = batch[self.context_column][i] if has_context else None
 
             # Нормализуем пустую строку контекста → None, чтобы схема

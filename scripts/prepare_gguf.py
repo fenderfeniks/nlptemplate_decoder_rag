@@ -38,6 +38,7 @@ from dotenv import load_dotenv
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
+
 load_dotenv()
 
 # ---------------------------------------------------------------------------
@@ -142,13 +143,14 @@ def _find_quantize_binary(llamacpp_dir: Path) -> Path:
         if p.exists():
             return p
     import shutil as _shutil
+
     found = _shutil.which("llama-quantize")
     if found:
         return Path(found)
     logger.error(
-        "Не найден бинарник квантизации в %s.\n"
-        "Пересоберите llama.cpp: cd %s && make -j",
-        llamacpp_dir, llamacpp_dir,
+        "Не найден бинарник квантизации в %s.\nПересоберите llama.cpp: cd %s && make -j",
+        llamacpp_dir,
+        llamacpp_dir,
     )
     sys.exit(1)
 
@@ -158,10 +160,13 @@ def _convert_to_gguf_f16(llamacpp_dir: Path, hf_model_dir: Path, output_path: Pa
     script = _find_convert_script(llamacpp_dir)
 
     cmd = [
-        sys.executable, str(script),
+        sys.executable,
+        str(script),
         str(hf_model_dir),
-        "--outfile", str(output_path),
-        "--outtype", "f16",
+        "--outfile",
+        str(output_path),
+        "--outtype",
+        "f16",
     ]
 
     # Если нет tokenizer.model — принудительно используем BPE (tokenizer.json)
@@ -188,6 +193,7 @@ def _quantize_gguf(
 # LoRA merge helper
 # ---------------------------------------------------------------------------
 
+
 def _merge_lora(
     base_model_path: str | Path,
     lora_path: Path,
@@ -203,9 +209,7 @@ def _merge_lora(
         from peft import PeftModel
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError as e:
-        logger.error(
-            "Для merge LoRA нужны пакеты: pip install peft transformers torch\n%s", e
-        )
+        logger.error("Для merge LoRA нужны пакеты: pip install peft transformers torch\n%s", e)
         sys.exit(1)
 
     logger.info("Загружаем базовую модель: %s", base_model_path)
@@ -235,6 +239,7 @@ def _merge_lora(
 # Манифест helpers
 # ---------------------------------------------------------------------------
 
+
 def _patch_manifest(
     manifest: dict,
     pipeline_name: str,
@@ -242,11 +247,13 @@ def _patch_manifest(
     quant_type: str,
 ) -> dict:
     """Добавляет GGUF-поля в секцию pipeline_name. Существующие поля не трогает."""
-    manifest[pipeline_name].update({
-        "gguf_uri": gguf_uri,
-        "gguf_quant": quant_type,
-        "gguf_updated_at": datetime.now(timezone.utc).isoformat(),
-    })
+    manifest[pipeline_name].update(
+        {
+            "gguf_uri": gguf_uri,
+            "gguf_quant": quant_type,
+            "gguf_updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
     logger.info("Манифест обновлён: gguf_uri=%s, gguf_quant=%s", gguf_uri, quant_type)
     return manifest
 
@@ -254,6 +261,7 @@ def _patch_manifest(
 # ---------------------------------------------------------------------------
 # Hydra config
 # ---------------------------------------------------------------------------
+
 
 def _load_config():
     config_dir = os.getenv("HYDRA_CONFIG_DIR", _DEFAULT_CONFIG_DIR)
@@ -274,6 +282,7 @@ def _load_config():
 # Основной сценарий
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     logger.info("=== prepare_gguf.py: старт ===")
     logger.info("Квантизация: %s", QUANT_TYPE)
@@ -289,14 +298,11 @@ def main() -> None:
     )
     if not manifest_uri:
         logger.error(
-            "manifest_uri не задан ни в конфиге (system.manifest.uri) "
-            "ни в env MANIFEST_URI."
+            "manifest_uri не задан ни в конфиге (system.manifest.uri) ни в env MANIFEST_URI."
         )
         sys.exit(1)
 
-    cache_base = Path(
-        OmegaConf.select(cfg, "system.paths.model_dir", default="/tmp/nlp_cache")
-    )
+    cache_base = Path(OmegaConf.select(cfg, "system.paths.model_dir", default="/tmp/nlp_cache"))
     router = hydra.utils.instantiate(cfg.system.storage_router)
 
     # --- Читаем манифест ---
@@ -306,7 +312,8 @@ def main() -> None:
     if _PIPELINE_NAME not in full_manifest:
         logger.error(
             "Секция '%s' не найдена в манифесте. Доступные: %s",
-            _PIPELINE_NAME, list(full_manifest.keys()),
+            _PIPELINE_NAME,
+            list(full_manifest.keys()),
         )
         sys.exit(1)
 
@@ -335,7 +342,7 @@ def main() -> None:
                 sys.exit(1)
 
             if base_model_uri.startswith("hf://"):
-                base_model_path: str | Path = base_model_uri[len("hf://"):]
+                base_model_path: str | Path = base_model_uri[len("hf://") :]
                 logger.info("Базовая модель: HuggingFace Hub (%s)", base_model_path)
             else:
                 base_name = base_model_uri.rstrip("/").split("/")[-1]
@@ -360,7 +367,7 @@ def main() -> None:
                 sys.exit(1)
 
             if model_uri.startswith("hf://"):
-                hf_id = model_uri[len("hf://"):]
+                hf_id = model_uri[len("hf://") :]
                 logger.info("Модель: HuggingFace Hub (%s)", hf_id)
                 try:
                     from huggingface_hub import snapshot_download
@@ -368,23 +375,21 @@ def main() -> None:
                     logger.error("pip install huggingface_hub")
                     sys.exit(1)
                 local_hf = cache_base / f"hf_{model_name}"
-                hf_model_dir = Path(snapshot_download(
-                    repo_id=hf_id,
-                    local_dir=str(local_hf),
-                    ignore_patterns=["*.msgpack", "flax_model*", "tf_model*"],
-                ))
+                hf_model_dir = Path(
+                    snapshot_download(
+                        repo_id=hf_id,
+                        local_dir=str(local_hf),
+                        ignore_patterns=["*.msgpack", "flax_model*", "tf_model*"],
+                    )
+                )
                 logger.info("Скачано с HF Hub → %s", hf_model_dir)
             else:
                 dl_name = model_uri.rstrip("/").split("/")[-1]
-                hf_model_dir = router.download_from_uri(
-                    model_uri, cache_base / f"model_{dl_name}"
-                )
+                hf_model_dir = router.download_from_uri(model_uri, cache_base / f"model_{dl_name}")
                 logger.info("Модель скачана из storage: %s", hf_model_dir)
 
         else:
-            logger.error(
-                "Неизвестный load_type='%s'. Поддерживаются: lora, full_model.", load_type
-            )
+            logger.error("Неизвестный load_type='%s'. Поддерживаются: lora, full_model.", load_type)
             sys.exit(1)
 
         # --- HF → GGUF float16 ---
@@ -461,7 +466,7 @@ def main() -> None:
         "    --ctx-size 4096 \\\n"
         "    --n-gpu-layers 35\n\n"
         "Локальный путь к GGUF в storage можно найти через:\n"
-        "  python -c \"from src.tools.storage.router import StorageRouter; ...\"\n"
+        '  python -c "from src.tools.storage.router import StorageRouter; ..."\n'
         "или прочитать из конфига system.paths.storage_root",
         gguf_storage_uri,
         QUANT_TYPE,

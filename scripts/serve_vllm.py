@@ -46,7 +46,6 @@ from dotenv import load_dotenv
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
-from src.tools.storage.resolver import ArtifactResolver
 
 load_dotenv()
 
@@ -69,6 +68,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _load_config():
     config_dir = os.getenv("HYDRA_CONFIG_DIR", _DEFAULT_CONFIG_DIR)
     try:
@@ -86,7 +86,7 @@ def _resolve_local_uri(uri: str, storage_root: Path) -> Path:
     if not uri.startswith("local://"):
         logger.error("Поддерживается только local:// URI, получен: %s", uri)
         sys.exit(1)
-    relative = uri[len("local://"):]
+    relative = uri[len("local://") :]
     return storage_root / relative
 
 
@@ -106,11 +106,10 @@ def _resolve_model(
     load_type = manifest.get("load_type")
     model_name = manifest.get("mlflow_model_name", pipeline_name)
 
-    cache_base = Path(
-        OmegaConf.select(cfg, "system.paths.model_dir", default="/tmp/nlp_cache")
-    ) / f"{pipeline_name}_cache"
-
-    resolver = ArtifactResolver(router=router, cache_base_dir=cache_base)
+    cache_base = (
+        Path(OmegaConf.select(cfg, "system.paths.model_dir", default="/tmp/nlp_cache"))
+        / f"{pipeline_name}_cache"
+    )
 
     if load_type == "full_model":
         logger.info("load_type=full_model — резолвим монолитную модель.")
@@ -144,7 +143,7 @@ def _resolve_model(
         # Базовая модель: hf://, local://, s3://
         if base_model_uri.startswith("hf://"):
             # HuggingFace — передаём идентификатор напрямую в vLLM
-            base_model_path = Path(base_model_uri[len("hf://"):])
+            base_model_path = Path(base_model_uri[len("hf://") :])
             logger.info("Базовая модель из HuggingFace Hub: %s", base_model_path)
         else:
             base_model_name = base_model_uri.rstrip("/").split("/")[-1]
@@ -191,7 +190,9 @@ def _resolve_quantization(manifest: dict) -> str | None:
             q_group_size = quant_info.get("q_group_size", "?")
             logger.info(
                 "Квантизация из манифеста: method=%s, w_bit=%s, q_group_size=%s",
-                method, w_bit, q_group_size,
+                method,
+                w_bit,
+                q_group_size,
             )
             return method
 
@@ -202,6 +203,7 @@ def _resolve_quantization(manifest: dict) -> str | None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     logger.info("=== serve_vllm.py: старт ===")
@@ -214,17 +216,12 @@ def main() -> None:
     )
     if not manifest_uri:
         logger.error(
-            "manifest_uri не задан ни в конфиге (system.manifest.uri) "
-            "ни в env MANIFEST_URI."
+            "manifest_uri не задан ни в конфиге (system.manifest.uri) ни в env MANIFEST_URI."
         )
         sys.exit(1)
 
-    storage_root = Path(
-        OmegaConf.select(cfg, "system.paths.storage_root", default="prod_storage")
-    )
-    cache_base = Path(
-        OmegaConf.select(cfg, "system.paths.model_dir", default="/tmp/nlp_cache")
-    )
+    storage_root = Path(OmegaConf.select(cfg, "system.paths.storage_root", default="prod_storage"))
+    cache_base = Path(OmegaConf.select(cfg, "system.paths.model_dir", default="/tmp/nlp_cache"))
 
     router = hydra.utils.instantiate(cfg.system.storage_router)
 
@@ -235,14 +232,16 @@ def main() -> None:
     if _PIPELINE_NAME not in full_manifest:
         logger.error(
             "Секция '%s' не найдена в манифесте. Доступные: %s",
-            _PIPELINE_NAME, list(full_manifest.keys()),
+            _PIPELINE_NAME,
+            list(full_manifest.keys()),
         )
         sys.exit(1)
 
     manifest = full_manifest[_PIPELINE_NAME]
     logger.info(
         "Манифест прочитан. load_type=%s, model=%s",
-        manifest.get("load_type"), manifest.get("mlflow_model_name"),
+        manifest.get("load_type"),
+        manifest.get("mlflow_model_name"),
     )
 
     # --- Резолвинг модели ---
@@ -267,15 +266,25 @@ def main() -> None:
 
     # --- Сборка команды ---
     cmd = [
-        sys.executable, "-m", "vllm.entrypoints.openai.api_server",
-        "--model", str(model_path),
-        "--served-model-name", model_name,
-        "--host", host,
-        "--port", str(port),
-        "--max-model-len", str(ctx_size),
-        "--tensor-parallel-size", str(tensor_parallel),
-        "--dtype", dtype,
-        "--gpu-memory-utilization", str(gpu_memory_util),
+        sys.executable,
+        "-m",
+        "vllm.entrypoints.openai.api_server",
+        "--model",
+        str(model_path),
+        "--served-model-name",
+        model_name,
+        "--host",
+        host,
+        "--port",
+        str(port),
+        "--max-model-len",
+        str(ctx_size),
+        "--tensor-parallel-size",
+        str(tensor_parallel),
+        "--dtype",
+        dtype,
+        "--gpu-memory-utilization",
+        str(gpu_memory_util),
     ]
 
     if quantization:
@@ -291,7 +300,8 @@ def main() -> None:
         # name используется в запросах через поле model= в OpenAI API
         cmd += [
             "--enable-lora",
-            "--lora-modules", f"{model_name}={lora_path}",
+            "--lora-modules",
+            f"{model_name}={lora_path}",
         ]
         logger.info("LoRA режим: адаптер будет доступен как модель '%s'", model_name)
 

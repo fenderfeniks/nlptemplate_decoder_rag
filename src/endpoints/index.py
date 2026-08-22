@@ -2,8 +2,9 @@
 
 import gc
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Any
+from typing import Any
 
 import hydra
 import torch
@@ -12,6 +13,7 @@ from omegaconf import DictConfig
 from src.tools.storage.resolver import ArtifactResolver
 from src.utils.logger import setup_logging
 from src.utils.torch_utils import register_safe_globals
+
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -24,9 +26,7 @@ def _free_memory() -> None:
 
 
 def run_universal_index(
-    cfg: DictConfig,
-    pipeline_name: str,
-    run_fn: Callable[[DictConfig, ArtifactResolver, Any], None]
+    cfg: DictConfig, pipeline_name: str, run_fn: Callable[[DictConfig, ArtifactResolver, Any], None]
 ) -> None:
     """Обертка индексации с единой инициализацией и очисткой."""
     logger.info("Старт индексации для пайплайна: %s...", pipeline_name)

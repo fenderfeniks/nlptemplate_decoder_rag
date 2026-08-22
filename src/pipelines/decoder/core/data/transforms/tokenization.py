@@ -64,7 +64,7 @@ class TokenizationTransform(BaseDatasetTransform):
         prompts = examples[self.prompt_column]
         targets = examples[self.target_column]
 
-        full_texts = [p + self.separator + t for p, t in zip(prompts, targets)]
+        full_texts = [p + self.separator + t for p, t in zip(prompts, targets, strict=True)]
         encodings = self.tokenizer(
             full_texts,
             truncation=True,
@@ -105,7 +105,7 @@ class TokenizationTransform(BaseDatasetTransform):
         }
 
         for prompt, target in zip(
-            examples[self.prompt_column], examples[self.target_column]
+            examples[self.prompt_column], examples[self.target_column], strict=True
         ):
             messages_full = [
                 {"role": "user", "content": prompt},

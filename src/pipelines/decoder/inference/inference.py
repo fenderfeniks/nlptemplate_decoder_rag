@@ -8,7 +8,8 @@ import pybreaker
 from openai import AsyncOpenAI
 from opentelemetry import trace
 
-from src.api_gateway.resilience import CircuitBreakerError, llm_breaker
+from src.api_gateway.resilience import llm_breaker
+
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -25,6 +26,7 @@ class StreamChunk:
         completion_tokens: Кол-во токенов ответа — аналогично.
         is_final:          True для последнего чанка (usage chunk от сервера).
     """
+
     text: str
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -72,7 +74,9 @@ class LLMGenerationClient:
 
         logger.info(
             "LLMGenerationClient инициализирован (api_base=%s, model=%s, include_usage=%s)",
-            api_base, model_name, include_usage,
+            api_base,
+            model_name,
+            include_usage,
         )
 
     async def generate(self, prompt: str, **kwargs) -> object:

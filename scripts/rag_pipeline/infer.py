@@ -1,4 +1,5 @@
 import logging
+
 import hydra
 from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
@@ -9,8 +10,10 @@ from src.tools.storage.resolver import ArtifactResolver
 from src.utils.cli import enforce_pipeline
 from src.utils.hydra_utils import setup_config
 
+
 load_dotenv()
 logger = logging.getLogger(__name__)
+
 
 def run_rag_logic(cfg: DictConfig, resolver: ArtifactResolver) -> None:
     """Специфичная логика сборки и инференса RAG."""
@@ -42,7 +45,11 @@ def run_rag_logic(cfg: DictConfig, resolver: ArtifactResolver) -> None:
                 cfg, cfg.system.manifest.uri, pipeline_name="reranker_pipeline", is_training=False
             )
             # Переопределяем auto_model_class для реранкера
-            OmegaConf.update(cfg, "model.builder.auto_model_class", "transformers.AutoModelForSequenceClassification")
+            OmegaConf.update(
+                cfg,
+                "model.builder.auto_model_class",
+                "transformers.AutoModelForSequenceClassification",
+            )
             r_model, _, r_tokenizer = build_inference_encoder(cfg, reranker_lora)
             reranker = hydra.utils.instantiate(
                 cfg.inference.reranker, model=r_model, tokenizer=r_tokenizer
@@ -73,14 +80,18 @@ def run_rag_logic(cfg: DictConfig, resolver: ArtifactResolver) -> None:
         text = res.get("metadata", {}).get("text", "").replace("\n", " ")
 
         if ce_score is not None:
-            logger.info("[%d] dense=%.4f | ce=%.4f | текст: %s...", i, dense_score, ce_score, text[:150])
+            logger.info(
+                "[%d] dense=%.4f | ce=%.4f | текст: %s...", i, dense_score, ce_score, text[:150]
+            )
         else:
             logger.info("[%d] dense=%.4f | текст: %s...", i, dense_score, text[:150])
+
 
 @hydra.main(config_path="../../configs", config_name="eval_rag", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     cfg = setup_config(cfg)
     run_universal_infer(cfg, "rag_pipeline", run_rag_logic)
+
 
 if __name__ == "__main__":
     enforce_pipeline("rag_pipeline")

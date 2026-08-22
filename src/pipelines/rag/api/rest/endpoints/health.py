@@ -1,7 +1,9 @@
 # src/pipelines/rag/api/rest/endpoints/health.py
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
 from src.pipelines.rag.api.metrics import RAG_INDEX_TOTAL_DOCS
+
 
 router = APIRouter(tags=["System"])
 

@@ -12,9 +12,10 @@ from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 from peft import PeftModel
 
+from src.tools.storage.resolver import ArtifactResolver
 from src.utils.hydra_utils import setup_config
 from src.utils.logger import setup_logging
-from src.tools.storage.resolver import ArtifactResolver
+
 
 load_dotenv()
 setup_logging()
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 def merge_and_export(cfg: DictConfig) -> None:
     """Сливает LoRA адаптер с базовой моделью и экспортирует монолит в хранилище."""
     cfg = setup_config(cfg)
-    
+
     # Инициализация абстрактного логгера через Hydra
     experiment_logger = hydra.utils.instantiate(cfg.system.logger.experiment_logger)
 
@@ -48,9 +49,9 @@ def merge_and_export(cfg: DictConfig) -> None:
         logger.info("Текущая Production модель: %s (версия %s)", reg_model_name, prod_version)
     except Exception as e:
         logger.error(
-            "Алиас 'Production' не найден для модели '%s' или произошла ошибка: %s. Слияние отменено.", 
-            reg_model_name, 
-            e
+            "Алиас 'Production' не найден для модели '%s' или произошла ошибка: %s. Слияние отменено.",
+            reg_model_name,
+            e,
         )
         sys.exit(1)
 
@@ -107,7 +108,9 @@ def merge_and_export(cfg: DictConfig) -> None:
             )
 
         # 3.5 Сохранение локально перед выгрузкой
-        output_path = Path(cfg.system.paths.model_dir) / f"merged_{mlflow_model_name}_v{prod_version}"
+        output_path = (
+            Path(cfg.system.paths.model_dir) / f"merged_{mlflow_model_name}_v{prod_version}"
+        )
         output_path.mkdir(parents=True, exist_ok=True)
 
         logger.info("Локальное сохранение монолитной модели в: %s", output_path)
@@ -142,11 +145,13 @@ def merge_and_export(cfg: DictConfig) -> None:
         if pipeline_name not in manifest:
             manifest[pipeline_name] = {}
 
-        manifest[pipeline_name].update({
-            "load_type": "full_model",
-            "model_uri": f"{uri_prefix}merged_models/{mlflow_model_name}_prod_v{prod_version}",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+        manifest[pipeline_name].update(
+            {
+                "load_type": "full_model",
+                "model_uri": f"{uri_prefix}merged_models/{mlflow_model_name}_prod_v{prod_version}",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
         # Удаляем ключи от раздельной сборки если были
         manifest[pipeline_name].pop("base_model_uri", None)

@@ -24,6 +24,7 @@ router = APIRouter(prefix="/api/v1", tags=["Retrieval"])
 
 _DEFAULT_LIMIT = "20/minute"
 
+
 @router.post("/search", response_model=SearchResponse)
 @limiter.limit(_DEFAULT_LIMIT)
 async def search_endpoint(

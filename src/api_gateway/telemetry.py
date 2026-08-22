@@ -23,6 +23,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,11 +42,13 @@ def setup_telemetry(app, service_name: str = "api-gateway") -> None:
     """
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4317")
 
-    resource = Resource.create({
-        "service.name": service_name,
-        "service.version": os.getenv("APP_VERSION", "unknown"),
-        "deployment.environment": os.getenv("APP_ENV", "production"),
-    })
+    resource = Resource.create(
+        {
+            "service.name": service_name,
+            "service.version": os.getenv("APP_VERSION", "unknown"),
+            "deployment.environment": os.getenv("APP_ENV", "production"),
+        }
+    )
 
     provider = TracerProvider(resource=resource)
     exporter = OTLPSpanExporter(endpoint=endpoint, insecure=True)
@@ -62,5 +65,6 @@ def setup_telemetry(app, service_name: str = "api-gateway") -> None:
 
     logger.info(
         "OpenTelemetry инициализирован (service=%s, exporter=%s)",
-        service_name, endpoint,
+        service_name,
+        endpoint,
     )

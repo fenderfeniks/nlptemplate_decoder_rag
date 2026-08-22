@@ -1,12 +1,13 @@
 # src/pipelines/decoder/training/callbacks.py
+import contextlib
 import logging
 from typing import Any
-import contextlib
+
 import pytorch_lightning as pl
 import torch
-from hydra.utils import instantiate
 
 from src.evaluation.evaluators.decoder import DecoderEvaluator
+
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,8 @@ class GenerationEvaluationCallback(pl.Callback):
             logger.warning(
                 "GenerationEvaluationCallback: %s_dataset_raw недоступен — "
                 "генерация на stage='%s' отключена.",
-                stage, stage,
+                stage,
+                stage,
             )
             return
 
@@ -95,14 +97,16 @@ class GenerationEvaluationCallback(pl.Callback):
             logger.warning(
                 "GenerationEvaluationCallback: колонки '%s'/'%s' не найдены в %s_dataset_raw "
                 "(доступны: %s) — генерация отключена.",
-                prompt_col, target_col, stage, raw_ds.column_names,
+                prompt_col,
+                target_col,
+                stage,
+                raw_ds.column_names,
             )
             return
 
         n = min(self.num_random * 10, len(raw_ds))
         records = [
-            {"prompt": raw_ds[i][prompt_col], "response": raw_ds[i][target_col]}
-            for i in range(n)
+            {"prompt": raw_ds[i][prompt_col], "response": raw_ds[i][target_col]} for i in range(n)
         ]
 
         self._evaluator._eval_datasets[stage] = records
@@ -111,7 +115,8 @@ class GenerationEvaluationCallback(pl.Callback):
 
         logger.info(
             "GenerationEvaluationCallback: stage='%s' готов, %d записей для генерации.",
-            stage, len(records),
+            stage,
+            len(records),
         )
 
     # ------------------------------------------------------------------
@@ -133,7 +138,7 @@ class GenerationEvaluationCallback(pl.Callback):
 
         # Достаем run_id через протокол
         run_id = self.experiment_logger.get_run_id(trainer)
-        
+
         # Оборачиваем логирование в контекст активного run'а
         ctx = self.experiment_logger.reopen_run(run_id) if run_id else contextlib.nullcontext()
         with ctx:
@@ -156,7 +161,7 @@ class GenerationEvaluationCallback(pl.Callback):
 
         # Аналогично для теста
         run_id = self.experiment_logger.get_run_id(trainer)
-        
+
         ctx = self.experiment_logger.reopen_run(run_id) if run_id else contextlib.nullcontext()
         with ctx:
             self._evaluator.evaluate(

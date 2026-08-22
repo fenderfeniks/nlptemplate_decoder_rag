@@ -19,11 +19,12 @@ import os
 import re
 import sys
 import tempfile
+from collections.abc import Generator
 from contextlib import contextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
 import mlflow
 import pandas as pd
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 # ===========================================================================
 # Приватные утилиты
 # ===========================================================================
+
 
 def _extract_run_id_from_trainer(trainer: Any) -> str | None:
     if not trainer.logger:
@@ -171,6 +173,7 @@ def _get_inference_pip_requirements(pyproject_path: str | Path) -> list[str]:
 # MLflowLogger — standalone (eval.py, DAG, inference, post-training)
 # ===========================================================================
 
+
 class MLflowLogger:
     """Standalone MLflow логгер. Реализует ExperimentLogger."""
 
@@ -248,7 +251,8 @@ class MLflowLogger:
             mlflow.set_experiment(experiment_id=run_info.info.experiment_id)
             logger.info(
                 "reopen_run: experiment_id=%s run_id=%s",
-                run_info.info.experiment_id, run_id,
+                run_info.info.experiment_id,
+                run_id,
             )
         except Exception as e:
             logger.warning("reopen_run: не удалось установить эксперимент: %s", e)
@@ -369,9 +373,7 @@ class MLflowLogger:
         staging_version = staging_mv.version
         staging_score_str = staging_mv.tags.get(metric_tag)
         if staging_score_str is None:
-            raise ValueError(
-                f"У {staging_alias} модели нет тега '{metric_tag}'."
-            )
+            raise ValueError(f"У {staging_alias} модели нет тега '{metric_tag}'.")
         staging_score = float(staging_score_str)
 
         try:
@@ -388,7 +390,9 @@ class MLflowLogger:
             logger.info("УСПЕХ: v%s -> Production.", staging_version)
             return True
 
-        logger.warning("ОТКАЗ: Staging (%.4f) не лучше Production (%.4f).", staging_score, prod_score)
+        logger.warning(
+            "ОТКАЗ: Staging (%.4f) не лучше Production (%.4f).", staging_score, prod_score
+        )
         return False
 
     def get_production_version(
@@ -409,6 +413,7 @@ class MLflowLogger:
 # ===========================================================================
 # LightningMLflowLogger — режим обучения (callbacks внутри Lightning цикла)
 # ===========================================================================
+
 
 class LightningMLflowLogger:
     """MLflow логгер для Lightning-режима.
@@ -450,13 +455,23 @@ class LightningMLflowLogger:
             mlflow.log_table(data=df, artifact_file=artifact_file)
 
     def save_adapter(self, cfg, model_module, tokenizer, run_id, pipeline_name, best_score=None):
-        self._standalone.save_adapter(cfg, model_module, tokenizer, run_id, pipeline_name, best_score)
+        self._standalone.save_adapter(
+            cfg, model_module, tokenizer, run_id, pipeline_name, best_score
+        )
 
     def load_adapter(self, resume_cfg, tracking_uri=None):
         return self._standalone.load_adapter(resume_cfg, tracking_uri)
 
-    def promote_model(self, reg_model_name, staging_alias="Staging", production_alias="Production", metric_tag="val_loss"):
-        return self._standalone.promote_model(reg_model_name, staging_alias, production_alias, metric_tag)
+    def promote_model(
+        self,
+        reg_model_name,
+        staging_alias="Staging",
+        production_alias="Production",
+        metric_tag="val_loss",
+    ):
+        return self._standalone.promote_model(
+            reg_model_name, staging_alias, production_alias, metric_tag
+        )
 
     def get_production_version(self, reg_model_name, production_alias="Production"):
         return self._standalone.get_production_version(reg_model_name, production_alias)

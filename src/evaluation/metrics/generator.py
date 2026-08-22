@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import logging
 import statistics
-from collections import Counter
 from typing import Any, Protocol
 
 import evaluate as hf_evaluate  # hf_evaluate — явный алиас, без конфликта с ragas
@@ -41,6 +40,7 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 # Протокол метрики
 # ------------------------------------------------------------------
+
 
 class GenerativeMetric(Protocol):
     """Единый интерфейс для любой метрики генератора.
@@ -58,13 +58,13 @@ class GenerativeMetric(Protocol):
         targets: list[str],
         contexts: list[list[str]] | None = None,
         extra: dict[str, Any] | None = None,
-    ) -> dict[str, float]:
-        ...
+    ) -> dict[str, float]: ...
 
 
 # ------------------------------------------------------------------
 # Пайплайн
 # ------------------------------------------------------------------
+
 
 class GeneratorMetricsPipeline:
     """Пайплайн последовательного вычисления всех метрик.
@@ -109,6 +109,7 @@ class GeneratorMetricsPipeline:
 # ------------------------------------------------------------------
 # StatisticalMetrics — ROUGE + BLEU
 # ------------------------------------------------------------------
+
 
 class StatisticalMetrics:
     """ROUGE и BLEU через HuggingFace ``evaluate``.
@@ -169,6 +170,7 @@ class StatisticalMetrics:
 # ------------------------------------------------------------------
 # RagasMetrics — LLM-as-a-judge
 # ------------------------------------------------------------------
+
 
 class RagasMetrics:
     """Ragas-метрики с LLM-судьёй (Answer Correctness, Faithfulness и др.).
@@ -251,14 +253,15 @@ class RagasMetrics:
             )
             # Отфильтровываем метрики, требующие контекст
             metrics_to_run = [
-                m for m in self._metric_objects 
+                m
+                for m in self._metric_objects
                 if m.name not in ["faithfulness", "context_precision"]
             ]
-            
+
             if not metrics_to_run:
                 logger.warning("RagasMetrics: после исключения контекстных метрик список пуст.")
                 return {}
-                
+
             contexts = [[""] for _ in prompts]
 
         data = {
@@ -284,9 +287,11 @@ class RagasMetrics:
             logger.error("RagasMetrics: сбой при вычислении — %s", e)
             return {}
 
+
 # ------------------------------------------------------------------
 # GenerationSpeedMetrics — латентность, throughput, token counts
 # ------------------------------------------------------------------
+
 
 class GenerationSpeedMetrics:
     """Бизнес-метрики скорости и стоимости инференса.
@@ -346,7 +351,6 @@ class GenerationSpeedMetrics:
         gen_tok = [s["generated_tokens"] for s in stats]
 
         sorted_lat = sorted(latencies)
-        n = len(sorted_lat)
 
         def _percentile(data: list[float], p: float) -> float:
             idx = max(0, int(len(data) * p / 100) - 1)
@@ -368,8 +372,10 @@ class GenerationSpeedMetrics:
             "prompt_tokens_mean": statistics.mean(prompt_tok) if prompt_tok else 0.0,
             "generated_tokens_mean": statistics.mean(gen_tok) if gen_tok else 0.0,
             "total_tokens_mean": statistics.mean(
-                [p + g for p, g in zip(prompt_tok, gen_tok)]
-            ) if prompt_tok else 0.0,
+                [p + g for p, g in zip(prompt_tok, gen_tok, strict=True)]
+            )
+            if prompt_tok
+            else 0.0,
             "empty_response_rate": empty_rate,
         }
 
@@ -377,13 +383,15 @@ class GenerationSpeedMetrics:
         if self.warn_latency_p95_s is not None and p95 > self.warn_latency_p95_s:
             logger.warning(
                 "GenerationSpeedMetrics: p95 латентность %.2f с превышает порог %.2f с.",
-                p95, self.warn_latency_p95_s,
+                p95,
+                self.warn_latency_p95_s,
             )
 
         if empty_rate > self.warn_empty_rate:
             logger.warning(
                 "GenerationSpeedMetrics: %.1f%% пустых ответов — превышен порог %.1f%%.",
-                empty_rate * 100, self.warn_empty_rate * 100,
+                empty_rate * 100,
+                self.warn_empty_rate * 100,
             )
 
         return results
@@ -392,6 +400,7 @@ class GenerationSpeedMetrics:
 # ------------------------------------------------------------------
 # TextQualityMetrics — repetition, diversity, length ratio
 # ------------------------------------------------------------------
+
 
 class TextQualityMetrics:
     """Бизнес-метрики качества текста без LLM-судьи.
@@ -462,7 +471,7 @@ class TextQualityMetrics:
 
         # --- Length ratio (words) ---
         ratios: list[float] = []
-        for g, t in zip(generated, targets):
+        for g, t in zip(generated, targets, strict=True):
             target_len = len(t.split())
             if target_len > 0:
                 ratios.append(len(g.split()) / target_len)

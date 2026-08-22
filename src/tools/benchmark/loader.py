@@ -10,6 +10,7 @@ from typing import Any
 
 from datasets import Dataset as HFDataset
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,7 +57,8 @@ class BenchmarkLoader:
         if actual_size != expected_size:
             logger.warning(
                 "Размер кэша (%d строк) не совпадает с манифестом (%d). Перекачка.",
-                actual_size, expected_size,
+                actual_size,
+                expected_size,
             )
             return False
         return True

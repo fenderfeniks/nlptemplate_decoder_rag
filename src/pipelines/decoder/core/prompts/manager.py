@@ -33,7 +33,7 @@ class PromptManager:
             self.templates = templates or {}
 
         self.env = Environment(autoescape=False)
-        
+
         # Стандартный индустриальный порядок сборки, если в конфиге не указано иное
         self.default_order = default_order or [
             "role",
@@ -54,9 +54,7 @@ class PromptManager:
         # find_undeclared_variables возвращает ВСЕ переменные включая те,
         # что внутри {% if var %}...{% endif %} — они фактически опциональны.
         # Передаём None для отсутствующих — Jinja корректно вычислит {% if None %} как False.
-        kwargs_with_defaults = {
-            var: kwargs.get(var, None) for var in required_vars
-        }
+        kwargs_with_defaults = {var: kwargs.get(var, None) for var in required_vars}
         kwargs_with_defaults.update(kwargs)  # явно переданные имеют приоритет
 
         template = self.env.from_string(template_str)
@@ -97,14 +95,12 @@ class PromptManager:
 
             for block_name in block_order:
                 block_content = template_data.get(block_name)
-                
+
                 if not block_content or not isinstance(block_content, str):
                     continue
 
                 rendered_block = self._render_string(
-                    block_content, 
-                    f"{template_name}.{block_name}", 
-                    **kwargs
+                    block_content, f"{template_name}.{block_name}", **kwargs
                 )
                 parts.append(rendered_block.strip())
 

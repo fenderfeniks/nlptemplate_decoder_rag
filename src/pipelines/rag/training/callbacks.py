@@ -69,7 +69,7 @@ class RetrievalEvaluationCallback(pl.Callback):
                 k: v.to(pl_module.device) if isinstance(v, torch.Tensor) else v
                 for k, v in batch.items()
             }
-            
+
             q = pl_module(batch["query_input_ids"], batch["query_attention_mask"])
             query_embs.append(q.cpu().float().numpy())
 
@@ -111,7 +111,7 @@ class RetrievalEvaluationCallback(pl.Callback):
             if stage == "val"
             else trainer.datamodule.test_dataloader()
         )
-        
+
         if dataloader is None:
             logger.warning("%s_dataloader не задан — RetrievalEval пропущен.", stage)
             return
@@ -122,7 +122,8 @@ class RetrievalEvaluationCallback(pl.Callback):
         if emb_mb > 256:
             logger.warning(
                 "RetrievalEval: query эмбеддинги занимают %.0f МБ RAM. При OOM уменьшите %s_size.",
-                emb_mb, stage
+                emb_mb,
+                stage,
             )
 
         search_results = self.vector_db.search(query_embs, top_k=self.top_k)
@@ -133,14 +134,13 @@ class RetrievalEvaluationCallback(pl.Callback):
         run_id = None
         if self.experiment_logger:
             run_id = self.experiment_logger.get_run_id(trainer)
-            
+
         ctx = self.experiment_logger.reopen_run(run_id) if run_id else contextlib.nullcontext()
 
         with ctx:
             k = self.top_k
             recall_bi_key = f"recall_{k}_biencoder"
             fnr_bi_key = f"fnr_{k}_biencoder"
-            recall_final_key = f"recall_{k}_final"
             ndcg_key = f"ndcg_{k}"
 
             if self.log_full_metrics:
@@ -153,8 +153,12 @@ class RetrievalEvaluationCallback(pl.Callback):
                         logger=True,
                     )
             else:
-                pl_module.log(f"{stage}_mrr", metrics["mrr"], sync_dist=True, prog_bar=True, logger=True)
-                pl_module.log(f"{stage}_{recall_bi_key}", metrics[recall_bi_key], sync_dist=True, logger=True)
+                pl_module.log(
+                    f"{stage}_mrr", metrics["mrr"], sync_dist=True, prog_bar=True, logger=True
+                )
+                pl_module.log(
+                    f"{stage}_{recall_bi_key}", metrics[recall_bi_key], sync_dist=True, logger=True
+                )
                 pl_module.log(f"{stage}_{ndcg_key}", metrics[ndcg_key], sync_dist=True, logger=True)
 
         logger.info(

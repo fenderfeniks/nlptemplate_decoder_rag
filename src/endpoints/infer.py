@@ -2,8 +2,8 @@
 
 import gc
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import hydra
 import torch
@@ -13,18 +13,19 @@ from src.tools.storage.resolver import ArtifactResolver
 from src.utils.logger import setup_logging
 from src.utils.torch_utils import register_safe_globals
 
+
 setup_logging()
 logger = logging.getLogger(__name__)
+
 
 def _free_memory() -> None:
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
+
 def run_universal_infer(
-    cfg: DictConfig,
-    pipeline_name: str,
-    run_fn: Callable[[DictConfig, ArtifactResolver], None]
+    cfg: DictConfig, pipeline_name: str, run_fn: Callable[[DictConfig, ArtifactResolver], None]
 ) -> None:
     """Обертка инференса с единой инициализацией и очисткой."""
     logger.info("Старт инференса пайплайна: %s...", pipeline_name)

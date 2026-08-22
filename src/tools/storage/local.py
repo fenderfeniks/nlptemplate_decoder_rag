@@ -15,15 +15,15 @@ class LocalStorage(BaseStorage):
         super().__init__(uri_prefix=uri_prefix)
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        
+
     def upload_file(self, local_path: str | Path, remote_path: str) -> None:
         """Безопасная загрузка одного файла без удаления остального содержимого папки."""
         local_path = Path(local_path)
         dest_path = Path(self.base_dir) / remote_path
-        
+
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         # Атомарная перезапись файла (сначала копируем во временный, потом переименовываем)
-        tmp_dest = dest_path.with_suffix('.tmp')
+        tmp_dest = dest_path.with_suffix(".tmp")
         shutil.copy2(local_path, tmp_dest)
         tmp_dest.replace(dest_path)
 

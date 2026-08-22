@@ -12,6 +12,7 @@ from src.pipelines.rag.inference.embedder import RAGInferenceEmbedder
 from src.pipelines.rag.inference.reranker import CrossEncoderReranker
 from src.vector_store.base import BaseVectorStore
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,9 +63,7 @@ class HybridRetriever:
         self.last_batch_degradation: dict[str, str] = {}
 
         if reranker is not None:
-            logger.info(
-                "HybridRetriever: реранкер включён (rerank_factor=%d).", rerank_factor
-            )
+            logger.info("HybridRetriever: реранкер включён (rerank_factor=%d).", rerank_factor)
         else:
             logger.info("HybridRetriever: реранкер отключён.")
 
@@ -117,9 +116,7 @@ class HybridRetriever:
         except RuntimeError as e:
             encode_sec = time.perf_counter() - t0
             timing["encode"] = encode_sec
-            logger.error(
-                "Ошибка векторизации — переходим сразу к BM25-only fallback: %s", e
-            )
+            logger.error("Ошибка векторизации — переходим сразу к BM25-only fallback: %s", e)
             # query_vectors остаётся None → search_hybrid и dense пропускаем
 
         # --- Этап 2: поиск с fallback-цепочкой ---
@@ -197,7 +194,8 @@ class HybridRetriever:
                 timing["search"] = time.perf_counter() - t0
                 logger.warning(
                     "search_hybrid упал (%s: %s) — пробуем dense-only fallback.",
-                    type(e).__name__, e,
+                    type(e).__name__,
+                    e,
                 )
 
         # --- Попытка 2: dense-only ---
@@ -216,7 +214,8 @@ class HybridRetriever:
                 timing["search_dense_fallback"] = time.perf_counter() - t0
                 logger.warning(
                     "dense-only тоже упал (%s: %s) — пробуем BM25-only fallback.",
-                    type(e).__name__, e,
+                    type(e).__name__,
+                    e,
                 )
 
         # --- Попытка 3: BM25-only (sparse) ---
@@ -234,7 +233,8 @@ class HybridRetriever:
             timing["search_sparse_fallback"] = time.perf_counter() - t0
             logger.error(
                 "Все методы поиска упали. BM25 (%s: %s). Возвращаем пустые результаты.",
-                type(e).__name__, e,
+                type(e).__name__,
+                e,
             )
             return empty, "failed"
 
@@ -253,7 +253,7 @@ class HybridRetriever:
         t0 = time.perf_counter()
         try:
             reranked = []
-            for query_text, candidates in zip(queries, raw_results):
+            for query_text, candidates in zip(queries, raw_results, strict=True):
                 if not candidates:
                     reranked.append([])
                     continue
@@ -273,7 +273,9 @@ class HybridRetriever:
             timing["rerank_failed"] = time.perf_counter() - t0
             logger.error(
                 "Реранкер упал в рантайме (%s: %s) — возвращаем top_%d кандидатов по исходному score.",
-                type(e).__name__, e, actual_top_k,
+                type(e).__name__,
+                e,
+                actual_top_k,
             )
             # Срезаем до actual_top_k — клиент получает ровно столько,
             # сколько ожидал бы после реранкинга.

@@ -79,7 +79,7 @@ class NLIJudge(BaseJudge):
         return_reasoning: bool = False,
         batch_size: int = 32,
         max_length: int = 512,
-    ) -> "NLIJudge":
+    ) -> NLIJudge:
         """Загружает NLI-модель из manifest["nli_pipeline"] и возвращает готовый judge.
 
         Args:
@@ -110,13 +110,10 @@ class NLIJudge(BaseJudge):
         manifest = full_manifest[pipeline_key]
         if manifest.get("load_type") != "full_model":
             raise ValueError(
-                f"NLI-модель ожидает load_type=full_model, "
-                f"получено: {manifest.get('load_type')}."
+                f"NLI-модель ожидает load_type=full_model, получено: {manifest.get('load_type')}."
             )
 
-        model_path = router.download_from_uri(
-            manifest["model_uri"], cache_base / "nli_model"
-        )
+        model_path = router.download_from_uri(manifest["model_uri"], cache_base / "nli_model")
         logger.info("NLIJudge: веса получены из storage: %s", model_path)
 
         device = 0 if torch.cuda.is_available() else -1
@@ -175,15 +172,13 @@ class NLIJudge(BaseJudge):
             return [EvalResult(metadata=inp.metadata) for inp in inputs]
 
         results = []
-        for inp, label_scores in zip(inputs, raw_outputs):
+        for inp, label_scores in zip(inputs, raw_outputs, strict=True):
             score = self._extract_score(label_scores)
             verdict = score >= self.verdict_threshold if self.return_verdict else None
 
             reasoning = None
             if self.return_reasoning:
-                scores_str = ", ".join(
-                    f"{d['label']}={d['score']:.3f}" for d in label_scores
-                )
+                scores_str = ", ".join(f"{d['label']}={d['score']:.3f}" for d in label_scores)
                 reasoning = f"NLI distribution: [{scores_str}]"
 
             results.append(

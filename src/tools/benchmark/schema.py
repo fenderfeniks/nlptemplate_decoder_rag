@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 
 @dataclass
@@ -37,7 +38,7 @@ class BenchmarkRecord:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BenchmarkRecord":
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkRecord:
         return cls(**data)
 
 
@@ -76,7 +77,7 @@ class BenchmarkDataset:
                 f.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
 
     @classmethod
-    def load_jsonl(cls, path: Path | str) -> "BenchmarkDataset":
+    def load_jsonl(cls, path: Path | str) -> BenchmarkDataset:
         """Загружает JSONL-файл в BenchmarkDataset."""
         path = Path(path)
         if not path.exists():

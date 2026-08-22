@@ -143,7 +143,7 @@ class ResponseCleaner:
 
         # 1. Срезаем эхо-промпт
         if self.strip_prompt and prompt and text.startswith(prompt):
-            text = text[len(prompt):]
+            text = text[len(prompt) :]
 
         # 2. Llama-заголовки
         text = _LLAMA_HEADER_RE.sub("", text)
