@@ -13,12 +13,13 @@ WORKDIR /build
 
 COPY pyproject.toml README.md ./
 ARG INSTALL_EXTRAS="api"
+ARG TORCH_INDEX="https://download.pytorch.org/whl/cpu"
 
 RUN uv venv /opt/venv
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /opt/venv/bin/python \
-    --extra-index-url https://download.pytorch.org/whl/cu121 \
+    --extra-index-url ${TORCH_INDEX} \
     --index-strategy unsafe-best-match \
     ".[${INSTALL_EXTRAS}]"
 

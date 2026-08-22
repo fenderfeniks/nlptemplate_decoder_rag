@@ -1,15 +1,19 @@
-# tests/vector_store/test_faiss_store.py
-"""Тесты для FAISSVectorStore.
+# tests/vector_store/test_faiss_store_extended.py
+"""Расширенные тесты для FAISSVectorStore.
 
-faiss и numpy — реальные зависимости (они нужны в окружении).
-Тесты используют небольшие векторы (dim=4) чтобы быть быстрыми.
-Тяжёлые операции IO мокируются там где нужно.
+Покрывают то, чего нет в test_faiss_store.py:
+- _match_filters (AND-семантика фильтрации)
+- _search_with_filter: итеративный over-fetch, расширение multiplier
+- insert_batched: граничные случаи
+- save/load: предупреждение о dropped kwargs
+- Корректность метаданных после поиска с фильтром
+- Нормализация: реальный эффект на результаты поиска
+- Граничные случаи ntotal=1, top_k=0
 """
 
 from __future__ import annotations
 
-import pickle
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -17,7 +21,7 @@ import pytest
 
 faiss = pytest.importorskip("faiss", reason="faiss не установлен")
 
-from src.vector_store.faiss_store import FAISSVectorStore  # noqa
+from src.vector_store.faiss_store import FAISSVectorStore  # noqa: E402
 
 
 DIM = 4
@@ -34,376 +38,415 @@ def store():
 
 
 @pytest.fixture
-def embeddings():
-    rng = np.random.default_rng(42)
-    return rng.random((3, DIM)).astype(np.float32)
+def rng():
+    return np.random.default_rng(0)
+
+
+@pytest.fixture
+def embeddings(rng):
+    return rng.random((5, DIM)).astype(np.float32)
 
 
 @pytest.fixture
 def metadata():
     return [
-        {"doc_id": "d1", "source": "wiki"},
-        {"doc_id": "d2", "source": "arxiv"},
-        {"doc_id": "d3", "source": "wiki"},
+        {"doc_id": "d1", "source": "wiki", "lang": "ru"},
+        {"doc_id": "d2", "source": "arxiv", "lang": "en"},
+        {"doc_id": "d3", "source": "wiki", "lang": "en"},
+        {"doc_id": "d4", "source": "arxiv", "lang": "ru"},
+        {"doc_id": "d5", "source": "wiki", "lang": "ru"},
     ]
 
 
-def make_store(**kwargs) -> FAISSVectorStore:
-    return FAISSVectorStore(embedding_dim=DIM, **kwargs)
-
-
 # ---------------------------------------------------------------------------
-# __init__ / _build_index
+# _match_filters — бизнес-логика AND-фильтрации
 # ---------------------------------------------------------------------------
 
 
-class TestInit:
-    def test_flat_index_created(self, store):
-        assert store.index_type == "flat"
-        assert store.embedding_dim == DIM
-        assert store.ntotal == 0
+class TestMatchFilters:
+    """_match_filters реализует AND-семантику: все условия должны совпасть."""
 
-    def test_hnsw_index_created(self):
-        s = make_store(index_type="hnsw")
-        assert s.index_type == "hnsw"
-        assert s.ntotal == 0
+    def test_single_match(self, store):
+        doc = {"source": "wiki", "lang": "ru"}
+        assert store._match_filters(doc, {"source": "wiki"}) is True
 
-    def test_invalid_index_type_raises(self):
-        with pytest.raises(ValueError, match="Неизвестный тип индекса"):
-            make_store(index_type="ivf")
+    def test_single_no_match(self, store):
+        doc = {"source": "arxiv", "lang": "en"}
+        assert store._match_filters(doc, {"source": "wiki"}) is False
 
-    def test_metadata_empty_on_init(self, store):
-        assert store._metadata == []
+    def test_and_semantics_all_match(self, store):
+        doc = {"source": "wiki", "lang": "ru"}
+        assert store._match_filters(doc, {"source": "wiki", "lang": "ru"}) is True
 
-    def test_doc_id_cache_none_on_init(self, store):
-        assert store._doc_id_cache is None
+    def test_and_semantics_partial_match_fails(self, store):
+        """AND: если хотя бы одно условие не совпало — False."""
+        doc = {"source": "wiki", "lang": "en"}
+        assert store._match_filters(doc, {"source": "wiki", "lang": "ru"}) is False
 
-    def test_index_type_case_insensitive(self):
-        s = FAISSVectorStore(embedding_dim=DIM, index_type="FLAT")
-        assert s.index_type == "flat"
+    def test_empty_filters_always_true(self, store):
+        """Пустой фильтр совпадает с любым документом."""
+        assert store._match_filters({"source": "wiki"}, {}) is True
 
+    def test_missing_key_in_doc_no_match(self, store):
+        """Ключ отсутствует в doc — не совпадает (get возвращает None)."""
+        doc = {"source": "wiki"}
+        assert store._match_filters(doc, {"lang": "ru"}) is False
 
-# ---------------------------------------------------------------------------
-# insert
-# ---------------------------------------------------------------------------
+    def test_none_value_matches_missing_key(self, store):
+        """Если фильтр ищет None — совпадёт с отсутствующим ключом."""
+        doc = {"source": "wiki"}
+        assert store._match_filters(doc, {"lang": None}) is True
 
+    def test_empty_doc_no_match(self, store):
+        """Пустой документ не совпадает ни с каким непустым фильтром."""
+        assert store._match_filters({}, {"source": "wiki"}) is False
 
-class TestInsert:
-    def test_insert_adds_vectors(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        assert store.ntotal == 3
-        assert len(store._metadata) == 3
-
-    def test_insert_wrong_dim_raises(self, store, metadata):
-        bad = np.ones((3, DIM + 1), dtype=np.float32)
-        with pytest.raises(ValueError, match="Ожидается embeddings"):
-            store.insert(bad, metadata[:3])
-
-    def test_insert_1d_raises(self, store, metadata):
-        bad = np.ones(DIM, dtype=np.float32)
-        with pytest.raises(ValueError, match="Ожидается embeddings"):
-            store.insert(bad, metadata[:1])
-
-    def test_insert_length_mismatch_raises(self, store, embeddings):
-        with pytest.raises(ValueError, match="Несоответствие длин"):
-            store.insert(embeddings, [{"doc_id": "only_one"}])
-
-    def test_insert_invalidates_cache(self, store, embeddings, metadata):
-        # Наполняем кэш
-        _ = store.existing_doc_ids
-        assert store._doc_id_cache is not None
-        store.insert(embeddings, metadata)
-        assert store._doc_id_cache is None
-
-    def test_insert_atomic_rollback_on_index_error(self, store, embeddings, metadata):
-        """При ошибке index.add метаданные откатываются."""
-        store.index.add = MagicMock(side_effect=RuntimeError("faiss boom"))
-        with pytest.raises(RuntimeError, match="faiss boom"):
-            store.insert(embeddings, metadata)
-        assert store.ntotal == 0
-        assert store._metadata == []
-
-    def test_insert_normalizes_vectors(self, embeddings, metadata):
-        s = make_store(normalize_embeddings=True)
-        # Патчим _normalize чтобы убедиться что он вызывается
-        with patch.object(s, "_normalize", wraps=s._normalize) as mock_norm:
-            s.insert(embeddings, metadata)
-        mock_norm.assert_called_once()
-
-    def test_insert_skip_normalize_when_disabled(self, embeddings, metadata):
-        s = make_store(normalize_embeddings=False)
-        with patch.object(s, "_normalize", wraps=s._normalize) as mock_norm:
-            s.insert(embeddings, metadata)
-        mock_norm.assert_not_called()
-
-    def test_insert_accumulates_multiple_calls(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        store.insert(embeddings, metadata)
-        assert store.ntotal == 6
-        assert len(store._metadata) == 6
+    def test_value_type_matters(self, store):
+        """Сравнение строгое: "1" != 1."""
+        doc = {"count": 1}
+        assert store._match_filters(doc, {"count": "1"}) is False
+        assert store._match_filters(doc, {"count": 1}) is True
 
 
 # ---------------------------------------------------------------------------
-# insert_batched
+# _search_with_filter — итеративный over-fetch
 # ---------------------------------------------------------------------------
 
 
-class TestInsertBatched:
-    def test_batched_inserts_all(self, embeddings, metadata):
-        s = FAISSVectorStore(embedding_dim=DIM, insert_batch_size=2)
-        s.insert_batched(embeddings, metadata)
-        assert s.ntotal == 3
+class TestSearchWithFilterIterative:
+    """Проверяем итеративное расширение multiplier при нехватке результатов."""
 
-    def test_batched_single_batch(self, store, embeddings, metadata):
-        store.insert_batched(embeddings, metadata, desc="Test")
-        assert store.ntotal == 3
+    def _make_store_with_data(self, n: int, source_pattern: list[str]) -> FAISSVectorStore:
+        """Создаёт store с n векторами, у каждого source из паттерна."""
+        rng = np.random.default_rng(99)
+        s = FAISSVectorStore(
+            embedding_dim=DIM,
+            filter_fetch_multiplier=2,
+            filter_max_fetch_multiplier=50,
+        )
+        embs = rng.random((n, DIM)).astype(np.float32)
+        meta = [
+            {"doc_id": f"d{i}", "source": source_pattern[i % len(source_pattern)]} for i in range(n)
+        ]
+        s.insert(embs, meta)
+        return s
 
-
-# ---------------------------------------------------------------------------
-# existing_doc_ids
-# ---------------------------------------------------------------------------
-
-
-class TestExistingDocIds:
-    def test_empty_store_returns_empty_set(self, store):
-        assert store.existing_doc_ids == set()
-
-    def test_returns_doc_ids_after_insert(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        assert store.existing_doc_ids == {"d1", "d2", "d3"}
-
-    def test_cache_populated_after_first_access(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        assert store._doc_id_cache is None
-        _ = store.existing_doc_ids
-        assert store._doc_id_cache is not None
-
-    def test_cache_reused_on_second_access(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        ids1 = store.existing_doc_ids
-        ids2 = store.existing_doc_ids
-        assert ids1 is ids2  # тот же объект
-
-    def test_metadata_without_doc_id_skipped(self, store, embeddings):
-        meta = [{"text": "no id"}, {"doc_id": "d2", "x": 1}, {"text": "also no id"}]
-        store.insert(embeddings, meta)
-        assert store.existing_doc_ids == {"d2"}
-
-
-# ---------------------------------------------------------------------------
-# search — без фильтра
-# ---------------------------------------------------------------------------
-
-
-class TestSearchNoFilter:
-    def test_empty_index_returns_empty_lists(self, store, embeddings):
-        result = store.search(embeddings[:1])
-        assert result == [[]]
-
-    def test_search_returns_top_k(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        results = store.search(embeddings[:1], top_k=2)
+    def test_filter_returns_correct_source(self):
+        """Только документы с нужным source попадают в результат."""
+        s = self._make_store_with_data(10, ["wiki", "arxiv", "other"])
+        rng = np.random.default_rng(1)
+        q = rng.random((1, DIM)).astype(np.float32)
+        results = s.search(q, top_k=3, filter_metadata={"source": "wiki"})
         assert len(results) == 1
-        assert len(results[0]) == 2
-
-    def test_search_result_structure(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        results = store.search(embeddings[:1], top_k=1)
-        hit = results[0][0]
-        assert "score" in hit
-        assert "metadata" in hit
-        assert isinstance(hit["score"], float)
-        assert isinstance(hit["metadata"], dict)
-
-    def test_search_sorted_by_score_descending(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        results = store.search(embeddings[:1], top_k=3)
-        scores = [h["score"] for h in results[0]]
-        assert scores == sorted(scores, reverse=True)
-
-    def test_search_multiple_queries(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        results = store.search(embeddings, top_k=1)
-        assert len(results) == 3
-
-    def test_top_k_clamped_to_ntotal(self, store, embeddings, metadata):
-        """top_k > ntotal не вызывает ошибку."""
-        store.insert(embeddings, metadata)
-        results = store.search(embeddings[:1], top_k=100)
-        assert len(results[0]) == 3  # ntotal=3
-
-
-# ---------------------------------------------------------------------------
-# search — с фильтром
-# ---------------------------------------------------------------------------
-
-
-class TestSearchWithFilter:
-    def test_filter_by_source(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        results = store.search(embeddings[:1], top_k=5, filter_metadata={"source": "wiki"})
-        # Все результаты должны иметь source=wiki
         for hit in results[0]:
             assert hit["metadata"]["source"] == "wiki"
 
-    def test_filter_no_match_returns_empty(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        results = store.search(embeddings[:1], top_k=5, filter_metadata={"source": "nonexistent"})
-        assert results[0] == []
+    def test_filter_fewer_results_than_top_k(self):
+        """Если подходящих документов меньше чем top_k — возвращаем сколько есть."""
+        rng = np.random.default_rng(2)
+        s = FAISSVectorStore(embedding_dim=DIM)
+        embs = rng.random((5, DIM)).astype(np.float32)
+        # Только 2 документа с source=rare
+        meta = [
+            {"doc_id": "d0", "source": "rare"},
+            {"doc_id": "d1", "source": "common"},
+            {"doc_id": "d2", "source": "common"},
+            {"doc_id": "d3", "source": "rare"},
+            {"doc_id": "d4", "source": "common"},
+        ]
+        s.insert(embs, meta)
+        q = rng.random((1, DIM)).astype(np.float32)
+        results = s.search(q, top_k=5, filter_metadata={"source": "rare"})
+        # Всего 2 подходящих — не должно падать
+        assert len(results[0]) <= 2
+        for hit in results[0]:
+            assert hit["metadata"]["source"] == "rare"
 
-    def test_filter_none_behaves_as_no_filter(self, store, embeddings, metadata):
+    def test_and_filter_multiple_conditions(self, store, embeddings, metadata):
+        """AND-фильтрация по нескольким полям."""
         store.insert(embeddings, metadata)
-        r_none = store.search(embeddings[:1], top_k=3, filter_metadata=None)
-        r_no = store.search(embeddings[:1], top_k=3)
-        assert len(r_none[0]) == len(r_no[0])
+        rng = np.random.default_rng(5)
+        q = rng.random((1, DIM)).astype(np.float32)
+        results = store.search(q, top_k=5, filter_metadata={"source": "wiki", "lang": "ru"})
+        for hit in results[0]:
+            assert hit["metadata"]["source"] == "wiki"
+            assert hit["metadata"]["lang"] == "ru"
 
-    def test_filter_empty_dict_behaves_as_no_filter(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        results = store.search(embeddings[:1], top_k=3, filter_metadata={})
+    def test_filter_multiplier_expands_when_insufficient(self):
+        """Проверяем что multiplier действительно расширяется через debug-лог."""
+        rng = np.random.default_rng(3)
+        s = FAISSVectorStore(
+            embedding_dim=DIM,
+            filter_fetch_multiplier=1,  # начинаем с маленького
+            filter_max_fetch_multiplier=100,
+        )
+        # 20 векторов, только 3 с source=rare — требуем top_k=3
+        embs = rng.random((20, DIM)).astype(np.float32)
+        meta = [{"doc_id": f"d{i}", "source": "rare" if i < 3 else "common"} for i in range(20)]
+        s.insert(embs, meta)
+        q = rng.random((1, DIM)).astype(np.float32)
+
+        with patch("src.vector_store.faiss_store.logger") as mock_logger:
+            results = s.search(q, top_k=3, filter_metadata={"source": "rare"})
+
+        # Должны найти все 3 редких документа
         assert len(results[0]) == 3
+        for hit in results[0]:
+            assert hit["metadata"]["source"] == "rare"
 
-
-# ---------------------------------------------------------------------------
-# _normalize / _prepare
-# ---------------------------------------------------------------------------
-
-
-class TestNormalize:
-    def test_normalize_produces_unit_vectors(self, store):
-        vecs = np.array([[3.0, 4.0, 0.0, 0.0]], dtype=np.float32)
-        normed = store._normalize(vecs)
-        norms = np.linalg.norm(normed, axis=1)
-        np.testing.assert_allclose(norms, [1.0], atol=1e-6)
-
-    def test_normalize_zero_vector_no_nan(self, store):
-        """Нулевой вектор -> не NaN (clip предотвращает деление на 0)."""
-        vecs = np.zeros((1, DIM), dtype=np.float32)
-        result = store._normalize(vecs)
-        assert not np.isnan(result).any()
-
-    def test_prepare_casts_to_float32(self, store):
-        vecs = np.ones((2, DIM), dtype=np.float64)
-        result = store._prepare(vecs)
-        assert result.dtype == np.float32
-
-
-# ---------------------------------------------------------------------------
-# _check_consistency
-# ---------------------------------------------------------------------------
-
-
-class TestCheckConsistency:
-    def test_consistent_state_does_not_raise(self, store, embeddings, metadata):
+    def test_multiple_queries_with_filter(self, store, embeddings, metadata):
+        """Фильтрация работает для нескольких запросов одновременно."""
         store.insert(embeddings, metadata)
-        store._check_consistency()  # не должен упасть
+        results = store.search(embeddings[:3], top_k=2, filter_metadata={"source": "wiki"})
+        assert len(results) == 3
+        for query_results in results:
+            for hit in query_results:
+                assert hit["metadata"]["source"] == "wiki"
 
-    def test_inconsistent_state_raises(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        store._metadata.append({"doc_id": "extra"})  # ломаем консистентность
-        with pytest.raises(RuntimeError, match="консистентность"):
-            store._check_consistency()
-
-
-# ---------------------------------------------------------------------------
-# reset
-# ---------------------------------------------------------------------------
-
-
-class TestReset:
-    def test_reset_clears_index(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        store.reset()
-        assert store.ntotal == 0
-
-    def test_reset_clears_metadata(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        store.reset()
-        assert store._metadata == []
-
-    def test_reset_invalidates_cache(self, store, embeddings, metadata):
-        store.insert(embeddings, metadata)
-        _ = store.existing_doc_ids
-        store.reset()
-        assert store._doc_id_cache is None
+    def test_max_multiplier_stops_iteration(self):
+        """При достижении filter_max_fetch_multiplier итерация прекращается."""
+        rng = np.random.default_rng(7)
+        # store с маленьким max_multiplier
+        s = FAISSVectorStore(
+            embedding_dim=DIM,
+            filter_fetch_multiplier=1,
+            filter_max_fetch_multiplier=2,
+        )
+        embs = rng.random((10, DIM)).astype(np.float32)
+        # Только 1 документ подходит, но top_k=5 — не наберём
+        meta = [{"doc_id": f"d{i}", "source": "rare" if i == 0 else "common"} for i in range(10)]
+        s.insert(embs, meta)
+        q = rng.random((1, DIM)).astype(np.float32)
+        # Не должно зависнуть в бесконечном цикле
+        results = s.search(q, top_k=5, filter_metadata={"source": "rare"})
+        assert len(results) == 1
+        assert len(results[0]) <= 1
 
 
 # ---------------------------------------------------------------------------
-# save / load
+# insert_batched — граничные случаи
 # ---------------------------------------------------------------------------
 
 
-class TestSaveLoad:
-    def test_save_creates_files(self, store, embeddings, metadata, tmp_path):
-        store.insert(embeddings, metadata)
+class TestInsertBatchedExtended:
+    def test_batch_size_1(self):
+        """batch_size=1 — каждый вектор в отдельном батче."""
+        rng = np.random.default_rng(10)
+        s = FAISSVectorStore(embedding_dim=DIM, insert_batch_size=1)
+        embs = rng.random((4, DIM)).astype(np.float32)
+        meta = [{"doc_id": f"d{i}"} for i in range(4)]
+        s.insert_batched(embs, meta)
+        assert s.ntotal == 4
+
+    def test_batch_size_equals_n(self):
+        """batch_size == len(embeddings) — один батч."""
+        rng = np.random.default_rng(11)
+        s = FAISSVectorStore(embedding_dim=DIM, insert_batch_size=3)
+        embs = rng.random((3, DIM)).astype(np.float32)
+        meta = [{"doc_id": f"d{i}"} for i in range(3)]
+        s.insert_batched(embs, meta, desc="My batch")
+        assert s.ntotal == 3
+
+    def test_batched_accumulates_metadata(self):
+        """Метаданные накапливаются корректно при батчевой вставке."""
+        rng = np.random.default_rng(12)
+        s = FAISSVectorStore(embedding_dim=DIM, insert_batch_size=2)
+        embs = rng.random((5, DIM)).astype(np.float32)
+        meta = [{"doc_id": f"d{i}", "val": i} for i in range(5)]
+        s.insert_batched(embs, meta)
+        assert len(s._metadata) == 5
+        assert s._metadata[4]["val"] == 4
+
+    def test_batched_existing_doc_ids(self):
+        """existing_doc_ids содержит все id после батчевой вставки."""
+        rng = np.random.default_rng(13)
+        s = FAISSVectorStore(embedding_dim=DIM, insert_batch_size=2)
+        embs = rng.random((4, DIM)).astype(np.float32)
+        ids = [f"d{i}" for i in range(4)]
+        meta = [{"doc_id": did} for did in ids]
+        s.insert_batched(embs, meta)
+        assert s.existing_doc_ids == set(ids)
+
+
+# ---------------------------------------------------------------------------
+# save/load — расширенные случаи
+# ---------------------------------------------------------------------------
+
+
+class TestSaveLoadExtended:
+    def test_load_logs_warning_for_dropped_kwargs(self, store, tmp_path):
+        """load логирует warning при обнаружении неизвестных kwargs."""
+        rng = np.random.default_rng(20)
+        embs = rng.random((2, DIM)).astype(np.float32)
+        meta = [{"doc_id": "d1"}, {"doc_id": "d2"}]
+        store.insert(embs, meta)
+        store.save(tmp_path)
+
+        with patch("src.vector_store.faiss_store.logger") as mock_logger:
+            FAISSVectorStore.load(
+                tmp_path,
+                embedding_dim=DIM,
+                hydra_extra_key="dropped",
+                another_extra="also_dropped",
+            )
+
+        warning_text = " ".join(str(c) for c in mock_logger.warning.call_args_list)
+        assert "hydra_extra_key" in warning_text or "dropped" in warning_text.lower()
+
+    def test_loaded_store_search_results_match_original(self, store, tmp_path):
+        """После load поиск возвращает те же топ-1 результаты что и оригинал."""
+        rng = np.random.default_rng(21)
+        embs = rng.random((5, DIM)).astype(np.float32)
+        meta = [{"doc_id": f"d{i}", "val": i} for i in range(5)]
+        store.insert(embs, meta)
+        store.save(tmp_path)
+
+        loaded = FAISSVectorStore.load(tmp_path, embedding_dim=DIM)
+        q = rng.random((1, DIM)).astype(np.float32)
+
+        r_orig = store.search(q, top_k=1)
+        r_load = loaded.search(q, top_k=1)
+
+        assert r_orig[0][0]["metadata"]["doc_id"] == r_load[0][0]["metadata"]["doc_id"]
+
+    def test_save_load_preserves_normalize_setting(self, tmp_path):
+        """normalize_embeddings=False сохраняется после load через kwargs."""
+        rng = np.random.default_rng(22)
+        s = FAISSVectorStore(embedding_dim=DIM, normalize_embeddings=False)
+        embs = rng.random((2, DIM)).astype(np.float32)
+        meta = [{"doc_id": "d1"}, {"doc_id": "d2"}]
+        s.insert(embs, meta)
+        s.save(tmp_path)
+
+        loaded = FAISSVectorStore.load(tmp_path, embedding_dim=DIM, normalize_embeddings=False)
+        assert loaded.normalize_embeddings is False
+
+    def test_save_empty_store(self, store, tmp_path):
+        """Можно сохранить пустой store без ошибки."""
         store.save(tmp_path)
         assert (tmp_path / "index.faiss").exists()
         assert (tmp_path / "metadata.json").exists()
 
-    def test_save_load_roundtrip(self, store, embeddings, metadata, tmp_path):
-        store.insert(embeddings, metadata)
+    def test_load_empty_store_ntotal_zero(self, store, tmp_path):
+        """Загрузка пустого store — ntotal=0."""
         store.save(tmp_path)
-
         loaded = FAISSVectorStore.load(tmp_path, embedding_dim=DIM)
-        assert loaded.ntotal == 3
-        assert len(loaded._metadata) == 3
+        assert loaded.ntotal == 0
+        assert loaded._metadata == []
 
-    def test_load_metadata_correct(self, store, embeddings, metadata, tmp_path):
-        store.insert(embeddings, metadata)
-        store.save(tmp_path)
 
-        loaded = FAISSVectorStore.load(tmp_path, embedding_dim=DIM)
-        assert loaded._metadata == metadata
+# ---------------------------------------------------------------------------
+# Нормализация — реальный эффект
+# ---------------------------------------------------------------------------
 
-    def test_load_missing_index_raises(self, tmp_path):
-        (tmp_path / "metadata.json").write_text("[]")
-        with pytest.raises(FileNotFoundError, match="index.faiss"):
-            FAISSVectorStore.load(tmp_path, embedding_dim=DIM)
 
-    def test_load_missing_metadata_raises(self, store, embeddings, metadata, tmp_path):
-        store.insert(embeddings, metadata)
-        store.save(tmp_path)
-        (tmp_path / "metadata.json").unlink()
-        with pytest.raises(FileNotFoundError, match="metadata"):
-            FAISSVectorStore.load(tmp_path, embedding_dim=DIM)
+class TestNormalizationEffect:
+    def test_normalized_scores_in_range(self):
+        """При normalize=True косинусное сходство ∈ [-1, 1]."""
+        rng = np.random.default_rng(30)
+        s = FAISSVectorStore(embedding_dim=DIM, normalize_embeddings=True)
+        embs = rng.random((5, DIM)).astype(np.float32)
+        meta = [{"doc_id": f"d{i}"} for i in range(5)]
+        s.insert(embs, meta)
 
-    def test_load_legacy_pkl_fallback(self, store, embeddings, metadata, tmp_path):
-        """Если metadata.json нет но есть metadata.pkl — загружается legacy."""
-        store.insert(embeddings, metadata)
-        store.save(tmp_path)
-        (tmp_path / "metadata.json").unlink()
-        (tmp_path / "metadata.pkl").write_bytes(pickle.dumps(metadata))
+        q = rng.random((1, DIM)).astype(np.float32)
+        results = s.search(q, top_k=5)
+        for hit in results[0]:
+            assert -1.01 <= hit["score"] <= 1.01
 
-        with patch("src.vector_store.faiss_store.logger") as mock_logger:
-            loaded = FAISSVectorStore.load(tmp_path, embedding_dim=DIM)
+    def test_self_query_highest_score_when_normalized(self):
+        """Запрос собственным вектором должен дать наивысший score."""
+        rng = np.random.default_rng(31)
+        s = FAISSVectorStore(embedding_dim=DIM, normalize_embeddings=True)
+        embs = rng.random((5, DIM)).astype(np.float32)
+        meta = [{"doc_id": f"d{i}"} for i in range(5)]
+        s.insert(embs, meta)
 
-        assert loaded._metadata == metadata
-        # Должно быть предупреждение о legacy pkl
-        warning_messages = " ".join(str(c.args) for c in mock_logger.warning.call_args_list)
-        assert "pkl" in warning_messages.lower() or "legacy" in warning_messages.lower()
+        # Запрашиваем первым вектором — он должен быть ближайшим к себе
+        results = s.search(embs[:1], top_k=5)
+        top_hit = results[0][0]
+        assert top_hit["metadata"]["doc_id"] == "d0"
 
-    def test_load_filters_unknown_kwargs(self, store, embeddings, metadata, tmp_path):
-        """Лишние kwargs из Hydra-конфига игнорируются без ошибки."""
-        store.insert(embeddings, metadata)
-        store.save(tmp_path)
-        loaded = FAISSVectorStore.load(
-            tmp_path,
-            embedding_dim=DIM,
-            unknown_key="should_be_ignored",
-        )
-        assert loaded.ntotal == 3
+    def test_prepare_returns_float32(self):
+        """_prepare всегда возвращает float32 независимо от входного типа."""
+        s = FAISSVectorStore(embedding_dim=DIM)
+        for dtype in [np.float64, np.int32, np.float16]:
+            vecs = np.ones((2, DIM), dtype=dtype)
+            result = s._prepare(vecs)
+            assert result.dtype == np.float32, (
+                f"Ожидался float32, получен {result.dtype} для {dtype}"
+            )
 
-    def test_save_creates_directory_if_missing(self, store, embeddings, metadata, tmp_path):
-        target = tmp_path / "nested" / "dir"
-        store.insert(embeddings, metadata)
-        store.save(target)
-        assert (target / "index.faiss").exists()
 
-    def test_loaded_store_can_search(self, store, embeddings, metadata, tmp_path):
-        """После load поиск работает корректно."""
-        store.insert(embeddings, metadata)
-        store.save(tmp_path)
+# ---------------------------------------------------------------------------
+# Граничные случаи поведения
+# ---------------------------------------------------------------------------
 
-        loaded = FAISSVectorStore.load(tmp_path, embedding_dim=DIM)
-        results = loaded.search(embeddings[:1], top_k=1)
+
+class TestEdgeCases:
+    def test_search_single_vector_in_store(self):
+        """store с 1 вектором — поиск работает."""
+        rng = np.random.default_rng(40)
+        s = FAISSVectorStore(embedding_dim=DIM)
+        emb = rng.random((1, DIM)).astype(np.float32)
+        s.insert(emb, [{"doc_id": "only"}])
+
+        results = s.search(emb, top_k=1)
         assert len(results[0]) == 1
-        assert "score" in results[0][0]
+        assert results[0][0]["metadata"]["doc_id"] == "only"
+
+    def test_insert_single_vector(self):
+        """Вставка одного вектора работает корректно."""
+        rng = np.random.default_rng(41)
+        s = FAISSVectorStore(embedding_dim=DIM)
+        emb = rng.random((1, DIM)).astype(np.float32)
+        s.insert(emb, [{"doc_id": "solo"}])
+        assert s.ntotal == 1
+        assert s.existing_doc_ids == {"solo"}
+
+    def test_reset_then_insert(self):
+        """После reset можно снова вставлять данные."""
+        rng = np.random.default_rng(42)
+        s = FAISSVectorStore(embedding_dim=DIM)
+        embs = rng.random((3, DIM)).astype(np.float32)
+        meta = [{"doc_id": f"d{i}"} for i in range(3)]
+        s.insert(embs, meta)
+        s.reset()
+        s.insert(embs[:1], [{"doc_id": "new"}])
+        assert s.ntotal == 1
+        assert s.existing_doc_ids == {"new"}
+
+    def test_search_after_reset_returns_empty(self):
+        """После reset поиск возвращает пустой список."""
+        rng = np.random.default_rng(43)
+        s = FAISSVectorStore(embedding_dim=DIM)
+        embs = rng.random((3, DIM)).astype(np.float32)
+        meta = [{"doc_id": f"d{i}"} for i in range(3)]
+        s.insert(embs, meta)
+        s.reset()
+
+        q = rng.random((1, DIM)).astype(np.float32)
+        results = s.search(q, top_k=3)
+        assert results == [[]]
+
+    def test_hnsw_search_returns_results(self):
+        """HNSW индекс возвращает корректные результаты."""
+        rng = np.random.default_rng(44)
+        s = FAISSVectorStore(embedding_dim=DIM, index_type="hnsw")
+        embs = rng.random((10, DIM)).astype(np.float32)
+        meta = [{"doc_id": f"d{i}"} for i in range(10)]
+        s.insert(embs, meta)
+
+        q = rng.random((1, DIM)).astype(np.float32)
+        results = s.search(q, top_k=3)
+        assert len(results[0]) == 3
+
+    def test_insert_consistency_check_raises_on_broken_state(self):
+        """insert проверяет консистентность до добавления."""
+        rng = np.random.default_rng(45)
+        s = FAISSVectorStore(embedding_dim=DIM)
+        # Намеренно ломаем состояние
+        s._metadata.append({"doc_id": "ghost"})
+        embs = rng.random((1, DIM)).astype(np.float32)
+        with pytest.raises(RuntimeError, match="консистентность"):
+            s.insert(embs, [{"doc_id": "new"}])

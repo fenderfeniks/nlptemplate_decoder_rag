@@ -1,11 +1,9 @@
-version: '3.8'
-
 volumes:
   grafana_data:
   models_cache:
-  mlflow_data:
   minio_data:
   qdrant_data:
+  # mlflow_data:  # раскомментировать вместе с training-сервисами
 
 services:
 
@@ -82,13 +80,13 @@ services:
   # 0. Init Container (Загрузчик артефактов из S3)
   # ----------------------------------------------------
   artifact_downloader:
-    image: my-company/nlp_template:training-rag
+    image: my-company/nlp_template:rag-api
     build:
       context: .
       dockerfile: Dockerfile
       args:
         # Нужны rag (для Qdrant-клиента при индексации) + training (для резолвера)
-        INSTALL_EXTRAS: "rag,training"
+        INSTALL_EXTRAS: "api,rag"
     container_name: nlp_template_downloader
     command: ["python", "-m", "scripts.prepare_artifacts"]
     env_file:
@@ -221,99 +219,100 @@ services:
         condition: service_started
 
   # ----------------------------------------------------
-  # MLOps инфраструктура
+  # MLOps инфраструктура (закомментировано — обучение не используется)
+  # Раскомментировать и запустить: docker compose --profile training up
   # ----------------------------------------------------
 
-  mlflow:
-    image: my-company/nlp_template:training
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        INSTALL_EXTRAS: "training"
-    container_name: nlp_template_mlflow
-    ports:
-      - "${MLFLOW_PORT:-5000}:5000"
-    command: >
-      mlflow ui
-      --backend-store-uri sqlite:///mlflow/mlflow.db
-      --default-artifact-root /mlflow/mlartifacts
-      --host 0.0.0.0
-      --port 5000
-    volumes:
-      - mlflow_data:/mlflow
-    restart: unless-stopped
-    profiles:
-      - training
-      - mlflow
+  # mlflow:
+  #   image: my-company/nlp_template:training
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #     args:
+  #       INSTALL_EXTRAS: "training"
+  #   container_name: nlp_template_mlflow
+  #   ports:
+  #     - "${MLFLOW_PORT:-5000}:5000"
+  #   command: >
+  #     mlflow ui
+  #     --backend-store-uri sqlite:///mlflow/mlflow.db
+  #     --default-artifact-root /mlflow/mlartifacts
+  #     --host 0.0.0.0
+  #     --port 5000
+  #   volumes:
+  #     - mlflow_data:/mlflow
+  #   restart: unless-stopped
+  #   profiles:
+  #     - training
+  #     - mlflow
 
   # ----------------------------------------------------
-  # Training сервисы
+  # Training сервисы (закомментировано — обучение не используется)
   # ----------------------------------------------------
 
-  train_decoder:
-    image: my-company/nlp_template:training
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        INSTALL_EXTRAS: "training,data"
-    container_name: nlp_template_train_decoder
-    profiles:
-      - training
-    command: ["python", "-m", "scripts.decoder_pipeline.train"]
-    env_file:
-      - .env
-    environment:
-      - PROJECT_ROOT=/app
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
-      - AWS_ENDPOINT_URL=http://minio:9000
-    volumes:
-      - ./configs:/app/configs
-      - ~/.cache/huggingface:/root/.cache/huggingface
-      - mlflow_data:/mlflow
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    depends_on:
-      - mlflow
+  # train_decoder:
+  #   image: my-company/nlp_template:training
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #     args:
+  #       INSTALL_EXTRAS: "training,data"
+  #   container_name: nlp_template_train_decoder
+  #   profiles:
+  #     - training
+  #   command: ["python", "-m", "scripts.decoder_pipeline.train"]
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - PROJECT_ROOT=/app
+  #     - MLFLOW_TRACKING_URI=http://mlflow:5000
+  #     - AWS_ENDPOINT_URL=http://minio:9000
+  #   volumes:
+  #     - ./configs:/app/configs
+  #     - ~/.cache/huggingface:/root/.cache/huggingface
+  #     - mlflow_data:/mlflow
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+  #   depends_on:
+  #     - mlflow
 
-  train_rag:
-    image: my-company/nlp_template:training-rag
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        INSTALL_EXTRAS: "training,data,rag"
-    container_name: nlp_template_train_rag
-    profiles:
-      - training
-    command: ["python", "-m", "scripts.rag_pipeline.train"]
-    env_file:
-      - .env
-    environment:
-      - PROJECT_ROOT=/app
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
-      - AWS_ENDPOINT_URL=http://minio:9000
-      - QDRANT_URL=http://qdrant:6333
-    volumes:
-      - ./configs:/app/configs
-      - ~/.cache/huggingface:/root/.cache/huggingface
-      - mlflow_data:/mlflow
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    depends_on:
-      - mlflow
-      - qdrant
+  # train_rag:
+  #   image: my-company/nlp_template:training-rag
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #     args:
+  #       INSTALL_EXTRAS: "training,data,rag"
+  #   container_name: nlp_template_train_rag
+  #   profiles:
+  #     - training
+  #   command: ["python", "-m", "scripts.rag_pipeline.train"]
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - PROJECT_ROOT=/app
+  #     - MLFLOW_TRACKING_URI=http://mlflow:5000
+  #     - AWS_ENDPOINT_URL=http://minio:9000
+  #     - QDRANT_URL=http://qdrant:6333
+  #   volumes:
+  #     - ./configs:/app/configs
+  #     - ~/.cache/huggingface:/root/.cache/huggingface
+  #     - mlflow_data:/mlflow
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+  #   depends_on:
+  #     - mlflow
+  #     - qdrant
 
   # ----------------------------------------------------
   # Мониторинг

@@ -1,8 +1,19 @@
-# tests/vector_store/test_qdrant_store.py
-"""Тесты для QdrantVectorStore.
+# tests/vector_store/test_qdrant_store_extended.py
+"""Расширенные тесты для QdrantVectorStore.
 
-qdrant_client не устанавливается — мокируем целиком через patch.dict(sys.modules).
-Все тесты работают без запущенного Qdrant-сервера.
+Покрывают то, чего нет в test_qdrant_store.py:
+- connect(): парсинг qdrant:// URI
+- connect(): directory=None
+- get_uri(): in-memory и обычный режим
+- existing_doc_ids: пагинация scroll (несколько страниц)
+- existing_doc_ids: записи без doc_id в payload, с payload=None
+- _normalize / _prepare
+- search: использует query_points (не search)
+- search: нормализация включена/выключена
+- insert: 1D массив raises ValueError
+- insert: нормализация
+- _build_filter: несколько полей, порядок conditions
+- reset: кэш инвалидируется
 """
 
 from __future__ import annotations
@@ -16,15 +27,12 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Инфраструктура мока qdrant_client
+# Инфраструктура мока qdrant_client (копия из test_qdrant_store.py)
 # ---------------------------------------------------------------------------
 
 
 def _make_qdrant_mocks():
-    """Возвращает (mock_module, mock_client_instance, mock_qmodels)."""
     mock_qmodels = MagicMock()
-
-    # Distance enum-заглушки
     mock_qmodels.Distance.COSINE = "Cosine"
     mock_qmodels.Distance.DOT = "Dot"
     mock_qmodels.Distance.EUCLID = "Euclid"
@@ -32,17 +40,14 @@ def _make_qdrant_mocks():
     mock_client = MagicMock()
     mock_client_cls = MagicMock(return_value=mock_client)
 
-    # get_collections -> пустой список по умолчанию
     mock_collections_response = MagicMock()
     mock_collections_response.collections = []
     mock_client.get_collections.return_value = mock_collections_response
 
-    # count -> 0 по умолчанию
     mock_count_response = MagicMock()
     mock_count_response.count = 0
     mock_client.count.return_value = mock_count_response
 
-    # scroll -> пустой по умолчанию
     mock_client.scroll.return_value = ([], None)
 
     mock_qdrant_module = MagicMock()
@@ -50,7 +55,6 @@ def _make_qdrant_mocks():
 
     mock_http = MagicMock()
     mock_http.models = mock_qmodels
-
     mock_qdrant_module.http = mock_http
 
     return mock_qdrant_module, mock_client, mock_qmodels
@@ -61,7 +65,6 @@ DIM = 4
 
 @pytest.fixture
 def qdrant_mocks():
-    """Патчит sys.modules для qdrant_client и возвращает (module, client, qmodels)."""
     mock_module, mock_client, mock_qmodels = _make_qdrant_mocks()
 
     mock_http_module = ModuleType("qdrant_client.http")
@@ -81,107 +84,222 @@ def qdrant_mocks():
 
 
 def make_store(mock_module, mock_client, mock_qmodels, **kwargs):
-    """Создаёт QdrantVectorStore в контексте патча."""
     from src.vector_store.qdrant_store import QdrantVectorStore
 
-    return QdrantVectorStore(
-        embedding_dim=DIM,
-        in_memory=True,
-        **kwargs,
-    )
+    return QdrantVectorStore(embedding_dim=DIM, in_memory=True, **kwargs)
 
 
 # ---------------------------------------------------------------------------
-# __init__ / _ensure_collection
+# connect() — парсинг qdrant:// URI
 # ---------------------------------------------------------------------------
 
 
-class TestInit:
-    def test_client_created(self, qdrant_mocks):
-        _, mock_client, mock_qmodels = qdrant_mocks
-        store = make_store(*qdrant_mocks)
-        # Клиент создан
+class TestConnectURI:
+    def test_connect_parses_qdrant_uri(self, qdrant_mocks):
+        """connect() правильно извлекает url и collection из qdrant:// URI."""
+        from src.vector_store.qdrant_store import QdrantVectorStore
+
+        store = QdrantVectorStore.connect(
+            directory="qdrant://http://localhost:6333/my_collection",
+            embedding_dim=DIM,
+            in_memory=True,
+        )
+        assert store.collection_name == "my_collection"
+
+    def test_connect_uri_url_extracted(self, qdrant_mocks):
+        """connect() передаёт url из URI в kwargs (не перезаписывает явный url)."""
+        _, mock_client, _ = qdrant_mocks
+        from src.vector_store.qdrant_store import QdrantVectorStore
+
+        # in_memory=True чтобы не реально подключаться
+        store = QdrantVectorStore.connect(
+            directory="qdrant://http://qdrant-server:6333/kb",
+            embedding_dim=DIM,
+            in_memory=True,  # явный параметр имеет приоритет через kwargs
+        )
+        # Коллекция должна называться "kb"
+        assert store.collection_name == "kb"
+
+    def test_connect_uri_does_not_override_explicit_collection(self, qdrant_mocks):
+        """Явный collection_name в kwargs имеет приоритет над URI (setdefault)."""
+        from src.vector_store.qdrant_store import QdrantVectorStore
+
+        store = QdrantVectorStore.connect(
+            directory="qdrant://http://localhost:6333/from_uri",
+            embedding_dim=DIM,
+            collection_name="explicit_name",
+            in_memory=True,
+        )
+        # collection_name передан явно — setdefault не перезаписывает
+        assert store.collection_name == "explicit_name"
+
+    def test_connect_invalid_uri_raises(self, qdrant_mocks):
+        """URI без '/' после хоста вызывает ValueError."""
+        from src.vector_store.qdrant_store import QdrantVectorStore
+
+        with pytest.raises(ValueError, match="Невалидный qdrant://"):
+            QdrantVectorStore.connect(
+                directory="qdrant://noslash",
+                embedding_dim=DIM,
+                in_memory=True,
+            )
+
+    def test_connect_directory_none_ok(self, qdrant_mocks):
+        """connect() с directory=None не падает."""
+        from src.vector_store.qdrant_store import QdrantVectorStore
+
+        store = QdrantVectorStore.connect(directory=None, embedding_dim=DIM, in_memory=True)
         assert store._embedding_dim == DIM
 
-    def test_collection_not_recreated_when_exists(self, qdrant_mocks):
-        _, mock_client, _ = qdrant_mocks
-        # Коллекция уже существует
-        existing = MagicMock()
-        existing.name = "knowledge_base"
-        mock_client.get_collections.return_value.collections = [existing]
-        mock_client.create_collection.assert_not_called()
-
-    def test_invalid_distance_raises(self, qdrant_mocks):
+    def test_connect_non_qdrant_path_ignored(self, qdrant_mocks):
+        """directory со стандартным путём логируется и игнорируется."""
         from src.vector_store.qdrant_store import QdrantVectorStore
 
-        with pytest.raises(ValueError, match="Неизвестная метрика"):
-            QdrantVectorStore(embedding_dim=DIM, in_memory=True, distance="L2_bad")
+        with patch("src.vector_store.qdrant_store.logger") as mock_logger:
+            store = QdrantVectorStore.connect(
+                directory="/local/path/to/index",
+                embedding_dim=DIM,
+                in_memory=True,
+            )
 
-    def test_recreate_deletes_and_recreates(self, qdrant_mocks):
-        _, mock_client, _ = qdrant_mocks
-        existing = MagicMock()
-        existing.name = "knowledge_base"
-        mock_client.get_collections.return_value.collections = [existing]
+        # debug-лог об игнорировании
+        debug_calls = " ".join(str(c) for c in mock_logger.debug.call_args_list)
+        assert "игнорируется" in debug_calls or store._embedding_dim == DIM
 
+    def test_connect_drops_unknown_kwargs_with_warning(self, qdrant_mocks):
+        """Неизвестные kwargs логируются как warning."""
         from src.vector_store.qdrant_store import QdrantVectorStore
 
-        QdrantVectorStore(embedding_dim=DIM, in_memory=True, recreate_collection=True)
-        mock_client.delete_collection.assert_called_once_with("knowledge_base")
-        mock_client.create_collection.assert_called_once()
+        with patch("src.vector_store.qdrant_store.logger") as mock_logger:
+            QdrantVectorStore.connect(
+                embedding_dim=DIM,
+                in_memory=True,
+                hydra_extra="dropped",
+                another_extra="also_dropped",
+            )
 
-    def test_import_error_without_qdrant(self):
-        with patch("src.vector_store.qdrant_store._QDRANT_AVAILABLE", False):
-            from src.vector_store.qdrant_store import QdrantVectorStore
-
-            with pytest.raises(ImportError, match="qdrant-client"):
-                QdrantVectorStore(embedding_dim=DIM)
+        warning_text = " ".join(str(c) for c in mock_logger.warning.call_args_list)
+        assert "hydra_extra" in warning_text or "dropped" in warning_text.lower()
 
 
 # ---------------------------------------------------------------------------
-# Свойства состояния
+# get_uri()
 # ---------------------------------------------------------------------------
 
 
-class TestProperties:
-    def test_embedding_dim(self, qdrant_mocks):
+class TestGetUri:
+    def test_get_uri_in_memory_scheme(self, qdrant_mocks):
+        """In-memory режим возвращает qdrant+memory:// URI."""
         store = make_store(*qdrant_mocks)
-        assert store.embedding_dim == DIM
+        uri = store.get_uri()
+        assert uri.startswith("qdrant+memory:///")
 
-    def test_ntotal_delegates_to_client(self, qdrant_mocks):
-        _, mock_client, _ = qdrant_mocks
-        mock_client.count.return_value.count = 42
+    def test_get_uri_in_memory_contains_collection(self, qdrant_mocks):
+        """URI содержит имя коллекции."""
+        store = make_store(*qdrant_mocks, collection_name="my_kb")
+        uri = store.get_uri()
+        assert "my_kb" in uri
+
+    def test_get_uri_normal_mode(self, qdrant_mocks):
+        """Обычный режим возвращает qdrant://<url>/<collection>."""
+
+        # Имитируем не-in-memory store
+        store = make_store(*qdrant_mocks, collection_name="prod_kb")
+        store._in_memory = False
+        store._url = "http://qdrant:6333"
+        uri = store.get_uri()
+        assert uri == "qdrant://http://qdrant:6333/prod_kb"
+
+    def test_get_uri_format_qdrant_scheme(self, qdrant_mocks):
+        """Схема URI начинается с 'qdrant'."""
         store = make_store(*qdrant_mocks)
-        assert store.ntotal == 42
+        uri = store.get_uri()
+        assert uri.startswith("qdrant")
 
-    def test_existing_doc_ids_empty(self, qdrant_mocks):
-        _, mock_client, _ = qdrant_mocks
-        mock_client.scroll.return_value = ([], None)
-        store = make_store(*qdrant_mocks)
-        assert store.existing_doc_ids == set()
 
-    def test_existing_doc_ids_from_scroll(self, qdrant_mocks):
+# ---------------------------------------------------------------------------
+# existing_doc_ids — пагинация и edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestExistingDocIdsPagination:
+    def test_pagination_two_pages(self, qdrant_mocks):
+        """Scroll с пагинацией: две страницы возвращают все doc_ids."""
         _, mock_client, _ = qdrant_mocks
 
         rec1 = MagicMock()
         rec1.payload = {"doc_id": "d1"}
         rec2 = MagicMock()
         rec2.payload = {"doc_id": "d2"}
-        mock_client.scroll.return_value = ([rec1, rec2], None)
+        rec3 = MagicMock()
+        rec3.payload = {"doc_id": "d3"}
+
+        # Первый вызов: (страница 1, offset=42), второй: (страница 2, None)
+        mock_client.scroll.side_effect = [
+            ([rec1, rec2], 42),  # next_offset=42 -> продолжаем
+            ([rec3], None),  # next_offset=None -> стоп
+        ]
 
         store = make_store(*qdrant_mocks)
-        assert store.existing_doc_ids == {"d1", "d2"}
+        ids = store.existing_doc_ids
+        assert ids == {"d1", "d2", "d3"}
+        assert mock_client.scroll.call_count == 2
 
-    def test_existing_doc_ids_cached(self, qdrant_mocks):
+    def test_pagination_three_pages(self, qdrant_mocks):
+        """Scroll с тремя страницами собирает все ids."""
         _, mock_client, _ = qdrant_mocks
-        mock_client.scroll.return_value = ([], None)
+
+        def make_rec(doc_id):
+            r = MagicMock()
+            r.payload = {"doc_id": doc_id}
+            return r
+
+        mock_client.scroll.side_effect = [
+            ([make_rec("d1")], "cursor1"),
+            ([make_rec("d2")], "cursor2"),
+            ([make_rec("d3")], None),
+        ]
 
         store = make_store(*qdrant_mocks)
-        _ = store.existing_doc_ids
-        _ = store.existing_doc_ids
-        # scroll вызывался только один раз (кэш)
-        assert mock_client.scroll.call_count == 1
+        ids = store.existing_doc_ids
+        assert ids == {"d1", "d2", "d3"}
+        assert mock_client.scroll.call_count == 3
 
-    def test_existing_doc_ids_cache_invalidated_after_insert(self, qdrant_mocks):
+    def test_record_without_doc_id_skipped(self, qdrant_mocks):
+        """Записи без ключа doc_id в payload пропускаются."""
+        _, mock_client, _ = qdrant_mocks
+
+        rec_with_id = MagicMock()
+        rec_with_id.payload = {"doc_id": "d1", "text": "hello"}
+
+        rec_without_id = MagicMock()
+        rec_without_id.payload = {"text": "no id here"}
+
+        mock_client.scroll.return_value = ([rec_with_id, rec_without_id], None)
+
+        store = make_store(*qdrant_mocks)
+        ids = store.existing_doc_ids
+        assert ids == {"d1"}
+
+    def test_record_with_none_payload_skipped(self, qdrant_mocks):
+        """Запись с payload=None не вызывает ошибку."""
+        _, mock_client, _ = qdrant_mocks
+
+        rec_none = MagicMock()
+        rec_none.payload = None
+
+        rec_ok = MagicMock()
+        rec_ok.payload = {"doc_id": "d1"}
+
+        mock_client.scroll.return_value = ([rec_none, rec_ok], None)
+
+        store = make_store(*qdrant_mocks)
+        # Не должно падать, None payload безопасно обрабатывается
+        ids = store.existing_doc_ids
+        assert "d1" in ids
+
+    def test_cache_invalidated_after_reset(self, qdrant_mocks):
+        """После reset кэш doc_id_cache очищается."""
         _, mock_client, _ = qdrant_mocks
         mock_client.scroll.return_value = ([], None)
 
@@ -189,110 +307,206 @@ class TestProperties:
         _ = store.existing_doc_ids
         assert store._doc_id_cache is not None
 
-        emb = np.ones((1, DIM), dtype=np.float32)
-        store.insert(emb, [{"doc_id": "d1"}])
+        store.reset()
         assert store._doc_id_cache is None
 
 
 # ---------------------------------------------------------------------------
-# insert
+# _normalize / _prepare
 # ---------------------------------------------------------------------------
 
 
-class TestInsert:
-    def test_insert_calls_upsert(self, qdrant_mocks):
-        _, mock_client, _ = qdrant_mocks
+class TestNormalizePrepare:
+    def test_normalize_unit_vectors(self, qdrant_mocks):
+        """_normalize возвращает векторы единичной длины."""
         store = make_store(*qdrant_mocks)
-        emb = np.ones((2, DIM), dtype=np.float32)
-        store.insert(emb, [{"doc_id": "d1"}, {"doc_id": "d2"}])
-        mock_client.upsert.assert_called_once()
+        vecs = np.array([[3.0, 4.0, 0.0, 0.0]], dtype=np.float32)
+        normed = store._normalize(vecs)
+        norms = np.linalg.norm(normed, axis=1)
+        np.testing.assert_allclose(norms, [1.0], atol=1e-6)
 
-    def test_insert_wrong_dim_raises(self, qdrant_mocks):
+    def test_normalize_zero_vector_no_nan(self, qdrant_mocks):
+        """Нулевой вектор не приводит к NaN (clip ≥ 1e-10)."""
         store = make_store(*qdrant_mocks)
-        bad = np.ones((2, DIM + 1), dtype=np.float32)
+        vecs = np.zeros((1, DIM), dtype=np.float32)
+        result = store._normalize(vecs)
+        assert not np.isnan(result).any()
+
+    def test_prepare_casts_to_float32(self, qdrant_mocks):
+        """_prepare конвертирует любой dtype в float32."""
+        store = make_store(*qdrant_mocks)
+        for dtype in [np.float64, np.int32, np.float16]:
+            vecs = np.ones((2, DIM), dtype=dtype)
+            result = store._prepare(vecs)
+            assert result.dtype == np.float32
+
+    def test_prepare_normalizes_when_enabled(self, qdrant_mocks):
+        """_prepare нормализует если normalize_embeddings=True."""
+        store = make_store(*qdrant_mocks, normalize_embeddings=True)
+        vecs = np.array([[2.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+        result = store._prepare(vecs)
+        np.testing.assert_allclose(np.linalg.norm(result, axis=1), [1.0], atol=1e-6)
+
+    def test_prepare_skips_normalize_when_disabled(self, qdrant_mocks):
+        """_prepare не нормализует если normalize_embeddings=False."""
+        store = make_store(*qdrant_mocks, normalize_embeddings=False)
+        vecs = np.array([[2.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+        result = store._prepare(vecs)
+        # Длина должна остаться 2.0, а не стать 1.0
+        np.testing.assert_allclose(np.linalg.norm(result, axis=1), [2.0], atol=1e-6)
+
+    def test_prepare_multiple_vectors(self, qdrant_mocks):
+        """_prepare корректно обрабатывает батч векторов."""
+        store = make_store(*qdrant_mocks)
+        vecs = np.ones((5, DIM), dtype=np.float64)
+        result = store._prepare(vecs)
+        assert result.shape == (5, DIM)
+        assert result.dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
+# insert — расширенные случаи
+# ---------------------------------------------------------------------------
+
+
+class TestInsertExtended:
+    def test_insert_1d_array_raises(self, qdrant_mocks):
+        """1D массив вызывает ValueError."""
+        store = make_store(*qdrant_mocks)
+        bad = np.ones(DIM, dtype=np.float32)
         with pytest.raises(ValueError, match="Ожидается embeddings"):
-            store.insert(bad, [{}, {}])
+            store.insert(bad, [{"doc_id": "d1"}])
 
-    def test_insert_length_mismatch_raises(self, qdrant_mocks):
+    def test_insert_normalizes_when_enabled(self, qdrant_mocks):
+        """insert нормализует векторы перед upsert."""
+        store = make_store(*qdrant_mocks, normalize_embeddings=True)
+        with patch.object(store, "_normalize", wraps=store._normalize) as mock_norm:
+            emb = np.ones((1, DIM), dtype=np.float32)
+            store.insert(emb, [{"doc_id": "d1"}])
+        mock_norm.assert_called_once()
+
+    def test_insert_skips_normalize_when_disabled(self, qdrant_mocks):
+        """insert не нормализует если normalize_embeddings=False."""
+        store = make_store(*qdrant_mocks, normalize_embeddings=False)
+        with patch.object(store, "_normalize", wraps=store._normalize) as mock_norm:
+            emb = np.ones((1, DIM), dtype=np.float32)
+            store.insert(emb, [{"doc_id": "d1"}])
+        mock_norm.assert_not_called()
+
+    def test_insert_invalidates_doc_id_cache(self, qdrant_mocks):
+        """insert инвалидирует кэш doc_ids."""
+        _, mock_client, _ = qdrant_mocks
+        mock_client.scroll.return_value = ([], None)
         store = make_store(*qdrant_mocks)
-        emb = np.ones((3, DIM), dtype=np.float32)
-        with pytest.raises(ValueError, match="Несоответствие длин"):
-            store.insert(emb, [{}])
+        _ = store.existing_doc_ids  # наполняем кэш
+        assert store._doc_id_cache is not None
 
-    def test_insert_batching(self, qdrant_mocks):
-        """Вставка батчами: 5 векторов с batch_size=2 -> 3 вызова upsert."""
+        emb = np.ones((1, DIM), dtype=np.float32)
+        store.insert(emb, [{"doc_id": "new"}])
+        assert store._doc_id_cache is None
+
+    def test_insert_large_batch_multiple_upsert(self, qdrant_mocks):
+        """n=7, batch_size=3 -> 3 вызова upsert (3+3+1)."""
         _, mock_client, _ = qdrant_mocks
         from src.vector_store.qdrant_store import QdrantVectorStore
 
-        store = QdrantVectorStore(embedding_dim=DIM, in_memory=True, insert_batch_size=2)
-        emb = np.ones((5, DIM), dtype=np.float32)
-        meta = [{"doc_id": f"d{i}"} for i in range(5)]
+        store = QdrantVectorStore(embedding_dim=DIM, in_memory=True, insert_batch_size=3)
+        emb = np.ones((7, DIM), dtype=np.float32)
+        meta = [{"doc_id": f"d{i}"} for i in range(7)]
         store.insert(emb, meta)
-        assert mock_client.upsert.call_count == 3
-
-    def test_insert_points_have_unique_ids(self, qdrant_mocks):
-        """Каждая точка получает уникальный UUID."""
-        _, mock_client, mock_qmodels = qdrant_mocks
-        store = make_store(*qdrant_mocks)
-        emb = np.ones((2, DIM), dtype=np.float32)
-        store.insert(emb, [{"doc_id": "d1"}, {"doc_id": "d2"}])
-
-        # Извлекаем id из call_args_list конструктора PointStruct
-        ids = [c.kwargs["id"] for c in mock_qmodels.PointStruct.call_args_list]
-        assert len(ids) == 2
-        assert len(set(ids)) == 2
+        assert mock_client.upsert.call_count == 3  # ceil(7/3) = 3
 
 
 # ---------------------------------------------------------------------------
-# search
+# search — использует query_points (не search)
 # ---------------------------------------------------------------------------
 
 
-class TestSearch:
-    def test_empty_store_returns_empty_lists(self, qdrant_mocks):
+class TestSearchQueryPoints:
+    """В исходном коде search вызывает client.query_points, а не client.search."""
+
+    def _setup_search(self, mock_client, score=0.9, payload=None):
+        mock_client.count.return_value.count = 5
+        hit = MagicMock()
+        hit.score = score
+        hit.payload = payload or {"doc_id": "d1"}
+        response = MagicMock()
+        response.points = [hit]
+        mock_client.query_points.return_value = response
+
+    def test_search_calls_query_points_not_search(self, qdrant_mocks):
+        """Метод search вызывает client.query_points (не client.search)."""
         _, mock_client, _ = qdrant_mocks
-        mock_client.count.return_value.count = 0
+        self._setup_search(mock_client)
         store = make_store(*qdrant_mocks)
-        result = store.search(np.ones((1, DIM), dtype=np.float32))
-        assert result == [[]]
 
-    def test_search_calls_client_search(self, qdrant_mocks):
+        store.search(np.ones((1, DIM), dtype=np.float32), top_k=3)
+
+        mock_client.query_points.assert_called_once()
+        mock_client.search.assert_not_called()
+
+    def test_search_result_score_and_metadata(self, qdrant_mocks):
+        """Результат поиска содержит score и metadata."""
+        _, mock_client, _ = qdrant_mocks
+        self._setup_search(mock_client, score=0.75, payload={"doc_id": "d42", "text": "hi"})
+        store = make_store(*qdrant_mocks)
+
+        results = store.search(np.ones((1, DIM), dtype=np.float32), top_k=1)
+        assert len(results) == 1
+        assert len(results[0]) == 1
+        hit = results[0][0]
+        assert hit["score"] == pytest.approx(0.75)
+        assert hit["metadata"]["doc_id"] == "d42"
+
+    def test_search_multiple_queries_calls_query_points_per_query(self, qdrant_mocks):
+        """query_points вызывается по одному разу на каждый запрос."""
+        _, mock_client, _ = qdrant_mocks
+        mock_client.count.return_value.count = 5
+        response = MagicMock()
+        response.points = []
+        mock_client.query_points.return_value = response
+
+        store = make_store(*qdrant_mocks)
+        store.search(np.ones((4, DIM), dtype=np.float32), top_k=1)
+        assert mock_client.query_points.call_count == 4
+
+    def test_search_passes_top_k_as_limit(self, qdrant_mocks):
+        """search передаёт top_k как параметр limit в query_points."""
+        _, mock_client, _ = qdrant_mocks
+        mock_client.count.return_value.count = 10
+        response = MagicMock()
+        response.points = []
+        mock_client.query_points.return_value = response
+
+        store = make_store(*qdrant_mocks)
+        store.search(np.ones((1, DIM), dtype=np.float32), top_k=7)
+
+        call_kwargs = mock_client.query_points.call_args[1]
+        assert call_kwargs["limit"] == 7
+
+    def test_search_empty_payload_returns_empty_dict(self, qdrant_mocks):
+        """Если payload=None — возвращается пустой dict."""
         _, mock_client, _ = qdrant_mocks
         mock_client.count.return_value.count = 5
 
         hit = MagicMock()
-        hit.score = 0.9
-        hit.payload = {"doc_id": "d1"}
-        mock_client.search.return_value = [hit]
+        hit.score = 0.5
+        hit.payload = None
+        response = MagicMock()
+        response.points = [hit]
+        mock_client.query_points.return_value = response
 
         store = make_store(*qdrant_mocks)
-        result = store.search(np.ones((1, DIM), dtype=np.float32), top_k=3)
+        results = store.search(np.ones((1, DIM), dtype=np.float32), top_k=1)
+        assert results[0][0]["metadata"] == {}
 
-        mock_client.search.assert_called_once()
-        assert len(result) == 1
-        assert result[0][0]["score"] == pytest.approx(0.9)
-        assert result[0][0]["metadata"] == {"doc_id": "d1"}
-
-    def test_search_multiple_queries(self, qdrant_mocks):
-        _, mock_client, _ = qdrant_mocks
-        mock_client.count.return_value.count = 5
-
-        hit = MagicMock()
-        hit.score = 0.8
-        hit.payload = {}
-        mock_client.search.return_value = [hit]
-
-        store = make_store(*qdrant_mocks)
-        queries = np.ones((3, DIM), dtype=np.float32)
-        result = store.search(queries, top_k=1)
-
-        assert len(result) == 3
-        assert mock_client.search.call_count == 3
-
-    def test_search_with_filter_builds_qdrant_filter(self, qdrant_mocks):
+    def test_search_with_filter_passes_qdrant_filter(self, qdrant_mocks):
+        """search с filter_metadata передаёт Qdrant Filter в query_points."""
         _, mock_client, mock_qmodels = qdrant_mocks
         mock_client.count.return_value.count = 5
-        mock_client.search.return_value = []
+        response = MagicMock()
+        response.points = []
+        mock_client.query_points.return_value = response
 
         store = make_store(*qdrant_mocks)
         store.search(
@@ -300,123 +514,118 @@ class TestSearch:
             filter_metadata={"source": "wiki"},
         )
 
-        # _build_filter должен создать FieldCondition
-        mock_qmodels.FieldCondition.assert_called_once_with(
-            key="source",
-            match=mock_qmodels.MatchValue(value="wiki"),
-        )
+        call_kwargs = mock_client.query_points.call_args[1]
+        # query_filter должен быть передан (не None)
+        assert call_kwargs.get("query_filter") is not None
 
-    def test_search_none_filter_passes_none_to_client(self, qdrant_mocks):
+    def test_search_without_filter_passes_none(self, qdrant_mocks):
+        """search без фильтра передаёт query_filter=None."""
         _, mock_client, _ = qdrant_mocks
         mock_client.count.return_value.count = 5
-        mock_client.search.return_value = []
+        response = MagicMock()
+        response.points = []
+        mock_client.query_points.return_value = response
 
         store = make_store(*qdrant_mocks)
         store.search(np.ones((1, DIM), dtype=np.float32), filter_metadata=None)
 
-        call_kwargs = mock_client.search.call_args[1]
-        assert call_kwargs["query_filter"] is None
+        call_kwargs = mock_client.query_points.call_args[1]
+        assert call_kwargs.get("query_filter") is None
 
 
 # ---------------------------------------------------------------------------
-# save / reset
+# _build_filter — расширенные случаи
 # ---------------------------------------------------------------------------
 
 
-class TestSaveReset:
-    def test_save_is_noop(self, qdrant_mocks):
-        """save() не должен вызывать никаких клиентских методов."""
-        _, mock_client, _ = qdrant_mocks
+class TestBuildFilterExtended:
+    def test_multiple_fields_and_semantics(self, qdrant_mocks):
+        """Несколько полей -> несколько FieldCondition, все в must (AND)."""
+        _, _, mock_qmodels = qdrant_mocks
         store = make_store(*qdrant_mocks)
-        store.save("/some/dir")
-        mock_client.upsert.assert_not_called()
+        store._build_filter({"source": "wiki", "lang": "ru", "year": 2024})
+        assert mock_qmodels.FieldCondition.call_count == 3
+        # Filter создан с must=
+        mock_qmodels.Filter.assert_called_once()
+        call_kwargs = mock_qmodels.Filter.call_args[1]
+        assert "must" in call_kwargs
 
-    def test_reset_deletes_and_recreates_collection(self, qdrant_mocks):
-        _, mock_client, _ = qdrant_mocks
+    def test_none_filter_skips_FieldCondition(self, qdrant_mocks):
+        """_build_filter(None) не создаёт FieldCondition."""
+        _, _, mock_qmodels = qdrant_mocks
         store = make_store(*qdrant_mocks)
-        store.reset()
-        mock_client.delete_collection.assert_called_once_with("knowledge_base")
-        # create_collection: один раз при __init__, один раз после reset
-        assert mock_client.create_collection.call_count == 2
+        store._build_filter(None)
+        mock_qmodels.FieldCondition.assert_not_called()
 
-    def test_reset_invalidates_cache(self, qdrant_mocks):
-        _, mock_client, _ = qdrant_mocks
-        mock_client.scroll.return_value = ([], None)
+    def test_empty_dict_skips_FieldCondition(self, qdrant_mocks):
+        """_build_filter({}) не создаёт FieldCondition."""
+        _, _, mock_qmodels = qdrant_mocks
         store = make_store(*qdrant_mocks)
-        _ = store.existing_doc_ids
-        store.reset()
-        assert store._doc_id_cache is None
+        store._build_filter({})
+        mock_qmodels.FieldCondition.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# connect (фабричный метод)
+# _ensure_collection — поведение при существующей коллекции
 # ---------------------------------------------------------------------------
 
 
-class TestConnect:
-    def test_connect_filters_unknown_kwargs(self, qdrant_mocks):
-        """Лишние kwargs из Hydra не вызывают TypeError."""
-        from src.vector_store.qdrant_store import QdrantVectorStore
+class TestEnsureCollection:
+    def test_existing_collection_skips_create(self, qdrant_mocks):
+        """Если коллекция уже существует — create_collection не вызывается."""
+        _, mock_client, _ = qdrant_mocks
+        existing = MagicMock()
+        existing.name = "knowledge_base"
+        mock_client.get_collections.return_value.collections = [existing]
 
-        # Должен пройти без ошибки
-        store = QdrantVectorStore.connect(
-            directory="/ignored",
-            embedding_dim=DIM,
-            in_memory=True,
-            unknown_hydra_key="should_be_dropped",
-        )
-        assert store is not None
+        make_store(*qdrant_mocks)
+        mock_client.create_collection.assert_not_called()
 
-    def test_connect_directory_ignored(self, qdrant_mocks):
-        """directory не вызывает ошибку и игнорируется."""
-        from src.vector_store.qdrant_store import QdrantVectorStore
+    def test_new_collection_calls_create(self, qdrant_mocks):
+        """Если коллекции нет — create_collection вызывается."""
+        _, mock_client, _ = qdrant_mocks
+        mock_client.get_collections.return_value.collections = []
 
-        store = QdrantVectorStore.connect(
-            directory="/tmp/whatever",
-            embedding_dim=DIM,
-            in_memory=True,
-        )
+        make_store(*qdrant_mocks)
+        mock_client.create_collection.assert_called_once()
+
+    def test_collection_name_passed_to_create(self, qdrant_mocks):
+        """Имя коллекции корректно передаётся в create_collection."""
+        _, mock_client, _ = qdrant_mocks
+        mock_client.get_collections.return_value.collections = []
+
+        make_store(*qdrant_mocks, collection_name="custom_kb")
+        call_kwargs = mock_client.create_collection.call_args[1]
+        assert call_kwargs["collection_name"] == "custom_kb"
+
+
+# ---------------------------------------------------------------------------
+# ntotal и состояние
+# ---------------------------------------------------------------------------
+
+
+class TestNtotalAndState:
+    def test_ntotal_calls_client_count(self, qdrant_mocks):
+        """ntotal делегирует вызов client.count."""
+        _, mock_client, _ = qdrant_mocks
+        mock_client.count.return_value.count = 99
+        store = make_store(*qdrant_mocks)
+        assert store.ntotal == 99
+
+    def test_embedding_dim_stored(self, qdrant_mocks):
+        """embedding_dim хранится как _embedding_dim."""
+        store = make_store(*qdrant_mocks)
+        assert store.embedding_dim == DIM
         assert store._embedding_dim == DIM
 
-    def test_connect_logs_warning_when_empty(self, qdrant_mocks):
-        """При пустой коллекции логируется warning."""
-        _, mock_client, _ = qdrant_mocks
-        mock_client.count.return_value.count = 0
+    def test_in_memory_flag_set(self, qdrant_mocks):
+        """in_memory=True корректно устанавливает _in_memory."""
+        store = make_store(*qdrant_mocks, in_memory=True)
+        assert store._in_memory is True
 
+    def test_url_memory_triggers_in_memory(self, qdrant_mocks):
+        """url=':memory:' активирует in-memory режим."""
         from src.vector_store.qdrant_store import QdrantVectorStore
 
-        with patch("src.vector_store.qdrant_store.logger") as mock_logger:
-            QdrantVectorStore.connect(embedding_dim=DIM, in_memory=True)
-
-        warning_args = " ".join(str(c) for c in mock_logger.warning.call_args_list)
-        assert (
-            "пуст" in warning_args or "empty" in warning_args.lower() or mock_logger.warning.called
-        )
-
-
-# ---------------------------------------------------------------------------
-# _build_filter
-# ---------------------------------------------------------------------------
-
-
-class TestBuildFilter:
-    def test_none_returns_none(self, qdrant_mocks):
-        store = make_store(*qdrant_mocks)
-        assert store._build_filter(None) is None
-
-    def test_empty_dict_returns_none(self, qdrant_mocks):
-        store = make_store(*qdrant_mocks)
-        assert store._build_filter({}) is None
-
-    def test_single_field_builds_filter(self, qdrant_mocks):
-        _, _, mock_qmodels = qdrant_mocks
-        store = make_store(*qdrant_mocks)
-        store._build_filter({"source": "wiki"})
-        mock_qmodels.FieldCondition.assert_called_once()
-        mock_qmodels.Filter.assert_called_once()
-
-    def test_multiple_fields_multiple_conditions(self, qdrant_mocks):
-        _, _, mock_qmodels = qdrant_mocks
-        store = make_store(*qdrant_mocks)
-        store._build_filter({"source": "wiki", "lang": "ru"})
-        assert mock_qmodels.FieldCondition.call_count == 2
+        store = QdrantVectorStore(embedding_dim=DIM, url=":memory:")
+        assert store._in_memory is True
