@@ -106,8 +106,9 @@ class TestDuplicationFlow:
 
 class TestThresholdEffect:
     def test_high_threshold_only_exact_matches(self):
-        """threshold=0.99 — только почти идентичные тексты детектируются."""
-        lsh = LSHIndex(threshold=0.99, num_perm=128, ngram_size=3)
+        """threshold=0.95 — только почти идентичные тексты детектируются."""
+        # Увеличиваем num_perm до 256, чтобы математика bands сошлась при высоком пороге
+        lsh = LSHIndex(threshold=0.95, num_perm=256, ngram_size=3)
         lsh.register("doc_1", TEXT_A)
 
         # Near-дубль не проходит строгий порог

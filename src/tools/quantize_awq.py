@@ -255,7 +255,7 @@ def quantize_and_export(cfg: DictConfig) -> None:
         try:
             manifest = router.download_manifest(manifest_uri, cache_dir=old_manifest_dir)
             logger.info("Манифест найден. Обновляем секцию '%s'.", pipeline_name)
-        except Exception:
+        except FileNotFoundError:
             logger.warning("Манифест не найден. Будет создан новый.")
             manifest = {}
 

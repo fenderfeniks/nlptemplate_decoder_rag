@@ -40,7 +40,7 @@ class BenchmarkLoader:
             )
             # Извлекаем словарь только для текущего пайплайна
             return full_manifest.get(self.pipeline_name, {})
-        except Exception as e:
+        except FileNotFoundError as e:
             logger.warning("Не удалось загрузить манифест (%s): %s", self.manifest_uri, e)
             return {}
 
@@ -53,7 +53,11 @@ class BenchmarkLoader:
             return False
         if expected_size is None:
             return True
-        actual_size = sum(1 for line in local.open(encoding="utf-8") if line.strip())
+
+        # Используем with для безопасного открытия и автоматического закрытия файла
+        with local.open(encoding="utf-8") as f:
+            actual_size = sum(1 for line in f if line.strip())
+
         if actual_size != expected_size:
             logger.warning(
                 "Размер кэша (%d строк) не совпадает с манифестом (%d). Перекачка.",

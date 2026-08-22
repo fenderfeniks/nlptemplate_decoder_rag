@@ -63,7 +63,7 @@ def main(cfg: DictConfig) -> None:
         try:
             manifest = router.download_manifest(manifest_uri, cache_dir=old_manifest_dir)
             logger.info("Найден существующий манифест. Обновляем секцию '%s'.", pipeline_name)
-        except Exception:
+        except FileNotFoundError:
             logger.warning("Существующий манифест не найден. Будет создан новый.")
             manifest = {}
 

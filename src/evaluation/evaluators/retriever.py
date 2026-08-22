@@ -111,7 +111,7 @@ class RetrieverEvaluator:
         # 3. Качество финальной выдачи (cross-encoder)
         min_ndcg = self.drift_cfg.get("min_ndcg")
         ndcg_key = f"ndcg_{self.rerank_top_k}"
-        if min_ndcg and metrics.get(ndcg_key, 1.0) < min_ndcg:
+        if min_ndcg and metrics.get(ndcg_key, 0.0) < min_ndcg:
             msg = (
                 f"ДРИФТ (Качество): {ndcg_key}={metrics[ndcg_key]:.4f} упал ниже порога {min_ndcg}."
             )
@@ -122,7 +122,7 @@ class RetrieverEvaluator:
         # 4. Recall bi-encoder — независимый алерт, не скрытый за NDCG
         min_recall_bi = self.drift_cfg.get("min_recall_biencoder")
         recall_bi_key = f"recall_{self.retrieval_top_k}_biencoder"
-        if min_recall_bi and metrics.get(recall_bi_key, 1.0) < min_recall_bi:
+        if min_recall_bi and metrics.get(recall_bi_key, 0.0) < min_recall_bi:
             msg = (
                 f"ДРИФТ (Bi-encoder): {recall_bi_key}={metrics[recall_bi_key]:.4f} "
                 f"упал ниже порога {min_recall_bi}. "

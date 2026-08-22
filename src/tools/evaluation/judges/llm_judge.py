@@ -72,7 +72,7 @@ def _parse_llm_json(
             score = float(score)
             score = (score - min_score) / (max_score - min_score)
             score = max(0.0, min(1.0, score))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, ZeroDivisionError):
             score = None
 
     if verdict is not None and not isinstance(verdict, bool):
@@ -102,6 +102,10 @@ class LLMJudge(BaseJudge):
         retry_attempts: int = 3,
         retry_delay: float = 5.0,
     ) -> None:
+        if min_score >= max_score:
+            raise ValueError(
+                f"Некорректный диапазон оценок: min_score ({min_score}) должен быть строго меньше max_score ({max_score})."
+            )
         api_key = os.environ.get(api_key_env)
         if not api_key:
             raise OSError(

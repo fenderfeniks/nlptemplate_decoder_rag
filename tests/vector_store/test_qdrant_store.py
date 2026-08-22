@@ -627,5 +627,6 @@ class TestNtotalAndState:
         """url=':memory:' активирует in-memory режим."""
         from src.vector_store.qdrant_store import QdrantVectorStore
 
+        # Передаем только url, без дублирования in_meгmory
         store = QdrantVectorStore(embedding_dim=DIM, url=":memory:")
         assert store._in_memory is True

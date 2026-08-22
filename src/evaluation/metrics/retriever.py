@@ -111,10 +111,14 @@ class RetrieverMetrics:
         hits = 0
         dcg = 0.0
         first_hit_rank: int | None = None
+        seen_ids = set()  # Отслеживаем уже посчитанные документы
 
         for rank, res in enumerate(results):
             doc_id = res.get("metadata", {}).get("doc_id")
-            if doc_id in true_ids:
+
+            # Считаем только уникальные релевантные документы
+            if doc_id in true_ids and doc_id not in seen_ids:
+                seen_ids.add(doc_id)
                 hits += 1
                 dcg += 1.0 / np.log2(rank + 2)
                 if first_hit_rank is None:
@@ -183,7 +187,7 @@ class RetrieverMetrics:
                     ood_count += 1
 
             # ── Фильтрация по similarity_threshold (по dense score) ──
-            filtered = [r for r in res_list if r.get("score", 1.0) >= self.similarity_threshold]
+            filtered = [r for r in res_list if r.get("score", 0.0) >= self.similarity_threshold]
 
             if not filtered:
                 empty_count += 1

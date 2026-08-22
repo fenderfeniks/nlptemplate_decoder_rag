@@ -1,5 +1,6 @@
 """Универсальный оркестратор обучения для всех пайплайнов."""
 
+import copy
 import gc
 import logging
 from collections.abc import Callable
@@ -81,7 +82,8 @@ def run_universal_train(cfg: DictConfig, pipeline_name: str, build_module_fn: Ca
             else:
                 callbacks.append(hydra.utils.instantiate(cb_cfg))
 
-    with open_dict(cfg.training):
+    training_cfg = copy.deepcopy(cfg.training)
+    with open_dict(training_cfg):
         keys_to_remove = [
             "callbacks",
             "optimizer",
@@ -92,9 +94,9 @@ def run_universal_train(cfg: DictConfig, pipeline_name: str, build_module_fn: Ca
             "warmup_steps",
         ]
         for key in keys_to_remove:
-            cfg.training.pop(key, None)
+            training_cfg.pop(key, None)
 
-    trainer = hydra.utils.instantiate(cfg.training, callbacks=callbacks)
+    trainer = hydra.utils.instantiate(training_cfg, callbacks=callbacks)
 
     # ── 4. Auto-resume ────────────────────────────────────────
     register_safe_globals()
@@ -107,21 +109,29 @@ def run_universal_train(cfg: DictConfig, pipeline_name: str, build_module_fn: Ca
 
     # ── 5. Цикл Обучения ──────────────────────────────────────
     best_score = None
+    should_run_test = False  # Флаг для защиты от запуска тестов при OOM/ошибках
+
     try:
         trainer.fit(model=model_module, datamodule=datamodule, ckpt_path=resume_path)
         logger.info("Обучение завершено.")
+        should_run_test = True
     except KeyboardInterrupt:
         logger.warning("Прервано пользователем (Ctrl+C). Переход к оценке и сохранению...")
+        should_run_test = True
     except Exception:
-        logger.exception("Критическая ошибка:")
+        logger.exception("Критическая ошибка обучения:")
         raise
     finally:
         run_id = experiment_logger.get_run_id(trainer)
         logger.info("Experiment run_id: %s", run_id)
 
         # ── 6. Финальная Оценка ───────────────────────────────
-        if not getattr(trainer, "tested", False):
-            best_ckpt_path = trainer.checkpoint_callback.best_model_path
+        if should_run_test and not getattr(trainer, "tested", False):
+            # Безопасная проверка наличия checkpoint_callback
+            best_ckpt_path = None
+            if trainer.checkpoint_callback is not None:
+                best_ckpt_path = trainer.checkpoint_callback.best_model_path
+
             if best_ckpt_path:
                 logger.info("Загрузка лучших LoRA-весов для теста...")
                 checkpoint = torch.load(
@@ -130,14 +140,17 @@ def run_universal_train(cfg: DictConfig, pipeline_name: str, build_module_fn: Ca
                 lora_sd = {k: v for k, v in checkpoint["state_dict"].items() if "lora_" in k}
                 model_module.load_state_dict(lora_sd, strict=False)
             else:
-                logger.warning("Лучший чекпоинт не найден — тест на текущих весах.")
+                logger.warning("Лучший чекпоинт не найден (или отключен) — тест на текущих весах.")
 
             logger.info("Запуск trainer.test()...")
             trainer.test(model=model_module, datamodule=datamodule)
-            score = trainer.checkpoint_callback.best_model_score
-            best_score = float(score) if score is not None else None
 
-        # Очистка памяти
+            # Безопасное извлечение score
+            if trainer.checkpoint_callback is not None:
+                score = trainer.checkpoint_callback.best_model_score
+                best_score = float(score) if score is not None else None
+
+        # Очистка памяти (выполнится при любых раскладах)
         del trainer
         del datamodule
         gc.collect()

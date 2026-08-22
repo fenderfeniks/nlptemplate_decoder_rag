@@ -1,78 +1,167 @@
-from unittest.mock import MagicMock, patch
+import json
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from omegaconf import OmegaConf
 
-from src.tools.promote import PromoteError, _promote
+# Укажи правильный путь импорта в зависимости от структуры проекта
+from src.tools.promote import main
 
 
-class TestPromoteModel:
-    @patch("src.tools.promote.MlflowClient")
-    @patch("src.tools.promote.mlflow")
-    def test_promote_success_better_model(self, mock_mlflow, mock_client_cls):
-        """Staging модель лучше Production (0.1 < 0.5) -> Успешный промоут."""
-        mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+# ===========================================================================
+# Фикстуры
+# ===========================================================================
 
-        # Мокаем ответы MLflow: первый вызов для Staging, второй для Production
-        mock_client.get_model_version_by_alias.side_effect = [
-            MagicMock(version="2", tags={"val_loss": "0.1"}),
-            MagicMock(version="1", tags={"val_loss": "0.5"}),
-        ]
 
-        _promote("dummy_uri", "my_model")
+@pytest.fixture
+def base_cfg():
+    """Генерирует базовый конфиг Hydra без хардкода внутри самих тестов."""
+    return OmegaConf.create(
+        {
+            "pipeline_name": "nlp_pipeline",
+            "model": {
+                "architecture": {
+                    "mlflow_model_name": "MyModel",
+                    "model_name_or_path": "some-org/my-model",
+                    "base_model_uri": "hf://some-org/my-model",
+                }
+            },
+            "system": {
+                "logger": {
+                    "experiment_logger": {"_target_": "dummy"},
+                    "registry": {"artifact_path": "lora_weights"},
+                },
+                "storage": {"_target_": "dummy", "uri_prefix": "s3://bucket/"},
+                "storage_router": {"_target_": "dummy"},
+                "manifest": {"uri": "s3://bucket/manifest.json"},
+            },
+        }
+    )
 
-        # Проверяем, что алиас был обновлен
-        mock_client.set_registered_model_alias.assert_called_once_with(
-            "my_model", "Production", "2"
+
+@pytest.fixture
+def mock_instantiate(mocker):
+    """Мокает инстанциацию классов через Hydra."""
+    return mocker.patch("src.tools.promote.hydra.utils.instantiate")
+
+
+@pytest.fixture
+def mock_sys_exit(mocker):
+    """Мокает sys.exit, чтобы тесты не прерывались."""
+    return mocker.patch("src.tools.promote.sys.exit")
+
+
+@pytest.fixture
+def mock_setup_config(mocker):
+    """Мокает утилиту настройки конфига, возвращая переданный конфиг."""
+    mock = mocker.patch("src.tools.promote.setup_config")
+    mock.side_effect = lambda x: x
+    return mock
+
+
+# ===========================================================================
+# Тесты бизнес-логики и краевых случаев
+# ===========================================================================
+
+
+class TestPromoteScript:
+    def test_missing_mlflow_model_name_raises_error(self, base_cfg, mock_setup_config):
+        """Валидация конфигурации: ошибка при отсутствии mlflow_model_name."""
+        base_cfg.model.architecture.pop("mlflow_model_name")
+
+        with pytest.raises(ValueError, match="mlflow_model_name не задан"):
+            # Вызываем распакованную функцию для обхода @hydra.main
+            main.__wrapped__(base_cfg)
+
+    def test_promote_model_exception_triggers_exit(
+        self, base_cfg, mock_instantiate, mock_sys_exit, mock_setup_config
+    ):
+        """Бизнес-логика: если логгер не смог продвинуть модель, скрипт прерывается."""
+        mock_logger = MagicMock()
+        # Возвращаем mock_logger на первый вызов instantiate
+        mock_instantiate.side_effect = [mock_logger, MagicMock(), MagicMock()]
+        mock_logger.promote_model.side_effect = Exception("Registry connection failed")
+
+        main.__wrapped__(base_cfg)
+
+        mock_sys_exit.assert_called_once_with(1)
+
+    def test_load_adapter_fails_triggers_exit(
+        self, base_cfg, mock_instantiate, mock_sys_exit, mock_setup_config
+    ):
+        """Бизнес-логика: если не удалось загрузить адаптер, скрипт прерывается."""
+        mock_logger = MagicMock()
+        mock_router = MagicMock()
+
+        mock_instantiate.side_effect = [mock_logger, MagicMock(), mock_router]
+        mock_router.download_manifest.return_value = {}
+        # Эмулируем ситуацию, когда адаптер не найден
+        mock_logger.load_adapter.return_value = None
+
+        main.__wrapped__(base_cfg)
+
+        mock_sys_exit.assert_called_once_with(1)
+        mock_logger.load_adapter.assert_called_once()
+
+    def test_successful_promotion_and_manifest_update(
+        self, base_cfg, mock_instantiate, mock_setup_config, mocker
+    ):
+        """
+        Комплексный тест счастливого пути:
+        1. Успешный промоут модели.
+        2. Скачивание старого манифеста и корректное разрешение base_model_uri.
+        3. Загрузка адаптера в хранилище.
+        4. Обновление манифеста без затирания соседних пайплайнов.
+        """
+        mock_logger = MagicMock()
+        mock_storage = MagicMock()
+        mock_router = MagicMock()
+
+        # Настраиваем возвращаемые значения для трех вызовов instantiate
+        mock_instantiate.side_effect = [mock_logger, mock_storage, mock_router]
+        mock_logger.load_adapter.return_value = "/local/tmp/path/to/adapter"
+
+        # Имитируем существующий манифест с другим пайплайном
+        existing_manifest = {
+            "nlp_pipeline": {"model_uri": "hf://old-model", "other_key": "should_be_kept"},
+            "vision_pipeline": {"load_type": "full"},
+        }
+        mock_router.download_manifest.return_value = existing_manifest
+
+        main.__wrapped__(base_cfg)
+
+        # 1. Проверяем обращение к логгеру
+        mock_logger.promote_model.assert_called_once_with(
+            reg_model_name="MyModel_LoRA",
+            staging_alias="Staging",
+            production_alias="Production",
+            metric_tag="val_loss",
         )
 
-    @patch("src.tools.promote.MlflowClient")
-    @patch("src.tools.promote.mlflow")
-    def test_promote_skipped_worse_model(self, mock_mlflow, mock_client_cls):
-        """Staging модель хуже Production (0.6 > 0.5) -> Промоут отменен."""
-        mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
-
-        mock_client.get_model_version_by_alias.side_effect = [
-            MagicMock(version="2", tags={"val_loss": "0.6"}),
-            MagicMock(version="1", tags={"val_loss": "0.5"}),
-        ]
-
-        _promote("dummy_uri", "my_model")
-
-        mock_client.set_registered_model_alias.assert_not_called()
-
-    @patch("src.tools.promote.MlflowClient")
-    @patch("src.tools.promote.mlflow")
-    def test_promote_first_time(self, mock_mlflow, mock_client_cls):
-        """Если Production модели еще нет, Staging должен стать Production."""
-        from mlflow.exceptions import MlflowException
-
-        mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
-
-        def get_alias_mock(name, alias):
-            if alias == "Staging":
-                return MagicMock(version="1", tags={"val_loss": "0.3"})
-            raise MlflowException("Alias not found")  # Имитация отсутствия Production
-
-        mock_client.get_model_version_by_alias.side_effect = get_alias_mock
-
-        _promote("dummy_uri", "my_model")
-
-        mock_client.set_registered_model_alias.assert_called_once_with(
-            "my_model", "Production", "1"
+        # 2. Проверяем загрузку адаптера в хранилище
+        mock_storage.upload.assert_called_once_with(
+            local_dir="/local/tmp/path/to/adapter", remote_path="adapters/MyModel_prod"
         )
 
-    @patch("src.tools.promote.MlflowClient")
-    @patch("src.tools.promote.mlflow")
-    def test_promote_fails_no_staging(self, mock_mlflow, mock_client_cls):
-        """Если нет Staging, скрипт должен упасть с понятной ошибкой."""
-        from mlflow.exceptions import MlflowException
+        # 3. Проверяем параметры, переданные в upload_file (загрузка манифеста)
+        mock_storage.upload_file.assert_called_once()
+        upload_kwargs = mock_storage.upload_file.call_args.kwargs
+        assert upload_kwargs["remote_path"] == "manifest.json"
 
-        mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
-        mock_client.get_model_version_by_alias.side_effect = MlflowException("No Staging")
+        # Читаем локально сохраненный манифест, чтобы проверить структуру
+        manifest_path = Path(upload_kwargs["local_path"])
+        with open(manifest_path, encoding="utf-8") as f:
+            new_manifest = json.load(f)
 
-        with pytest.raises(PromoteError, match="Алиас 'Staging' не найден"):
-            _promote("dummy_uri", "my_model")
+        # Убеждаемся, что другой пайплайн остался нетронутым
+        assert "vision_pipeline" in new_manifest
+
+        # Убеждаемся, что текущий пайплайн обновился корректно
+        updated_nlp = new_manifest["nlp_pipeline"]
+        assert updated_nlp["load_type"] == "lora"
+        assert updated_nlp["base_model_uri"] == "hf://old-model"  # Вытянуло из model_uri
+        assert updated_nlp["lora_uri"] == "s3://bucket/adapters/MyModel_prod"
+        assert "model_uri" not in updated_nlp  # Попнули старый ключ
+        assert "updated_at" in updated_nlp
+        assert updated_nlp["other_key"] == "should_be_kept"  # Старые ключи не затерты
