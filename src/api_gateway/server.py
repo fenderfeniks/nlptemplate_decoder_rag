@@ -4,15 +4,17 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+
 import yaml
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.api_gateway.endpoints import chat
 from src.api_gateway.middlewares import setup_gateway_middlewares
+from src.api_gateway.telemetry import setup_telemetry
 from src.application.orchestrator import RAGOrchestrator
 from src.pipelines.decoder.core.prompts.manager import PromptManager
 from src.pipelines.decoder.inference.inference import LLMGenerationClient
-from prometheus_fastapi_instrumentator import Instrumentator
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +25,6 @@ def create_gateway_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         logger.info("Инициализация API Gateway...")
 
-        # Читаем model_name из манифеста
         storage_root = Path(os.getenv("STORAGE_ROOT", "prod_storage"))
         manifest = json.loads((storage_root / "manifest.json").read_text(encoding="utf-8"))
         model_name = manifest["decoder_pipeline"]["mlflow_model_name"]
@@ -58,9 +59,17 @@ def create_gateway_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Telemetry инициализируется до middleware и роутеров.
+    # FastAPIInstrumentor внутри setup_telemetry добавляет свой middleware —
+    # он должен быть зарегистрирован раньше пользовательских middleware,
+    # иначе входящий trace-context не будет прочитан до нашей обработки.
+    setup_telemetry(app, service_name=os.getenv("OTEL_SERVICE_NAME", "api-gateway"))
+
     cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
     setup_gateway_middlewares(app, cors_origins)
+
     app.include_router(chat.router)
+
     Instrumentator(
         should_group_status_codes=False,
         should_ignore_untemplated=True,

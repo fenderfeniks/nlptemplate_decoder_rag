@@ -4,7 +4,7 @@
 defaults:
   - logger: mlflow
   - paths: default
-  - storage: source/local
+  - storage: source/s3
   - storage/router@storage_router
   - manifest: default
   - _self_

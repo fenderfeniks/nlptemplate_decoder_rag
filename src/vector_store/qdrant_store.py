@@ -377,16 +377,14 @@ class QdrantVectorStore:
 
         results = []
         for query_vec in prepared:
-            hits = self._client.search(
+            response = self._client.query_points(
                 collection_name=self.collection_name,
-                query_vector=(
-                    ("dense", query_vec.tolist())
-                    if self.enable_sparse
-                    else query_vec.tolist()
-                ),
+                query=query_vec.tolist(),
+                using="dense" if self.enable_sparse else None,
                 query_filter=qdrant_filter,
                 limit=top_k,
                 with_payload=True,
+                with_vectors=False,
             )
             results.append(
                 [
@@ -394,7 +392,7 @@ class QdrantVectorStore:
                         "score": float(hit.score),
                         "metadata": hit.payload or {},
                     }
-                    for hit in hits
+                    for hit in response.points
                 ]
             )
 
@@ -487,7 +485,7 @@ class QdrantVectorStore:
     def reset(self) -> None:
         """Удаляет и пересоздаёт коллекцию — полная очистка."""
         self._client.delete_collection(self.collection_name)
-        self._ensure_collection(recreate=False)
+        self._ensure_collection()  # убрали recreate=False — метод его не принимает
         self._invalidate_cache()
         logger.info("QdrantVectorStore: коллекция '%s' сброшена.", self.collection_name)
 

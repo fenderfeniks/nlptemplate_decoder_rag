@@ -63,6 +63,27 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # llama.cpp helpers
 # ---------------------------------------------------------------------------
+def _patch_hf_model_for_gguf(model_dir: Path) -> None:
+    """Патчит HF-модель для совместимости с llama.cpp convert_hf_to_gguf.py.
+
+    Фиксит два типичных бага с тестовыми/tiny моделями:
+    1. pad_token_id=-1 → eos_token_id в tokenizer_config.json и generation_config.json
+    2. Отсутствие tokenizer.model — создаёт пустой файл-заглушку
+    """
+    # --- 1. Фикс pad_token_id=-1 ---
+    for filename in ("tokenizer_config.json", "generation_config.json", "config.json"):
+        config_path = model_dir / filename
+        if not config_path.exists():
+            continue
+        with open(config_path, encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("pad_token_id") in (-1, None):
+            eos = data.get("eos_token_id", 2)
+            data["pad_token_id"] = eos
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.info("Пропатчен pad_token_id=-1 → %d в %s", eos, filename)
+
 
 def _find_llamacpp_dir() -> Path:
     """Ищет директорию llama.cpp: LLAMACPP_DIR env → ~/llama.cpp → sys.exit."""
@@ -135,12 +156,21 @@ def _find_quantize_binary(llamacpp_dir: Path) -> Path:
 def _convert_to_gguf_f16(llamacpp_dir: Path, hf_model_dir: Path, output_path: Path) -> None:
     """HF-модель → GGUF float16."""
     script = _find_convert_script(llamacpp_dir)
-    _run([
+
+    cmd = [
         sys.executable, str(script),
         str(hf_model_dir),
         "--outfile", str(output_path),
         "--outtype", "f16",
-    ])
+    ]
+
+    # Если нет tokenizer.model — принудительно используем BPE (tokenizer.json)
+    sp_path = hf_model_dir / "tokenizer.model"
+    if not sp_path.exists() or sp_path.stat().st_size == 0:
+        cmd += ["--vocab-type", "bpe"]
+        logger.info("tokenizer.model отсутствует — используем --vocab-type bpe")
+
+    _run(cmd)
 
 
 def _quantize_gguf(
@@ -358,6 +388,7 @@ def main() -> None:
             sys.exit(1)
 
         # --- HF → GGUF float16 ---
+        _patch_hf_model_for_gguf(hf_model_dir)
         logger.info("Конвертируем %s → %s", hf_model_dir, gguf_f16_path)
         _convert_to_gguf_f16(llamacpp_dir, hf_model_dir, gguf_f16_path)
 

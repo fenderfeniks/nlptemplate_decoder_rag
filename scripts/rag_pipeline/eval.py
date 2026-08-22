@@ -12,10 +12,11 @@
 """
 
 import logging
+from dotenv import load_dotenv
+load_dotenv()
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
-
 from src.endpoints.eval import EvalContext, run_universal_eval
 from src.evaluation.evaluators.retriever import RetrieverEvaluator
 from src.pipelines.rag.inference.builder import build_inference_encoder

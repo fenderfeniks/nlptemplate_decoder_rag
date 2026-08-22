@@ -72,3 +72,24 @@ LLM_TRUNCATED_RESPONSES_TOTAL = Counter(
     "Количество ответов обрезанных по max_tokens",
     ["model"],
 )
+
+# --- Resilience уровень ---
+
+# reason labels:
+#   "circuit_breaker_open" — breaker был открыт, fast fail без запроса к RAG
+#   "network_error"        — ConnectError / TimeoutException при обращении к RAG
+#   "http_502" / "http_503" и т.п. — RAG вернул 5xx
+RAG_FALLBACK_TOTAL = Counter(
+    "rag_fallback_total",
+    "Количество запросов обработанных без RAG-контекста (graceful degradation)",
+    ["reason"],
+)
+
+# Считает fast-fail'ы от circuit breaker'а для LLM.
+# Отдельно от LLM_ERRORS_TOTAL чтобы различать:
+#   - ошибки генерации (модель ответила с ошибкой)
+#   - circuit breaker (до модели даже не дошли)
+LLM_CIRCUIT_BREAKER_TOTAL = Counter(
+    "llm_circuit_breaker_total",
+    "Количество запросов отклонённых LLM circuit breaker'ом (fast fail)",
+)

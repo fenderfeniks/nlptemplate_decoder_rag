@@ -2,12 +2,13 @@ _target_: src.tools.storage.router.StorageRouter
 
 clients:
   - _target_: src.tools.storage.s3.S3Storage
-    bucket_name: "my-production-models"
+    bucket_name: "nlp-storage"
     endpoint_url: ${oc.env:S3_ENDPOINT_URL, null}
     aws_access_key_id: ${oc.env:AWS_ACCESS_KEY_ID, null}
     aws_secret_access_key: ${oc.env:AWS_SECRET_ACCESS_KEY, null}
     # Убедитесь, что S3Storage знает свой префикс (если он не задан внутри класса жестко)
-    uri_prefix: "s3://" 
+    uri_prefix: "s3://nlp-storage/"
+    
 
   - _target_: src.tools.storage.hf_hub.HFHubStorage
     repo_id: "твоя-организация/твоя-модель"
@@ -17,5 +18,5 @@ clients:
     uri_prefix: "hf://" 
 
   - _target_: src.tools.storage.local.LocalStorage
-    base_dir: "${oc.env:PROJECT_ROOT}/prod_storage"
+    base_dir: "${oc.env:PROJECT_ROOT, C:/Users/Maxim/nlptemplate_decoder_rag}/prod_storage" #тонкое место лучше дублировать из .env 
     uri_prefix: "local://"

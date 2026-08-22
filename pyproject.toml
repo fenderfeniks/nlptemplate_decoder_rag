@@ -47,6 +47,11 @@ dependencies = [
     "autoawq>=0.2.9",
     "grep>=0.3.2",
     "pybreak>=0.1.0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.44.0",
+    "opentelemetry-instrumentation-fastapi>=0.65b0",
+    "opentelemetry-instrumentation-httpx>=0.65b0",
+    "pybreaker>=1.4.1",
 ]
 
 [project.optional-dependencies]

@@ -63,17 +63,17 @@ class ArtifactResolver:
                 logger.warning("Не удалось пропатчить '%s': %s", path, e)
 
     def _resolve_base_model_uri(self, base_model_uri: str, cache_subdir: str) -> str:
-        """Разрешает URI базовой модели в локальный путь или HF-идентификатор."""
         if base_model_uri.startswith("hf://"):
             return base_model_uri[len("hf://"):]
-        elif base_model_uri.startswith("local://"):
-            model_name = base_model_uri.rstrip("/").split("/")[-1]
+
+        known_storage_schemes = ("local://", "s3://", "gs://", "az://")
+        if any(base_model_uri.startswith(s) for s in known_storage_schemes):
             local_path = self.router.download_from_uri(
                 base_model_uri, self.cache_base / cache_subdir
             )
             return str(local_path)
-        else:
-            return base_model_uri
+
+        return base_model_uri
 
     def resolve_and_patch(
         self,

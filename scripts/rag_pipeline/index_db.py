@@ -6,9 +6,11 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from dotenv import load_dotenv
+load_dotenv()
 
 import hydra
-from dotenv import load_dotenv
+
 from omegaconf import DictConfig, OmegaConf
 
 from src.endpoints.index import run_universal_index
@@ -19,7 +21,7 @@ from src.tools.storage.resolver import ArtifactResolver
 from src.utils.cli import enforce_pipeline
 from src.utils.hydra_utils import setup_config
 
-load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,6 +31,7 @@ def run_index_logic(cfg: DictConfig, resolver: ArtifactResolver, router: Any) ->
     storage_client = hydra.utils.instantiate(cfg.system.storage)
     uri_prefix = cfg.system.storage.uri_prefix
     manifest_uri = cfg.system.manifest.uri
+    pipeline_name = cfg.pipeline_name
 
     # 1. Загрузка артефактов (включая старую БД, если есть)
     db_dir, lora_path, *_ = resolver.resolve_and_patch(
@@ -108,7 +111,6 @@ def run_index_logic(cfg: DictConfig, resolver: ArtifactResolver, router: Any) ->
         logger.info("Vector DB персистентна на сервере: %s", db_uri)
     else:
         # FAISS — сохраняем файлы и загружаем в storage
-        pipeline_name = cfg.pipeline_name
         remote_db_dir = f"{pipeline_name}/vector_db"
 
         with tempfile.TemporaryDirectory() as tmp_db_dir:
@@ -129,7 +131,6 @@ def run_index_logic(cfg: DictConfig, resolver: ArtifactResolver, router: Any) ->
         db_uri = f"{uri_prefix}{remote_db_dir}"
 
     # 7. Обновление манифеста
-    pipeline_name = cfg.pipeline_name
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -146,22 +147,12 @@ def run_index_logic(cfg: DictConfig, resolver: ArtifactResolver, router: Any) ->
             "db_updated_at": datetime.now(timezone.utc).isoformat(),
         })
 
-        # Парсинг пути для загрузки манифеста обратно в storage
-        path_without_scheme = manifest_uri.split("://")[-1]
-        parts = path_without_scheme.split("/")
-        manifest_filename = parts[-1]
-        manifest_remote_dir = "/".join(parts[:-1])
-
+        manifest_filename = manifest_uri.rstrip("/").split("/")[-1]
         manifest_file = tmp_path / manifest_filename
         with open(manifest_file, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=4, ensure_ascii=False)
 
-        remote_file_path = (
-            f"{manifest_remote_dir}/{manifest_filename}"
-            if manifest_remote_dir
-            else manifest_filename
-        )
-        storage_client.upload_file(local_path=manifest_file, remote_path=remote_file_path)
+        router.upload_file_to_uri(manifest_file, manifest_uri)
 
     OmegaConf.update(cfg, "incremental", True, merge=True)
     logger.info("Индексация завершена. vector_db_uri: %s", db_uri)

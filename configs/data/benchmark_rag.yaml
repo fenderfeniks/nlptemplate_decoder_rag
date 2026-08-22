@@ -7,6 +7,6 @@ defaults:
 dataset_name: rag_corpus
 
 # Настройки чанкинга (если используется default OverlappingChunkingTransform)
-text_column: "text"
+text_column: ${benchmark.text_column}
 chunk_size: 500
 chunk_overlap: 50
