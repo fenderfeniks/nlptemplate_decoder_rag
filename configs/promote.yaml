@@ -3,9 +3,9 @@ defaults:
   - model: train_rag
   - _self_
 
-# Этот параметр мы будем передавать при запуске
 project_name: "nlp_project"
+
+# pipeline_name передаётся через override при запуске:
+#   python -m src.tools.promote pipeline_name=rag_pipeline
+#   python -m src.tools.promote pipeline_name=decoder_pipeline
 pipeline_name: rag_pipeline
-# Динамические пути, зависящие от pipeline_name
-manifest:
-  uri: local://manifests/${pipeline_name}_manifest.json
